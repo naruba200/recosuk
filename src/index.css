@@ -1,0 +1,164 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;700;800&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-stage text-paper font-sans antialiased;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-screen <style> blocks preserved from the Stitch exports          */
+/* Sources: 01/02/12 (osu ring animations + glass panel),               */
+/* 03/04 (osu grid bg, approach ring, circle glow, orbit badge),        */
+/* 05-11/13 (base reset + hidden scrollbar). Class/keyframe names were  */
+/* checked across groups: no collisions (pulseRing/approachCircle vs    */
+/* approachRing/hitCirclePulse/orbitBadge are distinct).               */
+/* ------------------------------------------------------------------ */
+
+/* --- from 01-onboarding-welcome / 02-link-osu / 12-auth --- */
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #150F1F;
+      color: #F5F1FA;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    .font-outfit {
+      font-family: 'Outfit', sans-serif;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    /* osu! pulsing animation and rings */
+    @keyframes pulseRing {
+      0% {
+        transform: scale(0.95);
+        opacity: 0.8;
+      }
+      50% {
+        transform: scale(1.08);
+        opacity: 0.35;
+      }
+      100% {
+        transform: scale(0.95);
+        opacity: 0.8;
+      }
+    }
+    @keyframes approachCircle {
+      0% {
+        transform: scale(1.45);
+        opacity: 0;
+      }
+      50% {
+        opacity: 0.7;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+    .hit-circle-glow {
+      box-shadow: 0 0 70px -10px rgba(255, 102, 170, 0.45), 0 0 35px -5px rgba(157, 107, 255, 0.35);
+    }
+    .approach-ring {
+      animation: approachCircle 3.5s ease-in-out infinite;
+    }
+    .pulse-ring-slow {
+      animation: pulseRing 4s ease-in-out infinite;
+    }
+    .glass-panel {
+      background: rgba(34, 24, 50, 0.82);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 102, 170, 0.16);
+    }
+    /* Subtle osu! background pattern with beatmap grid motif */
+    .bg-grid-osu {
+      background-image: radial-gradient(rgba(157, 107, 255, 0.12) 1.5px, transparent 1.5px),
+                        radial-gradient(rgba(255, 102, 170, 0.08) 1.5px, transparent 1.5px);
+      background-size: 40px 40px;
+      background-position: 0 0, 20px 20px;
+    }
+  
+/* --- from 03-generating / 04-stats-explained --- */
+
+    /* Subtle osu! coordinate dot grid matching the reference screen */
+    .osu-grid-bg {
+      background-color: #150F1F;
+      background-image: radial-gradient(rgba(157, 107, 255, 0.16) 1.2px, transparent 1.2px);
+      background-size: 32px 32px;
+    }
+    
+    /* Radial ambient atmospheric glows */
+    .ambient-glow-mania {
+      background: radial-gradient(circle at 50% 36%, rgba(157, 107, 255, 0.18) 0%, rgba(255, 102, 170, 0.08) 45%, transparent 75%);
+    }
+  
+
+    /* osu! hit circle approach ring animation */
+    @keyframes approachRing {
+      0% {
+        transform: scale(2.4);
+        opacity: 0;
+      }
+      25% {
+        opacity: 0.8;
+      }
+      80% {
+        opacity: 0.95;
+      }
+      100% {
+        transform: scale(1.04);
+        opacity: 0.2;
+      }
+    }
+
+    .animate-approach-ring {
+      animation: approachRing 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    }
+
+    /* Ambient pulse for central hit circle */
+    @keyframes hitCirclePulse {
+      0%, 100% {
+        box-shadow: 0 0 45px rgba(157, 107, 255, 0.45), 0 0 90px rgba(255, 102, 170, 0.2);
+        transform: scale(1);
+      }
+      50% {
+        box-shadow: 0 0 65px rgba(157, 107, 255, 0.65), 0 0 120px rgba(255, 102, 170, 0.35);
+        transform: scale(1.02);
+      }
+    }
+
+    .animate-circle-glow {
+      animation: hitCirclePulse 3s ease-in-out infinite;
+    }
+
+    /* Subtle orbit animation for the gold star badge */
+    @keyframes orbitBadge {
+      0% {
+        transform: rotate(0deg) translate(66px) rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg) translate(66px) rotate(-360deg);
+      }
+    }
+
+    .orbit-star {
+      animation: orbitBadge 14s linear infinite;
+    }
+  
+/* --- from 05-welcome-recs through 13-settings --- */
+@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}
+
+/* Tailwind v3 does not emit a `rounded-DEFAULT` utility (the DEFAULT borderRadius
+   key only backs the bare `rounded` class), but the Stitch exports use
+   `rounded-DEFAULT` in 203 places for the design token radius of 1rem.
+   Provide it explicitly so converted markup keeps the Stitch radius. */
+.rounded-DEFAULT {
+  border-radius: 1rem;
+}

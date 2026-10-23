@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>RecOsuk - Welcome</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #150F1F;
+      color: #F5F1FA;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    .font-outfit {
+      font-family: 'Outfit', sans-serif;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    /* osu! pulsing animation and rings */
+    @keyframes pulseRing {
+      0% {
+        transform: scale(0.95);
+        opacity: 0.8;
+      }
+      50% {
+        transform: scale(1.08);
+        opacity: 0.35;
+      }
+      100% {
+        transform: scale(0.95);
+        opacity: 0.8;
+      }
+    }
+    @keyframes approachCircle {
+      0% {
+        transform: scale(1.45);
+        opacity: 0;
+      }
+      50% {
+        opacity: 0.7;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+    .hit-circle-glow {
+      box-shadow: 0 0 70px -10px rgba(255, 102, 170, 0.45), 0 0 35px -5px rgba(157, 107, 255, 0.35);
+    }
+    .approach-ring {
+      animation: approachCircle 3.5s ease-in-out infinite;
+    }
+    .pulse-ring-slow {
+      animation: pulseRing 4s ease-in-out infinite;
+    }
+    .glass-panel {
+      background: rgba(34, 24, 50, 0.82);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 102, 170, 0.16);
+    }
+    /* Subtle osu! background pattern with beatmap grid motif */
+    .bg-grid-osu {
+      background-image: radial-gradient(rgba(157, 107, 255, 0.12) 1.5px, transparent 1.5px),
+                        radial-gradient(rgba(255, 102, 170, 0.08) 1.5px, transparent 1.5px);
+      background-size: 40px 40px;
+      background-position: 0 0, 20px 20px;
+    }
+  </style>
+<meta content="web_standard" name="shell-type"/></head>
+<body class="bg-grid-osu flex flex-col justify-between min-h-screen relative selection:bg-[#FF66AA] selection:text-white">
+<!-- Ambient Glow Blobs -->
+<div class="fixed top-[-100px] left-1/2 -translate-x-1/2 w-[720px] h-[450px] bg-[#FF66AA]/12 rounded-full blur-[140px] pointer-events-none -z-10"></div>
+<div class="fixed bottom-[-80px] right-[-40px] w-[500px] h-[500px] bg-[#9D6BFF]/10 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+<div class="fixed top-[30%] left-[-100px] w-[450px] h-[450px] bg-[#4CC3FF]/08 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+<!-- Minimal Header / Brand Indicator -->
+<header class="w-full px-12 py-8 flex items-center justify-between z-10">
+<div class="flex items-center gap-3">
+<!-- Mini hit circle logo -->
+<div class="w-9 h-9 rounded-full bg-[#FF66AA] flex items-center justify-center shadow-lg shadow-[#FF66AA]/30 text-white font-outfit font-black text-base border-2 border-white/30">
+        osu!
+      </div>
+<span class="font-outfit font-black text-xl tracking-tight text-[#F5F1FA]">Rec<span class="text-[#FF66AA]">Osuk</span></span>
+</div>
+<!-- Step Badge -->
+<div class="flex items-center gap-2 bg-[#221832] border border-[#FF66AA]/20 rounded-full px-4 py-1.5 shadow-sm">
+<span class="w-2 h-2 rounded-full bg-[#FF66AA] animate-ping"></span>
+<span class="text-xs font-semibold text-[#A59AB5]">Step 1 of 6 • Introduction</span>
+</div>
+</header>
+<!-- Central Stage -->
+<main class="w-full max-w-4xl mx-auto px-6 py-4 flex flex-col items-center text-center z-10 my-auto"><div class="flex flex-col w-full">
+<div class="relative w-full max-w-lg mx-auto flex flex-col items-center justify-center py-6 px-2">
+<!-- Ambient rhythmic aura glow -->
+<div class="absolute -top-12 left-1/2 -translate-x-1/2 w-80 h-80 bg-primary-container/10 rounded-full blur-[100px] pointer-events-none"></div>
+<div class="absolute top-1/3 -right-20 w-64 h-64 bg-secondary/10 rounded-full blur-[90px] pointer-events-none"></div>
+<!-- Centered Brand Identity -->
+<div class="flex flex-col items-center text-center mb-8 relative z-10">
+<div class="flex items-center gap-3 mb-2.5">
+<div class="relative flex items-center justify-center">
+<div class="w-12 h-12 rounded-full bg-secondary-container flex items-center justify-center shadow-lg shadow-secondary-container/40">
+<span class="font-headline-md text-headline-md text-on-secondary font-black tracking-tighter">osu!</span>
+</div>
+<span class="absolute -inset-1 rounded-full border border-secondary/30 animate-pulse pointer-events-none"></span>
+</div>
+<div class="flex flex-col items-start leading-none text-left">
+<span class="font-headline-lg text-headline-lg tracking-tight text-on-surface">Rec<span class="text-secondary">Osuk</span></span>
+<span class="font-label-sm text-label-sm text-outline tracking-widest uppercase mt-0.5">rhythm companion</span>
+</div>
+</div>
+<div class="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary animate-ping"></span>
+<span class="tracking-wider font-semibold">ACCOUNT GATEWAY · OAUTH &amp; BANCHO SYNC</span>
+</div>
+</div>
+<!-- Main Card Container -->
+<div class="w-full bg-surface-container-low/95 rounded-lg p-6 sm:p-8 shadow-2xl relative z-10 backdrop-blur-xl">
+<!-- Top Mode Switcher Tabs -->
+<div class="grid grid-cols-2 p-1.5 bg-surface-container-lowest rounded-full mb-8" id="auth-tab-bar">
+<button class="py-2.5 px-4 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-all flex items-center justify-center gap-2 cursor-pointer" id="tab-signin" onclick="switchAuthTab('signin')" type="button">
+<span class="material-symbols-outlined text-sm">login</span>
+          Sign in
+        </button>
+<button class="py-2.5 px-4 rounded-full font-label-md text-label-md bg-secondary-container text-on-secondary-container shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer font-bold" id="tab-signup" onclick="switchAuthTab('signup')" type="button">
+<span class="material-symbols-outlined text-sm">person_add</span>
+          Create account
+        </button>
+</div>
+<!-- Auth Form Stage -->
+<div class="flex flex-col" id="signup-panel">
+<div class="mb-6 text-left">
+<h2 class="font-headline-sm text-headline-sm text-on-surface tracking-tight mb-1">Create your RecOsuk account</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            Keep your calibrated beatmap drills, pp recommendations, and custom collections synced across devices.
+          </p>
+</div>
+<form class="flex flex-col gap-4 text-left" onsubmit="event.preventDefault(); window.location.href='#dashboard';">
+<!-- Email Input with Inline Active Error State -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between items-baseline">
+<label class="font-label-md text-label-md text-on-surface font-semibold" for="email-field">Email address</label>
+<span class="font-label-sm text-label-sm text-error font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">error</span>
+                Already registered
+              </span>
+</div>
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md bg-error-container/20 text-on-surface focus:outline-none transition-all placeholder:text-outline" id="email-field" placeholder="you@domain.com" type="email" value="sora.plays.osu@gmail.com"/>
+<span class="material-symbols-outlined absolute left-3.5 text-error text-lg">mail</span>
+<span class="material-symbols-outlined absolute right-3.5 text-error text-lg">warning</span>
+</div>
+<div class="flex items-center gap-1.5 px-2 text-error">
+<span class="font-label-sm text-label-sm">That email already has an account. <a class="underline hover:text-secondary-fixed font-semibold" href="javascript:void(0)" onclick="switchAuthTab('signin')">Try signing in</a> instead.</span>
+</div>
+</div>
+<!-- Password Input -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between items-baseline">
+<label class="font-label-md text-label-md text-on-surface font-semibold" for="password-field">Password</label>
+<span class="font-label-sm text-label-sm text-outline">Minimum 8 characters</span>
+</div>
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container px-4 py-3 pl-11 pr-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="password-field" placeholder="••••••••••••" type="password" value="masterKey2024!"/>
+<span class="material-symbols-outlined absolute left-3.5 text-outline text-lg">lock</span>
+<button class="absolute right-3.5 text-outline hover:text-on-surface transition-colors cursor-pointer p-0.5 flex items-center" onclick="togglePasswordVisibility()" title="Toggle password visibility" type="button">
+<span class="material-symbols-outlined text-lg" id="pw-visibility-icon">visibility</span>
+</button>
+</div>
+<!-- Dynamic Strength Bar -->
+<div class="flex items-center gap-1 px-1 mt-0.5">
+<span class="h-1 flex-1 rounded-full bg-secondary"></span>
+<span class="h-1 flex-1 rounded-full bg-secondary"></span>
+<span class="h-1 flex-1 rounded-full bg-secondary"></span>
+<span class="h-1 flex-1 rounded-full bg-surface-container-highest"></span>
+<span class="font-label-sm text-label-sm text-secondary ml-1 font-semibold">Strong</span>
+</div>
+</div>
+<!-- osu! Username Link Field -->
+<div class="flex flex-col gap-1.5 mt-1">
+<div class="flex justify-between items-baseline">
+<label class="font-label-md text-label-md text-on-surface font-semibold flex items-center gap-1.5" for="osu-username">
+                osu! Username
+                <span class="text-[10px] px-1.5 py-0.2 bg-surface-container-high rounded text-on-surface-variant font-medium">Bancho ID</span>
+</label>
+<div class="flex items-center gap-1 text-tertiary font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse"></span>
+<span>Bancho Ready</span>
+</div>
+</div>
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container px-4 py-3 pl-11 pr-24 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="osu-username" placeholder="e.g. sora_playz" type="text" value="sora_playz"/>
+<div class="absolute left-3 w-5 h-5 rounded-full bg-secondary-container flex items-center justify-center text-[9px] font-black text-on-secondary">
+                o!
+              </div>
+<div class="absolute right-3 flex items-center gap-1 bg-surface-container-high px-2 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-xs text-tertiary">check_circle</span>
+<span class="font-label-sm text-label-sm text-on-surface font-medium">5,284 pp</span>
+</div>
+</div>
+<span class="font-label-sm text-label-sm text-outline px-2">
+              Optional now — you can link later, and guest profiles carry over automatically.
+            </span>
+</div>
+<!-- Primary Submit Button -->
+<button class="mt-3 w-full py-3.5 px-6 rounded-full bg-secondary-container text-on-secondary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-secondary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit">
+<span class="material-symbols-outlined text-lg">bolt</span>
+            Create account
+          </button>
+</form>
+<!-- Divider with Beatmap Grid Dot -->
+<div class="relative flex items-center justify-center my-5">
+<div class="w-full h-px bg-surface-container-highest"></div>
+<span class="absolute bg-surface-container-low px-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">
+            or continue with
+          </span>
+</div>
+<!-- Social OAuth Suite -->
+<div class="grid grid-cols-2 gap-3">
+<!-- osu! Official OAuth -->
+<button class="w-full py-2.5 px-3 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95" onclick="triggerOsuAuth()" type="button">
+<div class="w-4 h-4 rounded-full bg-secondary-container flex items-center justify-center text-[8px] font-black text-on-secondary">
+              o!
+            </div>
+            osu! Bancho
+          </button>
+<!-- GitHub OAuth Button -->
+<button class="w-full py-2.5 px-3 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95" onclick="triggerGithubAuth()" type="button">
+<svg aria-hidden="true" class="w-4 h-4 fill-currentColor" viewbox="0 0 24 24">
+<path clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" fill-rule="evenodd"></path>
+</svg>
+            GitHub
+          </button>
+</div>
+</div>
+<!-- Sign In Alternate State (Hidden initially via script toggle) -->
+<div class="hidden flex-col text-left" id="signin-panel">
+<div class="mb-6">
+<h2 class="font-headline-sm text-headline-sm text-on-surface tracking-tight mb-1">Welcome back, player</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            Enter your credentials to access your skill telemetry, hit-error calibrations, and training routine.
+          </p>
+</div>
+<form class="flex flex-col gap-4" onsubmit="event.preventDefault(); window.location.href='#dashboard';">
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface font-semibold" for="signin-email">Email or osu! Username</label>
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-email" placeholder="sora_playz or player@osu.sh" type="text" value="sora.plays.osu@gmail.com"/>
+<span class="material-symbols-outlined absolute left-3.5 text-primary text-lg">account_circle</span>
+</div>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between items-baseline">
+<label class="font-label-md text-label-md text-on-surface font-semibold" for="signin-pw">Password</label>
+<a class="font-label-sm text-label-sm text-primary hover:underline" href="javascript:void(0)">Forgot?</a>
+</div>
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-pw" placeholder="Your secret key" type="password"/>
+<span class="material-symbols-outlined absolute left-3.5 text-outline text-lg">lock</span>
+</div>
+</div>
+<button class="mt-2 w-full py-3.5 px-6 rounded-full bg-primary-container text-on-primary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-primary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit">
+<span class="material-symbols-outlined text-lg">login</span>
+            Sign in to stage
+          </button>
+</form>
+<div class="relative flex items-center justify-center my-5">
+<div class="w-full h-px bg-surface-container-highest"></div>
+<span class="absolute bg-surface-container-low px-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">
+            or instant login
+          </span>
+</div>
+<button class="w-full py-2.5 px-4 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm" onclick="triggerOsuAuth()" type="button">
+<div class="w-4 h-4 rounded-full bg-secondary-container flex items-center justify-center text-[8px] font-black text-on-secondary">
+            o!
+          </div>
+          One-Click Bancho Login
+        </button>
+</div>
+<!-- Quiet Guest Panel Underneath -->
+<div class="mt-6 p-4 rounded-xl bg-surface-container-lowest/80 text-left flex flex-col gap-2.5">
+<div class="flex items-start gap-2.5">
+<span class="material-symbols-outlined text-tertiary text-base mt-0.5">visibility</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            Just want to look? Link your osu! username as a guest instead — you'll get your profile, stats, and recommendations. Saving, lists, and ratings need an account.
+          </p>
+</div>
+<div class="flex justify-end pt-1">
+<a class="inline-flex items-center gap-1.5 font-label-md text-label-md text-secondary hover:text-secondary-fixed hover:underline font-bold transition-colors cursor-pointer group" href="#guest-stage">
+<span>Continue as guest</span>
+<span class="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</a>
+</div>
+</div>
+</div>
+<!-- Micro-telemetry Status Footer in Stage -->
+<div class="mt-6 flex items-center justify-center gap-4 text-outline font-label-sm text-label-sm">
+<span class="flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+        API v2 Online
+      </span>
+<span>•</span>
+<span>Latency: 14ms (Tokyo-01)</span>
+<span>•</span>
+<span>v2.4.9</span>
+</div>
+</div>
+</div>
+<script>
+  function switchAuthTab(mode) {
+    const signinTab = document.getElementById('tab-signin');
+    const signupTab = document.getElementById('tab-signup');
+    const signinPanel = document.getElementById('signin-panel');
+    const signupPanel = document.getElementById('signup-panel');
+
+    if (mode === 'signin') {
+      signinTab.className = "py-2.5 px-4 rounded-full font-label-md text-label-md bg-primary-container text-on-primary shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer font-bold";
+      signupTab.className = "py-2.5 px-4 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-all flex items-center justify-center gap-2 cursor-pointer";
+      signinPanel.classList.remove('hidden');
+      signinPanel.classList.add('flex');
+      signupPanel.classList.add('hidden');
+      signupPanel.classList.remove('flex');
+    } else {
+      signupTab.className = "py-2.5 px-4 rounded-full font-label-md text-label-md bg-secondary-container text-on-secondary-container shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer font-bold";
+      signinTab.className = "py-2.5 px-4 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-all flex items-center justify-center gap-2 cursor-pointer";
+      signupPanel.classList.remove('hidden');
+      signupPanel.classList.add('flex');
+      signinPanel.classList.add('hidden');
+      signinPanel.classList.remove('flex');
+    }
+  }
+
+  function togglePasswordVisibility() {
+    const pwInput = document.getElementById('password-field');
+    const icon = document.getElementById('pw-visibility-icon');
+    if (!pwInput || !icon) return;
+    
+    if (pwInput.type === 'password') {
+      pwInput.type = 'text';
+      icon.textContent = 'visibility_off';
+    } else {
+      pwInput.type = 'password';
+      icon.textContent = 'visibility';
+    }
+  }
+
+  function triggerOsuAuth() {
+    console.log("Redirecting to osu! OAuth authorization...");
+  }
+
+  function triggerGithubAuth() {
+    console.log("Redirecting to GitHub OAuth authorization...");
+  }
+</script></main>
+<!-- Bottom Navigation / Progress Dots -->
+<footer class="w-full px-12 py-8 flex items-center justify-between z-10 border-t border-white/5 bg-[#150F1F]/60 backdrop-blur-md">
+<!-- Player hint preview -->
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#9D6BFF]/20 border border-[#9D6BFF]/50 flex items-center justify-center text-xs font-bold text-[#9D6BFF]">
+        VN
+      </div>
+<div class="text-left">
+<span class="text-xs text-[#A59AB5] block">Ready for player</span>
+<span class="text-xs font-bold text-[#F5F1FA]">sora_playz (5,284 pp)</span>
+</div>
+</div>
+<!-- Progress Dots (Step 1 of 6) -->
+<div class="flex items-center gap-3">
+<!-- Step 1: Active -->
+<div class="w-7 h-2.5 rounded-full bg-[#FF66AA] shadow-sm shadow-[#FF66AA]/50 transition-all"></div>
+<!-- Steps 2 to 6 -->
+<div class="w-2.5 h-2.5 rounded-full bg-[#35284D] hover:bg-[#4a396b] transition-colors cursor-pointer" title="Step 2: Connect Profile"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-[#35284D] hover:bg-[#4a396b] transition-colors cursor-pointer" title="Step 3: Select Game Modes"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-[#35284D] hover:bg-[#4a396b] transition-colors cursor-pointer" title="Step 4: Skill Analysis"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-[#35284D] hover:bg-[#4a396b] transition-colors cursor-pointer" title="Step 5: Training Goals"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-[#35284D] hover:bg-[#4a396b] transition-colors cursor-pointer" title="Step 6: First Beatmap Pack"></div>
+</div>
+<!-- Keyboard Shortcut or Quick Hint -->
+<div class="text-xs text-[#726585] hidden md:flex items-center gap-1.5 font-medium">
+      Press <kbd class="px-2 py-0.5 rounded bg-[#221832] border border-[#35284D] text-[#A59AB5] font-mono text-[11px]">Enter</kbd> to continue
+    </div>
+</footer>
+</body></html>

@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"surface-variant":"#393243","secondary-fixed":"#ffd9e4","primary-fixed-dim":"#d2bbff","on-error":"#690005","on-primary":"#3f008e","tertiary-fixed-dim":"#80d0ff","outline-variant":"#4a4454","outline":"#958d9f","on-secondary-fixed-variant":"#8d0051","surface-bright":"#3d3648","error-container":"#93000a","surface-container-highest":"#393243","on-surface":"#eadef5","on-tertiary-fixed-variant":"#004c6a","on-secondary":"#640038","inverse-on-surface":"#342d3f","on-tertiary":"#00344a","primary-fixed":"#eaddff","on-primary-fixed":"#25005a","secondary":"#ffb0cc","tertiary-container":"#009bd3","inverse-primary":"#713bd0","on-tertiary-container":"#002d41","secondary-fixed-dim":"#ffb0cc","surface-dim":"#161020","error":"#ffb4ab","on-surface-variant":"#ccc3d6","primary":"#d2bbff","on-secondary-container":"#ff9ac0","secondary-container":"#910054","primary-container":"#a476ff","tertiary":"#80d0ff","on-error-container":"#ffdad6","background":"#161020","on-primary-fixed-variant":"#5819b8","surface-container-lowest":"#110b1b","surface-container":"#231d2d","tertiary-fixed":"#c5e7ff","on-background":"#eadef5","surface-tint":"#d2bbff","on-secondary-fixed":"#3e0021","inverse-surface":"#eadef5","surface":"#161020","on-primary-container":"#36007d","surface-container-low":"#1f1929","on-tertiary-fixed":"#001e2d","surface-container-high":"#2e2738"},borderRadius:{DEFAULT:"1rem",lg:"2rem",xl:"3rem",full:"9999px"},spacing:{"space-sm":"0.5rem",margin:"2rem","gutter-mobile":"0.75rem","space-xs":"0.25rem","space-lg":"1.5rem",gutter:"1.25rem","space-xl":"2.5rem","margin-mobile":"1rem","space-md":"1rem"},fontFamily:{"label-sm":["Inter"],"headline-xl":["Outfit"],"metric-sm":["Outfit"],"headline-lg-mobile":["Outfit"],"body-lg":["Inter"],"headline-md":["Outfit"],"headline-sm":["Outfit"],"body-sm":["Inter"],"body-md":["Inter"],"metric-display":["Outfit"],"headline-xl-mobile":["Outfit"],"label-md":["Inter"],"headline-lg":["Outfit"]},fontSize:{"label-sm":["11px",{lineHeight:"16px",fontWeight:"600"}],"headline-xl":["48px",{lineHeight:"56px",letterSpacing:"-0.02em",fontWeight:"800"}],"metric-sm":["20px",{lineHeight:"24px",fontWeight:"700"}],"headline-lg-mobile":["24px",{lineHeight:"32px",letterSpacing:"-0.015em",fontWeight:"800"}],"body-lg":["16px",{lineHeight:"24px",fontWeight:"400"}],"headline-md":["24px",{lineHeight:"32px",fontWeight:"700"}],"headline-sm":["18px",{lineHeight:"26px",fontWeight:"700"}],"body-sm":["12px",{lineHeight:"18px",fontWeight:"400"}],"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"metric-display":["40px",{lineHeight:"44px",letterSpacing:"-0.02em",fontWeight:"800"}],"headline-xl-mobile":["32px",{lineHeight:"40px",letterSpacing:"-0.02em",fontWeight:"800"}],"label-md":["13px",{lineHeight:"18px",fontWeight:"600"}],"headline-lg":["32px",{lineHeight:"40px",letterSpacing:"-0.015em",fontWeight:"800"}]}}}}</script></head><body class="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen"><aside class="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]"><div class="flex flex-col gap-space-md px-space-md"><div class="flex items-center gap-space-sm px-space-xs pt-space-xs"><div class="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgba(255,176,204,0.35)]"><span class="text-on-secondary font-headline-md text-headline-md leading-none">o!</span></div><div class="flex flex-col"><span class="font-headline-md text-headline-md tracking-tight text-on-surface leading-none">RecOsuk</span><span class="font-label-sm text-label-sm text-on-surface-variant">rhythm companion</span></div></div><div class="flex items-center gap-space-sm p-space-sm rounded-DEFAULT bg-surface-container-high"><div class="relative flex-shrink-0"><div class="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center"><span class="material-symbols-outlined text-primary text-[22px]">face</span></div><div class="absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full bg-surface-container-lowest font-label-sm text-[9px] leading-none text-secondary font-bold uppercase">VN</div></div><div class="flex flex-col min-w-0 flex-1"><span class="font-label-md text-label-md text-on-surface truncate">sora_playz</span><div class="flex items-center gap-1"><span class="font-label-sm text-label-sm text-primary font-bold">5,284</span><span class="font-label-sm text-label-sm text-on-surface-variant">pp</span></div></div></div><nav class="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary-container font-semibold rounded-DEFAULT"><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="dashboard" href="#"><span class="material-symbols-outlined text-[20px]">grid_view</span><span class="font-label-md text-label-md">Dashboard</span></a><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="stats" href="#"><span class="material-symbols-outlined text-[20px]">insights</span><span class="font-label-md text-label-md">Stats</span></a><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="recommendations" href="#"><span class="material-symbols-outlined text-[20px]">auto_awesome</span><span class="font-label-md text-label-md">Recommendations</span></a><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="mirror" href="#"><span class="material-symbols-outlined text-[20px]">compare_arrows</span><span class="font-label-md text-label-md">Mirror</span></a><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="lists" href="#"><span class="material-symbols-outlined text-[20px]">queue_music</span><span class="font-label-md text-label-md">Lists</span></a><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="history" href="#"><span class="material-symbols-outlined text-[20px]">history</span><span class="font-label-md text-label-md">History</span></a><a class="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="settings" href="#"><span class="material-symbols-outlined text-[20px]">tune</span><span class="font-label-md text-label-md">Settings</span></a></nav></div><div class="px-space-md flex flex-col gap-space-xs"><div class="flex items-center justify-between p-space-sm rounded-DEFAULT bg-surface-container"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-[#7EE787] animate-pulse"></span><span class="font-label-sm text-label-sm text-on-surface-variant">osu! server</span></div><span class="font-label-sm text-label-sm text-on-surface">online</span></div><div class="flex items-center justify-between px-space-xs text-on-surface-variant font-label-sm text-label-sm"><span>RecOsuk v2.4</span><a class="hover:text-primary transition-colors" data-path="changelog" href="#">notes</a></div></div></aside><div class="pl-[232px]"><header class="fixed top-0 left-[232px] right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-xl z-40 flex items-center justify-between px-space-xl shadow-[0_1px_8px_rgba(0,0,0,0.3)]"><div class="flex items-center gap-space-sm"><span class="font-label-sm text-label-sm text-on-surface-variant">Stage context</span><span class="text-outline-variant font-label-sm text-label-sm">/</span><span class="font-label-md text-label-md text-primary font-medium">Active trainer</span></div><div class="flex items-center gap-space-sm bg-surface-container-low px-space-sm py-1.5 rounded-full"><button class="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-all" title="osu!standard" type="button"><span class="font-headline-sm text-[13px] leading-none">std</span></button><button class="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-[#FF5C39] hover:text-on-primary transition-all" title="osu!taiko" type="button"><span class="font-headline-sm text-[13px] leading-none">tai</span></button><button class="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" title="osu!catch" type="button"><span class="font-headline-sm text-[13px] leading-none">ctb</span></button><button class="w-8 h-8 rounded-full bg-primary-container text-on-primary-container shadow-[0_0_14px_rgba(164,118,255,0.45)] flex items-center justify-center transition-all" title="osu!mania" type="button"><span class="font-headline-sm text-[13px] leading-none">mna</span></button></div><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm"><span class="material-symbols-outlined text-[16px] text-tertiary">sync</span><span>synced</span></div><div class="flex items-center gap-space-sm pl-space-sm py-1 pr-1.5 rounded-full bg-surface-container-high"><div class="flex flex-col text-right"><span class="font-label-sm text-label-sm text-on-surface leading-none">sora_playz</span><span class="font-label-sm text-[10px] text-on-surface-variant leading-none mt-0.5">free tier</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="w-full pt-16 bg-surface min-h-screen px-space-xl py-space-xl"><div class="flex flex-col w-full">
+<!-- Top Ambient Glow Aura -->
+<div class="relative w-full">
+<div class="absolute -top-12 left-1/4 w-96 h-36 bg-primary-container/15 rounded-full blur-3xl pointer-events-none"></div>
+<div class="absolute -top-10 right-10 w-80 h-32 bg-secondary-container/20 rounded-full blur-3xl pointer-events-none"></div>
+</div>
+<!-- Page Header Area -->
+<header class="flex flex-col lg:flex-row lg:items-center justify-between gap-space-lg pb-space-lg">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+          Generated mode
+        </span>
+<span class="text-on-surface-variant font-label-sm text-label-sm">• Calibrated to 5.0★ collapse gap</span>
+</div>
+<h1 class="font-headline-xl text-headline-xl text-on-surface tracking-tight">Recommendations</h1>
+<p class="font-body-md text-body-md text-on-surface-variant">
+        Targeted algorithmic drill sets tailored to your rhythm input drift and recovery windows.
+      </p>
+</div>
+<!-- Mode Controller Hub -->
+<div class="flex flex-col sm:flex-row items-start sm:items-center gap-space-md bg-surface-container-low p-space-sm rounded-lg shadow-sm">
+<!-- Unlimited Toggle Switch -->
+<div class="flex items-center gap-space-sm px-space-xs">
+<label class="relative inline-flex items-center cursor-pointer select-none">
+<input class="sr-only peer" id="unlimited-toggle" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-outline-variant after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container peer-checked:after:bg-on-primary"></div>
+</label>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface leading-none">Unlimited beatmaps</span>
+<span class="font-body-sm text-[11px] text-on-surface-variant leading-tight">Feed streams as it loads</span>
+</div>
+</div>
+<div class="w-px h-8 bg-surface-container-highest hidden sm:block"></div>
+<!-- Segmented Pill Count Picker -->
+<div class="flex items-center bg-surface-container-high rounded-full p-0.5" id="count-picker">
+<button class="px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors" data-count="20" type="button">20</button>
+<button class="px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all" data-count="30" type="button">30</button>
+<button class="px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors" data-count="50" type="button">50</button>
+</div>
+<!-- Regenerate Primary CTA -->
+<button class="flex items-center gap-2 px-space-md py-2 rounded-full bg-gradient-to-r from-primary-container to-inverse-primary text-on-primary font-label-md text-label-md shadow-[0_0_16px_rgba(164,118,255,0.35)] hover:shadow-[0_0_22px_rgba(164,118,255,0.6)] active:scale-95 transition-all" id="regenerate-btn" type="button">
+<span class="material-symbols-outlined text-[18px] transition-transform duration-500" id="refresh-icon">auto_awesome</span>
+<span>Regenerate</span>
+</button>
+</div>
+</header>
+<!-- Dual Column Layout: Left Filter Rail & Main Stream -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start mt-space-sm">
+<!-- LEFT FILTER PANEL (approx 280px-300px on desktop) -->
+<aside class="lg:col-span-4 xl:col-span-3 flex flex-col gap-space-md bg-surface-container-low p-space-md rounded-lg shadow-md sticky top-20">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-primary text-[20px]">tune</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Filters</h2>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Filters narrow list. Ranking is pp-based.</span>
+</div>
+</div>
+<!-- Star Rating Range -->
+<div class="flex flex-col gap-space-xs bg-surface-container p-space-sm rounded-DEFAULT">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Difficulty</span>
+<span class="font-label-md text-label-md text-primary font-bold">4.0★ – 5.5★</span>
+</div>
+<div class="relative py-2 flex items-center">
+<div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden relative">
+<div class="absolute left-[35%] right-[20%] h-full bg-gradient-to-r from-primary to-primary-container shadow-[0_0_8px_rgba(164,118,255,0.8)]"></div>
+</div>
+<div class="absolute left-[35%] w-3.5 h-3.5 bg-on-primary rounded-full shadow-md cursor-grab -translate-x-1/2 ring-2 ring-primary"></div>
+<div class="absolute right-[20%] w-3.5 h-3.5 bg-on-primary rounded-full shadow-md cursor-grab translate-x-1/2 ring-2 ring-primary"></div>
+</div>
+<div class="flex justify-between font-label-sm text-[10px] text-on-surface-variant">
+<span>0★</span>
+<span>5.0★ Target</span>
+<span>10★</span>
+</div>
+</div>
+<!-- BPM Slider -->
+<div class="flex flex-col gap-space-xs bg-surface-container p-space-sm rounded-DEFAULT">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Tempo</span>
+<span class="font-label-md text-label-md text-secondary font-bold">160 – 200 BPM</span>
+</div>
+<div class="relative py-2 flex items-center">
+<div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden relative">
+<div class="absolute left-[40%] right-[30%] h-full bg-secondary"></div>
+</div>
+<div class="absolute left-[40%] w-3.5 h-3.5 bg-surface-container-lowest rounded-full -translate-x-1/2 ring-2 ring-secondary"></div>
+<div class="absolute right-[30%] w-3.5 h-3.5 bg-surface-container-lowest rounded-full translate-x-1/2 ring-2 ring-secondary"></div>
+</div>
+<div class="flex justify-between font-label-sm text-[10px] text-on-surface-variant">
+<span>100</span>
+<span>180 BPM</span>
+<span>280+</span>
+</div>
+</div>
+<!-- Key Count Pills -->
+<div class="flex flex-col gap-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Key Count (Mania)</span>
+<div class="grid grid-cols-3 gap-1.5">
+<button class="py-1.5 text-center rounded-DEFAULT bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors" type="button">4K</button>
+<button class="py-1.5 text-center rounded-DEFAULT bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors" type="button">5K</button>
+<button class="py-1.5 text-center rounded-DEFAULT bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors" type="button">6K</button>
+<button class="py-1.5 text-center rounded-DEFAULT bg-primary text-on-primary font-label-md text-label-md font-bold shadow-[0_0_12px_rgba(210,187,255,0.4)]" type="button">7K</button>
+<button class="py-1.5 text-center rounded-DEFAULT bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors" type="button">8K</button>
+<button class="py-1.5 text-center rounded-DEFAULT bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors" type="button">All</button>
+</div>
+</div>
+<!-- Tags Selector -->
+<div class="flex flex-col gap-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Pattern Skillsets</span>
+<div class="flex flex-wrap gap-1.5">
+<span class="px-2.5 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm cursor-pointer shadow-sm">jumpstream</span>
+<span class="px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm cursor-pointer transition-colors">chordjack</span>
+<span class="px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm cursor-pointer transition-colors">LN</span>
+<span class="px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm cursor-pointer transition-colors">stream</span>
+<span class="px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm cursor-pointer transition-colors">technical</span>
+<span class="px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm cursor-pointer transition-colors">stamina</span>
+</div>
+</div>
+<!-- Map Status Chips -->
+<div class="flex flex-col gap-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Beatmap Status</span>
+<div class="flex flex-col gap-1">
+<label class="flex items-center justify-between p-2 rounded-DEFAULT bg-primary-container/20 cursor-pointer">
+<span class="font-label-sm text-label-sm text-primary font-semibold">Ranked + Loved</span>
+<div class="w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+<span class="w-1.5 h-1.5 rounded-full bg-on-primary"></span>
+</div>
+</label>
+<label class="flex items-center justify-between p-2 rounded-DEFAULT bg-surface-container cursor-pointer hover:bg-surface-container-high transition-colors">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Ranked only</span>
+<div class="w-4 h-4 rounded-full bg-surface-container-highest"></div>
+</label>
+<label class="flex items-center justify-between p-2 rounded-DEFAULT bg-surface-container cursor-pointer hover:bg-surface-container-high transition-colors">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Qualified / WIP</span>
+<div class="w-4 h-4 rounded-full bg-surface-container-highest"></div>
+</label>
+</div>
+</div>
+<!-- Length Range -->
+<div class="flex flex-col gap-1 bg-surface-container p-space-sm rounded-DEFAULT">
+<div class="flex justify-between items-center">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Length</span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">1:30 – 4:30 min</span>
+</div>
+<div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden mt-1 relative">
+<div class="absolute left-[25%] right-[25%] h-full bg-tertiary"></div>
+</div>
+</div>
+<!-- Filter Buttons CTA -->
+<div class="flex flex-col gap-2 pt-space-xs">
+<button class="w-full py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold shadow-[0_0_14px_rgba(210,187,255,0.3)] hover:opacity-95 transition-opacity" type="button">
+          Apply filters (24 maps)
+        </button>
+<button class="w-full py-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-sm text-label-sm transition-colors" type="button">
+          Reset filters
+        </button>
+</div>
+</aside>
+<!-- RIGHT BEATMAP STREAM (Col-8 or 9) -->
+<main class="lg:col-span-8 xl:col-span-9 flex flex-col gap-space-md">
+<!-- Stream Header -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-space-xs py-1">
+<div class="flex items-center gap-space-sm">
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Training your 5.0★ gap — 24 maps</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[10px]">
+            Filtered from 30 generated
+          </span>
+</div>
+<div class="flex items-center gap-1.5 text-on-surface-variant font-label-sm text-label-sm">
+<span>Sorted by:</span>
+<span class="text-primary font-medium flex items-center gap-0.5 cursor-pointer hover:underline">
+            pp training weight
+            <span class="material-symbols-outlined text-[16px]">arrow_downward</span>
+</span>
+</div>
+</div>
+<!-- Map 1 -->
+<article class="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+<div class="flex items-center gap-space-md flex-1 min-w-0 w-full">
+<!-- Circular Cover Art with Active Ring -->
+<div class="relative flex-shrink-0">
+<div class="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
+<img class="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300" data-alt="Cybernetic futuristic city skyline at midnight saturated with ultraviolet and violet neon rays, high speed rhythm gaming aesthetic" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDuILuURjl0nwi5a19pFpfYT2EnaICT2kGx4bTTK-ataypUQ_Iy8zNGjZ5dCtSBfM_qdn2d7shXjyvPsX0RbpQu8WdycUxFlGYkSBo5A9aY72IUeYHz0TYh35sD4whxztZnEwqUzJU8nM-ngQz8772zljyDT26QcTQwXcPTjOipYzUxV9vvfTyvTIaszSh-wjb_F-NxsPXWNKe6dUBZeg6ImUqE7w8z-WwH4Obd7mn3maENuSgIyKnk"/>
+</div>
+<div class="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-surface-container-lowest text-primary rounded-full font-label-sm text-[9px] font-bold">
+              7K
+            </div>
+</div>
+<!-- Metadata & Core Metrics -->
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex flex-wrap items-center gap-space-xs mb-0.5">
+<span class="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px] leading-none">star</span>5.24★
+              </span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface truncate">Exit This Earth's Atomosphere</h3>
+<span class="text-on-surface-variant font-body-sm text-body-sm">by Camellia</span>
+<span class="px-2 py-0.5 rounded-full bg-surface-variant/80 text-outline font-label-sm text-[10px]">Already downloaded</span>
+</div>
+<!-- Recommendation Reason Prompt -->
+<p class="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">
+              Your accuracy drops above 5.0★ — this map trains that exact release threshold at 182 BPM.
+            </p>
+<!-- Technical Badges / Mini metrics -->
+<div class="flex flex-wrap items-center gap-space-sm text-on-surface-variant font-label-sm text-label-sm">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">speed</span>
+<span>182 BPM</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span>2:44</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">jumpstream</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">chordjack</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">technical</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Trailing Action Suite -->
+<div class="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+<!-- 5-Star Interactive Community Rater -->
+<div class="flex items-center gap-0.5 text-[#FFCC22] px-2 py-1 bg-surface-container rounded-full">
+<button class="material-symbols-outlined text-[16px] hover:scale-125 transition-transform" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] hover:scale-125 transition-transform" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] hover:scale-125 transition-transform" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] hover:scale-125 transition-transform" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] hover:scale-125 transition-transform text-outline-variant" type="button">star</button>
+</div>
+<div class="flex items-center gap-1.5">
+<!-- Audio Preview Button -->
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm" title="Preview Song" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<!-- Download Button (Downloaded state) -->
+<button class="w-9 h-9 rounded-full bg-surface-container-highest text-tertiary flex items-center justify-center transition-all shadow-sm" title="Downloaded" type="button">
+<span class="material-symbols-outlined text-[18px]">check_circle</span>
+</button>
+<!-- Save Button -->
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface flex items-center justify-center transition-all shadow-sm" title="Save to Practice List" type="button">
+<span class="material-symbols-outlined text-[18px]">bookmark_add</span>
+</button>
+</div>
+</div>
+</article>
+<!-- Map 2 with Save Tooltip Lock Demo -->
+<article class="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+<div class="flex items-center gap-space-md flex-1 min-w-0 w-full">
+<div class="relative flex-shrink-0">
+<div class="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
+<img class="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300" data-alt="Abstract deep cosmic energy burst with fractal lightning and deep violet smoke ripples in an anime stylized concept art" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBTIKryfRzKPCr2GavlKN8SBeF7RW2slmlLMr2kjQ_yipNtFiZ3ki1on2hxTIfX64Gg-sKZSxv4IOMS9mBvwDUWQhMC_olxJDEf7Gfla_xkBiBO9UDStlpFjmbn3NdtA7i-7nYiDIat9fec_7rCezDqN4UApGrzNwBUAv6TIMPfbBeUmJpIWNQT8_jh15Ifx_Srm5tArHOHYrVwJTk3Cuxl28ytTl9PghXMphlD5rntBIVJxgAZVKw1"/>
+</div>
+<div class="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-surface-container-lowest text-primary rounded-full font-label-sm text-[9px] font-bold">
+              7K
+            </div>
+</div>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex flex-wrap items-center gap-space-xs mb-0.5">
+<span class="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px] leading-none">star</span>5.12★
+              </span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface truncate">Calamity Fortune</h3>
+<span class="text-on-surface-variant font-body-sm text-body-sm">by LeaF</span>
+</div>
+<p class="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">
+              Dense 7K chordstreams at 174 BPM directly addresses your 6.6% accuracy degradation.
+            </p>
+<div class="flex flex-wrap items-center gap-space-sm text-on-surface-variant font-label-sm text-label-sm">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">speed</span>
+<span>174 BPM</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span>2:18</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">chordjack</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">stamina</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">7K</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+<div class="flex items-center gap-0.5 text-[#FFCC22] px-2 py-1 bg-surface-container rounded-full">
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+</div>
+<div class="flex items-center gap-1.5 relative">
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-tertiary-container hover:text-on-tertiary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+<!-- Save button with visible persistent tooltip pill -->
+<div class="relative group/save">
+<button class="w-9 h-9 rounded-full bg-surface-container text-on-surface-variant flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">lock</span>
+</button>
+<div class="absolute right-0 bottom-full mb-2 whitespace-nowrap bg-surface-container-highest text-on-surface px-2.5 py-1 rounded-DEFAULT text-body-sm font-label-sm shadow-xl flex items-center gap-1.5 z-20">
+<span class="material-symbols-outlined text-secondary text-[14px]">info</span>
+<span>Create a free account to save maps</span>
+</div>
+</div>
+</div>
+</div>
+</article>
+<!-- Map 3 -->
+<article class="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+<div class="flex items-center gap-space-md flex-1 min-w-0 w-full">
+<div class="relative flex-shrink-0">
+<div class="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
+<img class="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300" data-alt="High altitude azure sky above snow peaked anime mountains with celestial light beams and soft starlight particles" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA83rPtgcXL0r0XhK9MpCPoVl9ywcCXzckBTEGVB-lCEJyH57EukWp-ao8qilLant-VS_tGNfDQUc9DuezjGflNGURnifW3qsfwpgQ69WIICjjeUc5saQy-nhjEyQVKFc6L989ywF5uwy4rV1Tjfhok1eln65h9UWKhSwzstlLRmiPNnu4Tkegp3c1BjbYIoWYYOONzpIAU1F-1b7P4xt9fLbOiRINz0KbLKwkSxGzbxKY9bNZ1ILFM"/>
+</div>
+<div class="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-surface-container-lowest text-primary rounded-full font-label-sm text-[9px] font-bold">
+              7K
+            </div>
+</div>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex flex-wrap items-center gap-space-xs mb-0.5">
+<span class="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px] leading-none">star</span>4.86★
+              </span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface truncate">Blue Zenith</h3>
+<span class="text-on-surface-variant font-body-sm text-body-sm">by xi</span>
+</div>
+<p class="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">
+              Pushes stamina and tempo at 200 BPM while hovering safely in your high-consistency boundary.
+            </p>
+<div class="flex flex-wrap items-center gap-space-sm text-on-surface-variant font-label-sm text-label-sm">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">speed</span>
+<span>200 BPM</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span>4:12</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">stream</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">speed</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">stamina</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+<div class="flex items-center gap-0.5 text-[#FFCC22] px-2 py-1 bg-surface-container rounded-full">
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] text-outline-variant" type="button">star</button>
+</div>
+<div class="flex items-center gap-1.5">
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-tertiary-container hover:text-on-tertiary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">bookmark_add</span>
+</button>
+</div>
+</div>
+</article>
+<!-- Map 4 -->
+<article class="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+<div class="flex items-center gap-space-md flex-1 min-w-0 w-full">
+<div class="relative flex-shrink-0">
+<div class="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
+<img class="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300" data-alt="Stairway of white light ascending toward an ethereal cathedral floating among violet nebulas and geometric glyphs" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBO5qVUsCrKmGSohHhDaBc_qzTSWreFtj_pugKl2yxICA2x8jgmYdMP2xSqS0U8sYT_FAXlgHj4n6_Ywb8CdUJmarze8bLsnf_5mRxg2qslTUPurnpRTZrqoZ0J9iP7WABIBUZOPKfjdbRnzozG-n-QGUg61ojrE0ti4PNw4gWP7M1iBRREuo1AOfabHxK5N9hTjKKnHkf4j6JFzY9qlUy0Rc13HPF5ku_2dL4_4sZP_pJj0aLE8X3w"/>
+</div>
+<div class="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-surface-container-lowest text-primary rounded-full font-label-sm text-[9px] font-bold">
+              7K
+            </div>
+</div>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex flex-wrap items-center gap-space-xs mb-0.5">
+<span class="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px] leading-none">star</span>5.21★
+              </span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface truncate">Ascension to Heaven</h3>
+<span class="text-on-surface-variant font-body-sm text-body-sm">by xi</span>
+</div>
+<p class="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">
+              Progressive key density ladder that trains release timing during 7K long note hold-and-tap transitions.
+            </p>
+<div class="flex flex-wrap items-center gap-space-sm text-on-surface-variant font-label-sm text-label-sm">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">speed</span>
+<span>190 BPM</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span>3:05</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">jumpstream</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">LN</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">technical</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+<div class="flex items-center gap-0.5 text-[#FFCC22] px-2 py-1 bg-surface-container rounded-full">
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+</div>
+<div class="flex items-center gap-1.5">
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-tertiary-container hover:text-on-tertiary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">bookmark_add</span>
+</button>
+</div>
+</div>
+</article>
+<!-- Map 5 -->
+<article class="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+<div class="flex items-center gap-space-md flex-1 min-w-0 w-full">
+<div class="relative flex-shrink-0">
+<div class="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
+<img class="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300" data-alt="Intense neon explosion with high velocity speedlines, cyberpunk mecha weapon discharge and magenta sparks" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAwUOddjesfENci5GpujjWrzNWd-5Vg_vMTiUDkSglyWMX3C53bLiPl99nMRomq-nE_e9g__auF51XOugjzupbmPq98yVpVikIaAjl9hl-tQDCi4yUfMCDD77Z5xAqL-CleyxFZ_xy9HO92jyViNeUj9npXwoJ1bWpIEdyrWyffwOeoxxC5A56XahXBAL1UH0sQDnUqR1fzVDKaA_QjM63HqrMnHEEu2_UbT0pYDk3KHRgcpH2aUEco"/>
+</div>
+<div class="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-surface-container-lowest text-primary rounded-full font-label-sm text-[9px] font-bold">
+              7K
+            </div>
+</div>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex flex-wrap items-center gap-space-xs mb-0.5">
+<span class="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px] leading-none">star</span>5.38★
+              </span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface truncate">Blastix Riotz</h3>
+<span class="text-on-surface-variant font-body-sm text-body-sm">by Camellia</span>
+</div>
+<p class="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">
+              High velocity chord bursts slightly above your current comfort tempo to stretch recovery reflexes.
+            </p>
+<div class="flex flex-wrap items-center gap-space-sm text-on-surface-variant font-label-sm text-label-sm">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">speed</span>
+<span>210 BPM</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span>2:15</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">jumpstream</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">chordjack</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">speed</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+<div class="flex items-center gap-0.5 text-[#FFCC22] px-2 py-1 bg-surface-container rounded-full">
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] text-outline-variant" type="button">star</button>
+<button class="material-symbols-outlined text-[16px] text-outline-variant" type="button">star</button>
+</div>
+<div class="flex items-center gap-1.5">
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-tertiary-container hover:text-on-tertiary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">bookmark_add</span>
+</button>
+</div>
+</div>
+</article>
+<!-- Map 6 -->
+<article class="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+<div class="flex items-center gap-space-md flex-1 min-w-0 w-full">
+<div class="relative flex-shrink-0">
+<div class="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
+<img class="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300" data-alt="Surreal reflection of an anime shadow figure splitting across fractured dark glass in deep purple hues" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCU-Zjy_sJbzoDlrcA2UqYtX-4cFhSPSn03qdtfm-jdDLHsKIUZwnf0UkSwuvvolCogybmRwDkGZLEU0eH3cewGN_DxHD1IYpwN7wCF-G7-Y81SX7L2CXCf0o_dROJkJpImUj_zohrjiKsy6BuCgJu_jfe7kXjSv7eANijmE7R2cN4kixGRllKfmmFZR_DqYGsk_B9LComzgVccn88qcrt-uxikfO_OvPphLW5xJ7xPDCjzOizNK26V"/>
+</div>
+<div class="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-surface-container-lowest text-primary rounded-full font-label-sm text-[9px] font-bold">
+              7K
+            </div>
+</div>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex flex-wrap items-center gap-space-xs mb-0.5">
+<span class="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px] leading-none">star</span>5.14★
+              </span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface truncate">Doppelganger</h3>
+<span class="text-on-surface-variant font-body-sm text-body-sm">by LeaF</span>
+</div>
+<p class="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">
+              Rhythmic complexity test calibrated to your 91.2% threshold with syncopated 7K chord streams.
+            </p>
+<div class="flex flex-wrap items-center gap-space-sm text-on-surface-variant font-label-sm text-label-sm">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">speed</span>
+<span>178 BPM</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span>2:32</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">chordjack</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">technical</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+<div class="flex items-center gap-0.5 text-[#FFCC22] px-2 py-1 bg-surface-container rounded-full">
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+<button class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;" type="button">star</button>
+</div>
+<div class="flex items-center gap-1.5">
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-tertiary-container hover:text-on-tertiary-container text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface flex items-center justify-center transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">bookmark_add</span>
+</button>
+</div>
+</div>
+</article>
+<!-- Pagination / Load Bar Footer -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-space-md py-space-md px-space-sm bg-surface-container-low rounded-lg shadow-sm">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Showing 6 of 24 filtered recommendations (set of 30)</span>
+<div class="flex items-center gap-2">
+<button class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-label-sm transition-colors" type="button">
+            Previous
+          </button>
+<span class="font-label-sm text-label-sm text-primary font-bold px-2">Page 1 of 4</span>
+<button class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-label-sm transition-colors" type="button">
+            Next
+          </button>
+</div>
+</div>
+</main>
+</div>
+</div>
+<script>
+  // Dynamic Segmented Count Picker Toggle
+  const countButtons = document.querySelectorAll('#count-picker button');
+  countButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      countButtons.forEach(b => {
+        b.className = 'px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors';
+      });
+      btn.className = 'px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all';
+    });
+  });
+
+  // Regenerate Micro-interaction
+  const regenerateBtn = document.getElementById('regenerate-btn');
+  const refreshIcon = document.getElementById('refresh-icon');
+  if (regenerateBtn && refreshIcon) {
+    regenerateBtn.addEventListener('click', () => {
+      refreshIcon.classList.add('rotate-180');
+      setTimeout(() => {
+        refreshIcon.classList.remove('rotate-180');
+      }, 500);
+    });
+  }
+
+  // Bind Shell Nav Active State & Links
+  const sideLinks = document.querySelectorAll('aside nav a');
+  sideLinks.forEach(link => {
+    const path = link.getAttribute('data-path');
+    if (path === 'dashboard') {
+      link.setAttribute('href', '{{DATA:SCREEN:SCREEN_4}}');
+    } else if (path === 'stats') {
+      link.setAttribute('href', '{{DATA:SCREEN:SCREEN_2}}');
+    } else if (path === 'recommendations') {
+      link.classList.add('bg-primary-container', 'text-on-primary-container', 'font-semibold', 'shadow-[0_0_16px_rgba(164,118,255,0.35)]');
+      link.classList.remove('text-on-surface-variant');
+    }
+  });
+</script></main></div></body></html>
