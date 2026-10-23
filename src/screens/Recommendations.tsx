@@ -1,5 +1,26 @@
 // Converted from Stitch export: stitch-raw/08-recommendations.html
-export default function Recommendations() {
+// M3: the exported markup below is the DEMO variant (sora_playz),
+// rendered unchanged when nothing is linked. The real variant at the
+// bottom runs the windowed recommendation engine (see lib/recommend.ts
+// for the ranking-honesty notes) with working filters, previews and
+// downloads.
+import { useCallback, useEffect, useRef, useState } from 'react'
+import AppShell from '../components/AppShell'
+import BeatmapRow from '../components/BeatmapRow'
+import RecFiltersPanel from '../components/RecFiltersPanel'
+import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profileService'
+import { useModeStore } from '../lib/modeStore'
+import { MODE_LABELS } from '../lib/mode'
+import {
+  defaultFiltersFor,
+  generateRecommendations,
+  type RecCandidate,
+  type RecFilters,
+} from '../lib/recommend'
+import { seenKey, seenStore } from '../lib/seenStore'
+import { useAuth } from '../lib/auth'
+
+function RecommendationsDemo() {
   return (
     <div className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
     <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
@@ -902,5 +923,203 @@ export default function Recommendations() {
       </main>
     </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Real variant (M3): Generated mode — fixed top-N from the windowed pool.
+// ---------------------------------------------------------------------------
+
+function RecommendationsReal({ data }: { data: ProfileData }) {
+  const mode = useModeStore((s) => s.mode)
+  const { tier } = useAuth()
+  const profile = data.skillProfile
+  const key = seenKey(tier, data.user.username)
+  const [count, setCount] = useState(30)
+  const [filters, setFilters] = useState<RecFilters>(() => defaultFiltersFor(profile))
+  const [draft, setDraft] = useState<RecFilters>(filters)
+  const [items, setItems] = useState<RecCandidate[]>([])
+  const [totalMatched, setTotalMatched] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [downloadedTick, setDownloadedTick] = useState(0)
+  const runRef = useRef(0)
+
+  useEffect(() => {
+    seedPlayedSets(key, data)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, data.user.id, mode])
+
+  const generate = useCallback(
+    async (nextFilters: RecFilters, nextCount: number) => {
+      const run = ++runRef.current
+      setBusy(true)
+      setError(null)
+      try {
+        const seen = seenStore.load(key)
+        const result = await generateRecommendations(profile, mode, {
+          count: nextCount,
+          filters: nextFilters,
+          seen,
+        })
+        if (runRef.current !== run) return
+        setItems(result.items)
+        setTotalMatched(result.totalMatched)
+        seenStore.markMany(
+          key,
+          'served',
+          result.items.map((c) => c.beatmapsetId),
+        )
+      } catch {
+        if (runRef.current !== run) return
+        setError('The recommendation search failed just now — osu! or the proxy may be busy. Try regenerating.')
+      } finally {
+        if (runRef.current === run) setBusy(false)
+      }
+    },
+    [key, mode, profile],
+  )
+
+  // (Re)generate when the profile/mode lands or changes.
+  useEffect(() => {
+    const fresh = defaultFiltersFor(profile)
+    setFilters(fresh)
+    setDraft(fresh)
+    void generate(fresh, count)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, mode])
+
+  const downloaded = seenStore.load(key).downloaded
+
+  return (
+    <div className="flex flex-col w-full">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-lg pb-space-lg">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-space-sm">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-label-sm text-label-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>Generated mode
+            </span>
+            <span className="text-on-surface-variant font-label-sm text-label-sm">• Calibrated to {profile.srCeiling.toFixed(1)}★ collapse gap</span>
+          </div>
+          <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight">Recommendations</h1>
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            {profile.isStarter
+              ? `Starter picks for ${MODE_LABELS[mode]} — popular Ranked maps near the starter band, not personalised yet.`
+              : `Targeted algorithmic drill sets for ${data.user.username} in ${MODE_LABELS[mode]} — ordered for you from the fetched window.`}
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-space-md bg-surface-container-low p-space-sm rounded-lg shadow-sm">
+          <div className="flex items-center bg-surface-container-high rounded-full p-0.5" id="count-picker">
+            {[20, 30, 50].map((n) => (
+              <button
+                key={n}
+                className={count === n
+                  ? 'px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all'
+                  : 'px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors'}
+                data-count={n}
+                type="button"
+                onClick={() => { setCount(n); void generate(filters, n) }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <button
+            className="flex items-center gap-2 px-space-md py-2 rounded-full bg-gradient-to-r from-primary-container to-inverse-primary text-on-primary font-label-md text-label-md shadow-[0_0_16px_rgba(164,118,255,0.35)] hover:shadow-[0_0_22px_rgba(164,118,255,0.6)] active:scale-95 transition-all disabled:opacity-60"
+            id="regenerate-btn"
+            type="button"
+            disabled={busy}
+            onClick={() => void generate(filters, count)}
+          >
+            <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+            <span>{busy ? 'Generating…' : 'Regenerate'}</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start mt-space-sm">
+        <RecFiltersPanel
+          draft={draft}
+          onDraftChange={setDraft}
+          onApply={() => { setFilters(draft); void generate(draft, count) }}
+          profile={profile}
+          mode={mode}
+          appliedCount={items.length}
+        />
+        <main className="lg:col-span-8 xl:col-span-9 flex flex-col gap-space-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-space-xs py-1">
+            <div className="flex items-center gap-space-sm">
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">
+                Training your {profile.srCeiling.toFixed(1)}★ gap — {items.length} maps
+              </h2>
+              {totalMatched !== null && (
+                <span className="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[10px]">~{totalMatched.toLocaleString('en-US')} sets match on osu!</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 text-on-surface-variant font-label-sm text-label-sm">
+              <span>Sorted by:</span>
+              <span className="text-primary font-medium flex items-center gap-0.5">pp training weight
+                <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+              </span>
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-space-md rounded-lg bg-surface-container-low flex items-center justify-between gap-space-md">
+              <p className="font-body-sm text-body-sm text-error">{error}</p>
+              <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count)}>Retry</button>
+            </div>
+          )}
+          {busy && items.length === 0 && !error && (
+            <p className="font-body-md text-body-md text-on-surface-variant px-space-xs">Searching osu! and scoring your window…</p>
+          )}
+          {!busy && !error && items.length === 0 && (
+            <p className="font-body-md text-body-md text-on-surface-variant px-space-xs">
+              No maps in the fetched window match these filters. Loosen the SR/BPM ranges or clear the tag and apply again.
+            </p>
+          )}
+          {items.map((c) => (
+            <BeatmapRow
+              key={c.beatmapsetId}
+              candidate={c}
+              mode={mode}
+              seenKeyValue={key}
+              downloaded={downloaded.includes(c.beatmapsetId)}
+              onDownloaded={() => setDownloadedTick((n) => n + 1)}
+            />
+          ))}
+          <span className="hidden">{downloadedTick}</span>
+        </main>
+      </div>
+    </div>
+  )
+}
+
+export default function Recommendations() {
+  const mode = useModeStore((s) => s.mode)
+  const { tier } = useAuth()
+  const { status, data, identity } = useProfileData(mode)
+
+  if (status === 'loading') {
+    return (
+      <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: 0, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
+        <p className="font-body-md text-body-md text-on-surface-variant">Loading your profile before generating recommendations…</p>
+      </AppShell>
+    )
+  }
+  if ((status !== 'ready' && status !== 'empty') || !data) return <RecommendationsDemo />
+
+  return (
+    <AppShell
+      identity={{
+        username: data.user.username,
+        pp: data.skillProfile.pp,
+        countryCode: data.user.country_code,
+        avatarUrl: `https://a.ppy.sh/${data.user.id}`,
+        tierLabel: tier === 'account' ? 'account' : 'guest',
+      }}
+    >
+      <RecommendationsReal data={data} />
+    </AppShell>
   )
 }

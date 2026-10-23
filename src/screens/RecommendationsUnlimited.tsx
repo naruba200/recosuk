@@ -1,5 +1,25 @@
 // Converted from Stitch export: stitch-raw/08b-recommendations-unlimited.html
-export default function RecommendationsUnlimited() {
+// M3 (§13): the exported markup below is the DEMO variant, rendered
+// unchanged when nothing is linked. The real variant at the bottom is
+// the endless feed: windowed re-ranking over a cursor-paginated pool,
+// seen-set dedupe, honest end card.
+import { useCallback, useEffect, useRef, useState } from 'react'
+import AppShell from '../components/AppShell'
+import BeatmapRow from '../components/BeatmapRow'
+import RecFiltersPanel from '../components/RecFiltersPanel'
+import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profileService'
+import { useModeStore } from '../lib/modeStore'
+import { MODE_LABELS } from '../lib/mode'
+import {
+  defaultFiltersFor,
+  FeedSession,
+  type RecCandidate,
+  type RecFilters,
+} from '../lib/recommend'
+import { seenKey, seenStore, type SeenState } from '../lib/seenStore'
+import { useAuth } from '../lib/auth'
+
+function RecommendationsUnlimitedDemo() {
   return (
     <div className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
     <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
@@ -995,5 +1015,271 @@ export default function RecommendationsUnlimited() {
       </main>
     </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Real variant (M3, §13): Unlimited — endless feed, ordered as it loads.
+// ---------------------------------------------------------------------------
+
+const PAGE_TAKE = 20
+
+function FeedReal({ data }: { data: ProfileData }) {
+  const mode = useModeStore((s) => s.mode)
+  const { tier } = useAuth()
+  const profile = data.skillProfile
+  const key = seenKey(tier, data.user.username)
+  const [filters, setFilters] = useState<RecFilters>(() => defaultFiltersFor(profile))
+  const [draft, setDraft] = useState<RecFilters>(filters)
+  const [items, setItems] = useState<RecCandidate[]>([])
+  const [totalMatched, setTotalMatched] = useState<number | null>(null)
+  const [ended, setEnded] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [restarted, setRestarted] = useState(false)
+  const [downloadedTick, setDownloadedTick] = useState(0)
+  const sessionRef = useRef<FeedSession | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const loadingRef = useRef(false)
+
+  useEffect(() => {
+    seedPlayedSets(key, data)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, data.user.id, mode])
+
+  const startSession = useCallback(
+    async (nextFilters: RecFilters, seenOverride?: SeenState) => {
+      const seen = seenOverride ?? seenStore.load(key)
+      const session = new FeedSession(profile, mode, nextFilters, seen, key, (k, ids) =>
+        seenStore.markMany(k, 'served', ids),
+      )
+      sessionRef.current = session
+      setItems([])
+      setEnded(false)
+      setError(null)
+      loadingRef.current = true
+      setLoading(true)
+      try {
+        const first = await session.take(PAGE_TAKE)
+        setItems(first)
+        setTotalMatched(session.totalMatched)
+        setEnded(session.exhausted && session.bufferedCount === 0)
+      } catch {
+        setError('The feed could not load just now — osu! or the proxy may be busy.')
+      } finally {
+        loadingRef.current = false
+        setLoading(false)
+      }
+    },
+    [key, mode, profile],
+  )
+
+  // New session whenever profile/mode changes (§13.2.3).
+  useEffect(() => {
+    const fresh = defaultFiltersFor(profile)
+    setFilters(fresh)
+    setDraft(fresh)
+    setRestarted(false)
+    void startSession(fresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, mode])
+
+  const loadMore = useCallback(async () => {
+    const session = sessionRef.current
+    if (!session || loadingRef.current || session.exhausted) return
+    loadingRef.current = true
+    setLoading(true)
+    try {
+      const more = await session.take(10)
+      if (more.length > 0) setItems((prev) => [...prev, ...more])
+      setTotalMatched(session.totalMatched)
+      setEnded(session.exhausted && session.bufferedCount === 0)
+    } catch {
+      setError('A feed refill failed — scroll again to retry.')
+    } finally {
+      loadingRef.current = false
+      setLoading(false)
+    }
+  }, [])
+
+  // Prefetch on scroll: refill when the sentinel nears the viewport.
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMore()
+      },
+      { rootMargin: '600px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loadMore, items.length])
+
+  const handleSkip = (c: RecCandidate) => {
+    seenStore.mark(key, 'skipped', c.beatmapsetId)
+    setItems((prev) => prev.filter((item) => item.beatmapsetId !== c.beatmapsetId))
+    // Top the feed back up from the pool (§13.2.6: skips affect the
+    // next refill, never reshuffle what is on screen).
+    void loadMore()
+  }
+
+  const applyFilters = () => {
+    setFilters(draft)
+    setRestarted(true)
+    void startSession(draft)
+  }
+
+  const loosenFilters = () => {
+    const looser: RecFilters = {
+      ...filters,
+      srMin: Math.max(0, filters.srMin - 0.5),
+      srMax: filters.srMax + 1,
+      tagText: '',
+      keyCount: null,
+    }
+    setFilters(looser)
+    setDraft(looser)
+    setRestarted(true)
+    void startSession(looser)
+  }
+
+  const startOver = () => {
+    const seen = seenStore.load(key)
+    void startSession(filters, { ...seen, served: [], skipped: [] })
+  }
+
+  const downloaded = seenStore.load(key).downloaded
+
+  return (
+    <div className="flex flex-col w-full">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-lg pb-space-lg">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-space-sm">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-label-sm text-label-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>Unlimited mode
+            </span>
+            <span className="text-on-surface-variant font-label-sm text-label-sm">• Endless feed for {MODE_LABELS[mode]}</span>
+          </div>
+          <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight">Recommendations</h1>
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            {profile.isStarter
+              ? 'Starter picks — popular Ranked maps for this mode until your profile is personal.'
+              : 'An endless stream ordered for you as it loads — scored from the window ahead of your scroll, never a claimed global ranking.'}
+          </p>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start mt-space-sm">
+        <RecFiltersPanel
+          draft={draft}
+          onDraftChange={setDraft}
+          onApply={applyFilters}
+          profile={profile}
+          mode={mode}
+          appliedCount={null}
+        />
+        <main className="lg:col-span-8 xl:col-span-9 flex flex-col gap-space-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-space-xs py-1">
+            <div className="flex items-center gap-space-sm flex-wrap">
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">Training your {profile.srCeiling.toFixed(1)}★ gap — Endless stream</h2>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-primary-container/20 text-primary font-label-sm text-[10px] font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+                {totalMatched !== null ? `~${totalMatched.toLocaleString('en-US')} maps match your filters` : 'Live stream • counting matches…'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-on-surface-variant font-label-sm text-label-sm">
+              <span>Sorted by:</span>
+              <span className="text-primary font-medium flex items-center gap-0.5 cursor-pointer hover:underline">pp training weight
+                <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+              </span>
+            </div>
+          </div>
+
+          {restarted && (
+            <p className="font-body-sm text-body-sm text-tertiary px-space-xs">Filters changed — feed restarted.</p>
+          )}
+          {error && (
+            <div className="p-space-md rounded-lg bg-surface-container-low">
+              <p className="font-body-sm text-body-sm text-error">{error}</p>
+            </div>
+          )}
+
+          {items.map((c) => (
+            <BeatmapRow
+              key={c.beatmapsetId}
+              candidate={c}
+              mode={mode}
+              seenKeyValue={key}
+              downloaded={downloaded.includes(c.beatmapsetId)}
+              onDownloaded={() => setDownloadedTick((n) => n + 1)}
+              onSkip={() => handleSkip(c)}
+            />
+          ))}
+          <span className="hidden">{downloadedTick}</span>
+
+          {loading && (
+            <>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="rounded-lg bg-surface-container-low p-space-md animate-pulse" aria-hidden="true">
+                  <div className="flex items-center gap-space-md">
+                    <div className="w-14 h-14 rounded-full bg-surface-container-highest"></div>
+                    <div className="flex flex-col gap-2 flex-1">
+                      <div className="h-4 w-1/2 rounded bg-surface-container-highest"></div>
+                      <div className="h-3 w-1/3 rounded bg-surface-container-highest"></div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div ref={sentinelRef} className="h-2"></div>
+
+          {ended && !loading && (
+            <div className="p-space-lg rounded-lg bg-surface-container-low flex flex-col items-center gap-space-md text-center">
+              <span className="material-symbols-outlined text-primary text-[28px]">flag</span>
+              <p className="font-headline-sm text-headline-sm text-on-surface">That's everything matching these filters</p>
+              <p className="font-body-sm text-body-sm text-on-surface-variant max-w-md">
+                The endless feed is honest: the pool ran out. Loosen the filters for more maps, or start over and see the ones you skipped again.
+              </p>
+              <div className="flex items-center gap-space-sm">
+                <button className="px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={loosenFilters}>Loosen filters</button>
+                <button className="px-space-md py-2.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={startOver}>Start over (show seen maps again)</button>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  )
+}
+
+export default function RecommendationsUnlimited() {
+  const mode = useModeStore((s) => s.mode)
+  const { tier } = useAuth()
+  const { status, data, identity } = useProfileData(mode)
+
+  if (status === 'loading') {
+    return (
+      <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: 0, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
+        <p className="font-body-md text-body-md text-on-surface-variant">Loading your profile before starting the feed…</p>
+      </AppShell>
+    )
+  }
+  if ((status !== 'ready' && status !== 'empty') || !data) return <RecommendationsUnlimitedDemo />
+
+  return (
+    <AppShell
+      identity={{
+        username: data.user.username,
+        pp: data.skillProfile.pp,
+        countryCode: data.user.country_code,
+        avatarUrl: `https://a.ppy.sh/${data.user.id}`,
+        tierLabel: tier === 'account' ? 'account' : 'guest',
+      }}
+    >
+      <FeedReal data={data} />
+    </AppShell>
   )
 }

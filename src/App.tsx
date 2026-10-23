@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { AuthProvider } from './lib/auth'
+import { AuthProvider, useAuth } from './lib/auth'
+import { useGuestStore } from './lib/guestStore'
+import { PreviewRouteStop } from './lib/previewPlayer'
 import OnboardingWelcome from './screens/OnboardingWelcome'
 import LinkOsu from './screens/LinkOsu'
 import Generating from './screens/Generating'
@@ -23,12 +25,18 @@ import Settings from './screens/Settings'
  * also always reachable directly at /dashboard.
  */
 function EntryGate() {
+  const { user, loading } = useAuth()
+  const guestSession = useGuestStore((s) => s.session)
   let onboarded = false
   try {
     onboarded = window.localStorage.getItem('recosuk-onboarded') === '1'
   } catch {
     onboarded = false
   }
+  // Returning users (PLAN-v2 §5.6): a guest link or a signed-in account
+  // with a linked profile skips onboarding entirely, flag or not.
+  if (guestSession || user) return <Dashboard />
+  if (loading) return <Dashboard />
   if (!onboarded) {
     return <Navigate to="/onboarding" replace />
   }
@@ -106,12 +114,10 @@ function NavigationBridge() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // The Generating screen is a progress step: advance on its own.
-  useEffect(() => {
-    if (location.pathname !== '/onboarding/generating') return
-    const t = window.setTimeout(() => navigate('/onboarding/stats'), 4000)
-    return () => window.clearTimeout(t)
-  }, [location.pathname, navigate])
+  // NOTE (M4): the Generating screen used to auto-advance on a fixed
+  // 4s timer here. It now runs the real generation pipeline and
+  // navigates itself when the work is actually done (or shows its
+  // error state) — no bridge timer.
 
   useEffect(() => {
     const markOnboarded = () => {
@@ -181,6 +187,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
       <NavigationBridge />
+      <PreviewRouteStop />
       <Routes>
         <Route path="/onboarding" element={<OnboardingWelcome />} />
         <Route path="/onboarding/link" element={<LinkOsu />} />

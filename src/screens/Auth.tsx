@@ -183,27 +183,18 @@ export default function Auth() {
                 </p>
               </div>
               <form className="flex flex-col gap-4 text-left" onSubmit={handleSignUp}>
-                {/* Email Input with Inline Active Error State */}
+                {/* Email Input — neutral state; real errors surface in
+                    the notice area above the form (M4 cleanup: the
+                    Stitch export baked a fake "already registered"
+                    error into this field regardless of input). */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-baseline">
                     <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="email-field">Email address
                     </label>
-                    <span className="font-label-sm text-label-sm text-error font-medium flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px]">error
-                      </span>{' '}Already registered{' '}
-                    </span>
                   </div>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md bg-error-container/20 text-on-surface focus:outline-none transition-all placeholder:text-outline" id="email-field" placeholder="you@domain.com" type="email" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} />
-                    <span className="material-symbols-outlined absolute left-3.5 text-error text-lg">mail
-                    </span>
-                    <span className="material-symbols-outlined absolute right-3.5 text-error text-lg">warning
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-2 text-error">
-                    <span className="font-label-sm text-label-sm">That email already has an account.{' '}
-                      <a className="underline hover:text-secondary-fixed font-semibold" href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setActiveTab('signin') }}>Try signing in
-                      </a>{' '}instead.
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:outline-none transition-all placeholder:text-outline" id="email-field" placeholder="you@domain.com" type="email" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} />
+                    <span className="material-symbols-outlined absolute left-3.5 text-outline text-lg">mail
                     </span>
                   </div>
                 </div>

@@ -1,5 +1,25 @@
 // Converted from Stitch export: stitch-raw/09-mirror.html
-export default function Mirror() {
+// M6: the exported markup below is the DEMO variant (sora_playz),
+// rendered unchanged when the proxy is not configured. The real
+// variant at the bottom wires the search to the osu! API via the
+// proxy, with mode tabs (incl. All) and real mirror download links.
+import { useCallback, useEffect, useRef, useState } from 'react'
+import AppShell from '../components/AppShell'
+import BeatmapRow from '../components/BeatmapRow'
+import { isProxyConfigured, proxyCall } from '../lib/osu'
+import { GAME_MODES, MODE_LABELS, type GameMode } from '../lib/mode'
+import { useModeStore } from '../lib/modeStore'
+import { computeSkillProfile } from '../lib/skillProfile'
+import {
+  setToCandidate,
+  type RecCandidate,
+  type SearchPage,
+} from '../lib/recommend'
+import { seenKey, seenStore } from '../lib/seenStore'
+import { useAuth } from '../lib/auth'
+import { useGuestStore } from '../lib/guestStore'
+
+function MirrorDemo() {
   return (
     <div className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
     <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
@@ -842,5 +862,279 @@ export default function Mirror() {
       </main>
     </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Real variant (M6): mode-aware mirror search + downloads.
+// ---------------------------------------------------------------------------
+
+type MirrorTab = GameMode | 'all'
+
+interface MirrorResult {
+  candidate: RecCandidate
+  mode: GameMode
+}
+
+/** Neutral starter profile used only to pick a representative
+ *  difficulty per set when the visitor has no linked profile. */
+function neutralProfile(mode: GameMode) {
+  return computeSkillProfile(
+    { id: 0, username: '', playmode: mode, statistics: {} },
+    [],
+    [],
+    [],
+    mode,
+  )
+}
+
+const TAB_ORDER: { id: MirrorTab; label: string; dot?: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'osu', label: 'Standard', dot: 'bg-secondary' },
+  { id: 'taiko', label: 'Taiko', dot: 'bg-[#FF5C39]' },
+  { id: 'fruits', label: 'Catch', dot: 'bg-tertiary' },
+  { id: 'mania', label: 'Mania', dot: 'bg-primary-fixed' },
+]
+
+function MirrorReal() {
+  const globalMode = useModeStore((s) => s.mode)
+  const setGlobalMode = useModeStore((s) => s.setMode)
+  const { tier } = useAuth()
+  const guestSession = useGuestStore((s) => s.session)
+  const [tab, setTab] = useState<MirrorTab>(globalMode)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<MirrorResult[]>([])
+  const [total, setTotal] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [downloadedTick, setDownloadedTick] = useState(0)
+  const runRef = useRef(0)
+  const debounceRef = useRef<number | null>(null)
+
+  const username = guestSession?.osuUsername ?? null
+  const key = seenKey(tier, username ?? 'mirror')
+
+  const runSearch = useCallback(
+    async (q: string, activeTab: MirrorTab) => {
+      const run = ++runRef.current
+      setBusy(true)
+      setError(null)
+      try {
+        // The proxy search is per-mode (§8), so "All" runs one search
+        // per mode and merges, deduped by beatmapset id.
+        const modes: GameMode[] = activeTab === 'all' ? [...GAME_MODES] : [activeTab]
+        const merged = new Map<number, MirrorResult>()
+        let totalSum = 0
+        for (const m of modes) {
+          const page = await proxyCall<SearchPage>('searchBeatmapsets', {
+            mode: m,
+            query: q.trim() || undefined,
+            filters: { sort: 'plays_desc' },
+          })
+          if (typeof page.total === 'number') totalSum += page.total
+          const profile = neutralProfile(m)
+          for (const set of page.beatmapsets ?? []) {
+            if (merged.has(set.id)) continue
+            const candidate = setToCandidate(set, m, profile)
+            if (!candidate) continue
+            candidate.reason = `${set.status} · ${(set.play_count ?? 0).toLocaleString('en-US')} plays · ${(set.favourite_count ?? 0).toLocaleString('en-US')} favourites`
+            merged.set(set.id, { candidate, mode: m })
+          }
+        }
+        if (runRef.current !== run) return
+        setResults([...merged.values()])
+        setTotal(totalSum > 0 ? totalSum : null)
+      } catch {
+        if (runRef.current !== run) return
+        setError('Mirror search failed just now — osu! or the proxy may be busy. Try again.')
+        setResults([])
+      } finally {
+        if (runRef.current === run) setBusy(false)
+      }
+    },
+    [],
+  )
+
+  // Follow the global mode when it changes elsewhere (top-bar pills).
+  useEffect(() => {
+    setTab(globalMode)
+  }, [globalMode])
+
+  // Initial + tab searches run immediately; typing is debounced.
+  useEffect(() => {
+    void runSearch(query, tab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
+  const onQueryChange = (value: string) => {
+    setQuery(value)
+    if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(() => {
+      void runSearch(value, tab)
+    }, 500)
+  }
+
+  const pickTab = (next: MirrorTab) => {
+    setTab(next)
+    // One source of truth (§7): picking a concrete mode tab also sets
+    // the global mode; "All" is a Mirror-local view and leaves it be.
+    if (next !== 'all') setGlobalMode(next)
+  }
+
+  const downloaded = seenStore.load(key).downloaded
+  const sessionDownloads = results.filter((r) => downloaded.includes(r.candidate.beatmapsetId))
+
+  return (
+    <div className="flex flex-col w-full gap-space-lg">
+      <section className="flex flex-col gap-space-md">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm uppercase tracking-widest mb-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+              <span>Fast Beatmap Pipeline</span>
+              <span className="text-outline-variant">•</span>
+              <span>Latency Optimized</span>
+            </div>
+            <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">
+              Mirror — {tab === 'all' ? 'All modes' : MODE_LABELS[tab]}
+            </h1>
+          </div>
+          <div className="flex items-center gap-1.5 p-1 rounded-full bg-surface-container-low shadow-inner">
+            {TAB_ORDER.map((t) => {
+              const active = tab === t.id
+              return (
+                <button
+                  key={t.id}
+                  className={active
+                    ? 'flex items-center gap-1.5 px-space-md py-1.5 rounded-full font-label-md text-label-md bg-primary-container text-on-primary-container shadow-[0_0_16px_rgba(164,118,255,0.4)]'
+                    : 'flex items-center gap-1.5 px-space-md py-1.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-colors'}
+                  type="button"
+                  onClick={() => pickTab(t.id)}
+                >
+                  {t.dot && <span className={`w-2 h-2 rounded-full ${t.dot}`}></span>}
+                  <span>{t.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <p className="font-body-sm text-body-sm text-on-surface-variant -mt-1">
+          Downloads are the full beatmapset file (.osz contains every difficulty). The mode changes what you discover and which difficulty is shown.
+        </p>
+        <div className="flex flex-col gap-space-sm pt-space-xs">
+          <div className="relative flex items-center w-full">
+            <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[22px] pointer-events-none">search</span>
+            <input
+              className="w-full h-12 pl-12 pr-32 rounded-full bg-surface-container text-on-surface placeholder:text-on-surface-variant/60 font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary shadow-sm transition-all"
+              placeholder="Search beatmaps, artists, or mappers"
+              type="text"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+            />
+            <div className="absolute right-1.5 flex items-center">
+              <button
+                className="px-space-lg h-9 rounded-full bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1 shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all"
+                type="button"
+                onClick={() => void runSearch(query, tab)}
+              >
+                <span className="material-symbols-outlined text-[18px]">tune</span>
+                <span>Search</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-space-xl">
+        <section className="xl:col-span-8 flex flex-col gap-space-md min-w-0">
+          <div className="flex items-center justify-between pb-1">
+            <div className="flex items-center gap-space-sm">
+              <span className="font-headline-sm text-headline-sm text-on-surface">Search results</span>
+              <span className="px-2 py-0.5 rounded-full bg-surface-container-high font-label-sm text-label-sm text-on-surface-variant font-medium">
+                {results.length} beatmapsets{total !== null ? ` · ~${total.toLocaleString('en-US')} on osu!` : ''}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-low font-label-sm text-label-sm">
+              <span className="w-2 h-2 rounded-full bg-[#7EE787] animate-pulse"></span>
+              <span className="text-on-surface-variant">Mirror status:</span>
+              <span className="text-on-surface font-semibold">Online</span>
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-space-md rounded-lg bg-surface-container-low">
+              <p className="font-body-sm text-body-sm text-error">{error}</p>
+            </div>
+          )}
+          {busy && results.length === 0 && !error && (
+            <p className="font-body-md text-body-md text-on-surface-variant">Searching osu!…</p>
+          )}
+          {!busy && !error && results.length === 0 && (
+            <p className="font-body-md text-body-md text-on-surface-variant">
+              No beatmapsets found for this search in {tab === 'all' ? 'any mode' : MODE_LABELS[tab]}. Try a different artist, mapper, or title.
+            </p>
+          )}
+          <div className="flex flex-col gap-3">
+            {results.map(({ candidate, mode: entryMode }) => (
+              <BeatmapRow
+                key={`${entryMode}-${candidate.beatmapsetId}`}
+                candidate={candidate}
+                mode={entryMode}
+                seenKeyValue={key}
+                downloaded={downloaded.includes(candidate.beatmapsetId)}
+                onDownloaded={() => setDownloadedTick((n) => n + 1)}
+              />
+            ))}
+          </div>
+          <span className="hidden">{downloadedTick}</span>
+        </section>
+
+        <aside className="xl:col-span-4 flex flex-col gap-space-md">
+          <div className="rounded-lg bg-surface-container-low p-space-md shadow-md">
+            <h2 className="font-headline-sm text-headline-sm text-on-surface mb-space-sm">Downloaded from Mirror</h2>
+            {sessionDownloads.length === 0 ? (
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                Nothing downloaded yet this session. Downloads are recorded locally so
+                recommendations won't serve the same maps again.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {sessionDownloads.map(({ candidate }) => (
+                  <div key={candidate.beatmapsetId} className="flex items-center gap-2 font-label-sm text-label-sm">
+                    <span className="material-symbols-outlined text-tertiary text-[16px]">check_circle</span>
+                    <span className="text-on-surface truncate">{candidate.title}</span>
+                    <span className="text-on-surface-variant">· {candidate.artist}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rounded-lg bg-surface-container-low p-space-md shadow-md">
+            <h2 className="font-headline-sm text-headline-sm text-on-surface mb-space-sm">Mirror sources</h2>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">
+              Every result can be downloaded from the official osu! site or a community
+              mirror — open the mirror menu on a result. If one mirror is slow, another
+              usually isn't.
+            </p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+export default function Mirror() {
+  const { tier, guestSession } = useAuth()
+  if (!isProxyConfigured) return <MirrorDemo />
+  return (
+    <AppShell
+      identity={{
+        username: guestSession?.osuUsername ?? 'Guest',
+        pp: 0,
+        tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'mirror browsing',
+      }}
+    >
+      <MirrorReal />
+    </AppShell>
   )
 }

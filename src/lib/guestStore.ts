@@ -67,6 +67,8 @@ interface GuestState {
   linkGuest: (input: LinkGuestInput) => void
   clearGuest: () => void
   setGuestMode: (mode: GameMode) => void
+  /** Store a generated per-mode skill profile (M2, local only per §6). */
+  setSkillProfile: (mode: GameMode, profile: unknown) => void
 }
 
 export const useGuestStore = create<GuestState>()(
@@ -92,6 +94,19 @@ export const useGuestStore = create<GuestState>()(
         set((state) =>
           state.session
             ? { session: { ...state.session, selectedMode: mode } }
+            : state,
+        ),
+
+      setSkillProfile: (mode, profile) =>
+        set((state) =>
+          state.session
+            ? {
+                session: {
+                  ...state.session,
+                  skillProfiles: { ...state.session.skillProfiles, [mode]: profile },
+                  generatedAt: new Date().toISOString(),
+                },
+              }
             : state,
         ),
     }),

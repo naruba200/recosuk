@@ -43,6 +43,8 @@ export interface BeatmapsetSummary {
   status: string
   play_count?: number
   favourite_count?: number
+  /** Space-separated mapper/community tags (when the payload includes them). */
+  tags?: string
   covers?: { card?: string; cover?: string; list?: string }
 }
 

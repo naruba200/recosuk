@@ -1,5 +1,21 @@
 // Converted from Stitch export: stitch-raw/07-stats.html
-export default function Stats() {
+// M2: the exported markup below is the DEMO variant (sora_playz),
+// rendered unchanged when nothing is linked. The real variant at the
+// bottom renders the same design language with live per-mode data,
+// the interpretation layer, top plays, and snapshot history.
+import { useState } from 'react'
+import AppShell from '../components/AppShell'
+import AccBandChart from '../components/AccBandChart'
+import StatCards from '../components/StatCards'
+import LockedButton from '../components/LockedButton'
+import { useProfileData, useSnapshots, type ProfileData } from '../lib/profileService'
+import { useModeStore } from '../lib/modeStore'
+import { MODE_LABELS } from '../lib/mode'
+import { fmtAcc, fmtInt, interpretProfile } from '../lib/interpretations'
+import { useAuth } from '../lib/auth'
+import { useCapabilities } from '../lib/capabilities'
+
+function StatsDemo() {
   return (
     <div className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
     <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
@@ -1003,5 +1019,352 @@ export default function Stats() {
       </main>
     </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Real variant (M2): full stat tracker for the linked player.
+// ---------------------------------------------------------------------------
+
+function formatHours(seconds: number | undefined): string {
+  if (!seconds) return '0'
+  return fmtInt(Math.round(seconds / 3600))
+}
+
+function StatsReal({
+  data,
+  onRefresh,
+}: {
+  data: ProfileData
+  onRefresh: () => void
+}) {
+  const mode = useModeStore((s) => s.mode)
+  const { user, skillProfile: p } = data
+  const stats = user.statistics ?? {}
+  const caps = useCapabilities()
+  const [snapToken, setSnapToken] = useState(0)
+  const snapshots = useSnapshots(mode, snapToken)
+  const refreshedAt = new Date(p.generatedAt)
+
+  const handleRefresh = () => {
+    onRefresh()
+    setSnapToken((n) => n + 1)
+  }
+
+  return (
+    <div className="flex flex-col w-full">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-md pb-space-lg">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-space-sm">
+            <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Stats — {MODE_LABELS[mode]}</h1>
+            {mode === 'mania' && p.mainKeyCount !== null && (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-container/25 text-primary">
+                <span className="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(210,187,255,0.8)]"></span>
+                <span className="font-label-sm text-label-sm uppercase tracking-wider font-bold">{p.mainKeyCount}K Focused</span>
+              </div>
+            )}
+          </div>
+          <p className="font-body-md text-body-md text-on-surface-variant">In-depth performance tracking and skill degradation analysis</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-space-md">
+          <div className="flex flex-col text-left lg:text-right">
+            <div className="flex items-center lg:justify-end gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#7EE787] shadow-[0_0_6px_rgba(126,231,135,0.8)]"></span>
+              <span className="font-label-sm text-label-sm text-on-surface font-medium">
+                Last refreshed {refreshedAt.toLocaleDateString()} {refreshedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            <span className="font-label-sm text-[10px] text-on-surface-variant">Live from osu! via RecOsuk proxy</span>
+          </div>
+          <button className="group relative flex items-center gap-space-xs px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md shadow-[0_4px_20px_rgba(164,118,255,0.35)] hover:shadow-[0_4px_26px_rgba(164,118,255,0.55)] active:scale-[0.98] transition-all" id="refresh-btn" type="button" onClick={handleRefresh}>
+            <span className="material-symbols-outlined text-[18px] group-hover:rotate-180 transition-transform duration-500">sync</span>
+            <span>Refresh from osu!</span>
+          </button>
+        </div>
+      </div>
+
+      {p.isStarter && (
+        <div className="p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)] mb-space-xl">
+          <p className="font-body-md text-body-md text-on-surface">
+            Not enough {MODE_LABELS[mode]} plays yet — {user.username} has no top plays in this mode, so
+            the numbers below are their account totals and the analysis cards show starter estimates,
+            not a personalised profile.
+          </p>
+        </div>
+      )}
+
+      {/* Headline numbers strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-space-md mb-space-xl">
+        <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+          <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-primary/10 blur-xl pointer-events-none"></div>
+          <div className="flex items-center justify-between text-on-surface-variant mb-1">
+            <span className="font-label-sm text-label-sm uppercase tracking-wider">Performance Points</span>
+            <span className="material-symbols-outlined text-primary text-[18px]">bolt</span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-metric-display text-metric-display text-primary tracking-tight leading-none">{fmtInt(p.pp)}</span>
+            <span className="font-label-sm text-label-sm text-on-surface-variant">pp</span>
+          </div>
+          <div className="flex items-center gap-1 mt-2 text-on-surface-variant">
+            <span className="font-label-sm text-label-sm">from your top {p.topPlayCount} plays</span>
+          </div>
+        </div>
+        <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+          <div className="flex items-center justify-between text-on-surface-variant mb-1">
+            <span className="font-label-sm text-label-sm uppercase tracking-wider">Global Ranking</span>
+            {user.country_code && (
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-secondary font-label-sm text-[10px] font-bold">
+                <span>{user.country_code}</span>
+                <span>{p.countryRank !== null ? `#${fmtInt(p.countryRank)}` : ''}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="font-metric-display text-metric-display text-on-surface tracking-tight leading-none">{p.globalRank !== null ? `#${fmtInt(p.globalRank)}` : '—'}</span>
+          </div>
+          <div className="flex items-center gap-1 mt-2 text-on-surface-variant">
+            <span className="font-label-sm text-label-sm">{MODE_LABELS[mode]} leaderboard</span>
+          </div>
+        </div>
+        <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+          <div className="flex items-center justify-between text-on-surface-variant mb-1">
+            <span className="font-label-sm text-label-sm uppercase tracking-wider">Hit Accuracy</span>
+            <span className="material-symbols-outlined text-tertiary text-[18px]">adjust</span>
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="font-metric-display text-metric-display text-on-surface tracking-tight leading-none">{fmtAcc(p.accuracy)}</span>
+          </div>
+          <div className="flex items-center gap-1 mt-2 text-on-surface-variant">
+            <span className="font-label-sm text-label-sm">{p.recentAccuracy !== null ? `recent plays ${fmtAcc(p.recentAccuracy)}` : 'lifetime average'}</span>
+          </div>
+        </div>
+        <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+          <div className="flex items-center justify-between text-on-surface-variant mb-1">
+            <span className="font-label-sm text-label-sm uppercase tracking-wider">Total Plays</span>
+            <span className="material-symbols-outlined text-on-surface-variant text-[18px]">play_circle</span>
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="font-metric-display text-metric-display text-on-surface tracking-tight leading-none">{fmtInt(p.playCount)}</span>
+          </div>
+          <div className="flex items-center gap-1 mt-2 text-on-surface-variant">
+            <span className="font-label-sm text-label-sm">grades: {stats.grade_counts?.ss ?? 0} SS · {stats.grade_counts?.s ?? 0} S · {stats.grade_counts?.a ?? 0} A</span>
+          </div>
+        </div>
+        <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)] col-span-2 md:col-span-1">
+          <div className="flex items-center justify-between text-on-surface-variant mb-1">
+            <span className="font-label-sm text-label-sm uppercase tracking-wider">Time on Stage</span>
+            <span className="material-symbols-outlined text-on-surface-variant text-[18px]">timer</span>
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="font-metric-display text-metric-display text-on-surface tracking-tight leading-none">{formatHours(stats.play_time)}</span>
+            <span className="font-headline-sm text-headline-sm text-on-surface-variant">hrs</span>
+          </div>
+          <div className="flex items-center gap-1 mt-2 text-primary font-label-sm text-label-sm font-medium">
+            <span>Level {stats.level?.current ?? '—'}</span>
+            <span className="text-on-surface-variant">• max combo {fmtInt(stats.maximum_combo ?? 0)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
+        <div className="lg:col-span-7 flex flex-col gap-space-lg">
+          <div className="relative p-space-lg rounded-DEFAULT bg-surface-container-low shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-space-md">
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary text-[20px]">bar_chart</span>
+                  <h2 className="font-headline-sm text-headline-sm text-on-surface">Accuracy by Star Rating Band</h2>
+                </div>
+                <p className="font-body-sm text-body-sm text-on-surface-variant">Your average accuracy grouped by map difficulty — the comfort band and the collapse band</p>
+              </div>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm">Sample: top {p.topPlayCount} plays</span>
+              </div>
+            </div>
+            <AccBandChart profile={p} />
+          </div>
+
+          <div className="relative p-space-lg rounded-DEFAULT bg-surface-container-low shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="flex items-center gap-2 mb-space-md">
+              <span className="material-symbols-outlined text-primary text-[20px]">emoji_events</span>
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">Top Plays</h2>
+            </div>
+            {data.topPlays.length === 0 ? (
+              <p className="font-body-sm text-body-sm text-on-surface-variant">No top plays in {MODE_LABELS[mode]} yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {data.topPlays.slice(0, 15).map((play) => (
+                  <div key={play.id ?? play.beatmap?.id} className="flex items-center gap-space-md p-2 rounded-DEFAULT bg-surface-container">
+                    {play.beatmapset?.covers?.list ? (
+                      <img className="w-16 h-10 rounded object-cover flex-shrink-0" alt="" src={play.beatmapset.covers.list} />
+                    ) : (
+                      <div className="w-16 h-10 rounded bg-surface-container-highest flex-shrink-0"></div>
+                    )}
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="font-label-md text-label-md text-on-surface truncate">
+                        {play.beatmapset?.title ?? 'Unknown map'} <span className="text-on-surface-variant">[{play.beatmap?.version}]</span>
+                      </span>
+                      <span className="font-label-sm text-label-sm text-on-surface-variant truncate">
+                        {play.beatmapset?.artist} · {play.beatmap?.bpm ?? '—'} BPM · mapped by {play.beatmapset?.creator ?? '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-space-md flex-shrink-0 font-label-sm text-label-sm">
+                      <span className="text-[#FFCC22] font-bold">{play.beatmap?.difficulty_rating.toFixed(2)}★</span>
+                      <span className="text-on-surface">{(play.accuracy * 100).toFixed(2)}%</span>
+                      <span className="text-primary font-bold">{play.pp ? `${Math.round(play.pp)}pp` : '—'}</span>
+                      <span className="text-on-surface-variant hidden xl:inline">{fmtInt(play.max_combo)}x{(play.mods ?? []).length > 0 ? ` · ${(play.mods ?? []).join('')}` : ''}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {data.mostPlayed.length > 0 && (
+            <div className="relative p-space-lg rounded-DEFAULT bg-surface-container-low shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+              <div className="flex items-center gap-2 mb-space-md">
+                <span className="material-symbols-outlined text-primary text-[20px]">repeat</span>
+                <h2 className="font-headline-sm text-headline-sm text-on-surface">Most Played Maps</h2>
+              </div>
+              <div className="flex flex-col gap-2">
+                {data.mostPlayed.slice(0, 8).map((entry) => (
+                  <div key={entry.beatmap?.id ?? entry.beatmapset?.id} className="flex items-center gap-space-md p-2 rounded-DEFAULT bg-surface-container">
+                    {entry.beatmapset?.covers?.list ? (
+                      <img className="w-16 h-10 rounded object-cover flex-shrink-0" alt="" src={entry.beatmapset.covers.list} />
+                    ) : (
+                      <div className="w-16 h-10 rounded bg-surface-container-highest flex-shrink-0"></div>
+                    )}
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="font-label-md text-label-md text-on-surface truncate">{entry.beatmapset?.title ?? 'Unknown map'}</span>
+                      <span className="font-label-sm text-label-sm text-on-surface-variant truncate">{entry.beatmapset?.artist}</span>
+                    </div>
+                    <span className="font-label-sm text-label-sm text-primary font-bold flex-shrink-0">{entry.count} plays</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="lg:col-span-5 flex flex-col gap-space-lg">
+          <div className="relative p-space-lg rounded-DEFAULT bg-surface-container-low shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="flex items-center gap-2 mb-space-md">
+              <span className="material-symbols-outlined text-primary text-[20px]">insights</span>
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">What your numbers mean</h2>
+            </div>
+            <StatCards cards={interpretProfile(p)} />
+          </div>
+
+          {/* Snapshot history: accounts get their progress log; guests get
+              the locked panel (PLAN-v2 §4.2/§6). */}
+          <div className="relative p-space-lg rounded-DEFAULT bg-surface-container-low shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="flex items-center gap-2 mb-space-md">
+              <span className="material-symbols-outlined text-primary text-[20px]">history</span>
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">Progress history</h2>
+            </div>
+            {caps.canSnapshotHistory ? (
+              snapshots === null ? (
+                <p className="font-body-sm text-body-sm text-on-surface-variant">Loading snapshots…</p>
+              ) : snapshots.length === 0 ? (
+                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                  No snapshots yet for {MODE_LABELS[mode]}. Hit "Refresh from osu!" and your first
+                  snapshot is saved — future refreshes build your progress-over-time line.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {snapshots.map((snap) => (
+                    <div key={snap.id} className="flex items-center justify-between p-2 rounded-DEFAULT bg-surface-container font-label-sm text-label-sm">
+                      <span className="text-on-surface-variant">{new Date(snap.created_at).toLocaleDateString()} {new Date(snap.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="text-primary font-bold">{snap.pp !== null ? `${fmtInt(snap.pp)} pp` : '—'}</span>
+                      <span className="text-on-surface">{snap.global_rank !== null ? `#${fmtInt(snap.global_rank)}` : '—'}</span>
+                      <span className="text-on-surface-variant">{snap.accuracy !== null ? fmtAcc(snap.accuracy) : '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              <div className="flex flex-col gap-space-sm">
+                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                  Snapshot history is account-only: guests get live stats, but their progress
+                  over time isn't kept. Create a free account and every refresh is saved here.
+                </p>
+                <LockedButton
+                  allowed={false}
+                  lockedTitle="Create a free account to keep snapshot history"
+                  className="flex items-center justify-center gap-2 px-space-md py-2.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md"
+                >
+                  View snapshot history
+                </LockedButton>
+              </div>
+            )}
+          </div>
+
+          {p.modUsage.length > 0 && (
+            <div className="relative p-space-lg rounded-DEFAULT bg-surface-container-low shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+              <div className="flex items-center gap-2 mb-space-md">
+                <span className="material-symbols-outlined text-primary text-[20px]">tune</span>
+                <h2 className="font-headline-sm text-headline-sm text-on-surface">Mod usage</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {p.modUsage.slice(0, 8).map((entry) => (
+                  <span key={entry.mod} className="px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
+                    {entry.mod} · {entry.count}
+                  </span>
+                ))}
+              </div>
+              {p.playstyleTags.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 mt-space-md mb-space-sm">
+                    <span className="material-symbols-outlined text-primary text-[20px]">sell</span>
+                    <h2 className="font-headline-sm text-headline-sm text-on-surface">Playstyle tags</h2>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {p.playstyleTags.map((tag) => (
+                      <span key={tag} className="px-3 py-1.5 rounded-full bg-primary-container/25 text-primary font-label-sm text-label-sm">{tag}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function Stats() {
+  const mode = useModeStore((s) => s.mode)
+  const { tier } = useAuth()
+  const { status, data, identity, refresh } = useProfileData(mode)
+
+  if (status === 'loading') {
+    return (
+      <AppShell
+        identity={{
+          username: identity?.username ?? 'Loading…',
+          pp: 0,
+          tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
+        }}
+      >
+        <p className="font-body-md text-body-md text-on-surface-variant">Loading your {MODE_LABELS[mode]} stats from osu!…</p>
+      </AppShell>
+    )
+  }
+  if (status !== 'ready' && status !== 'empty') return <StatsDemo />
+  if (!data) return <StatsDemo />
+
+  return (
+    <AppShell
+      identity={{
+        username: data.user.username,
+        pp: data.skillProfile.pp,
+        countryCode: data.user.country_code,
+        avatarUrl: `https://a.ppy.sh/${data.user.id}`,
+        tierLabel: tier === 'account' ? 'account' : 'guest',
+      }}
+    >
+      <StatsReal data={data} onRefresh={refresh} />
+    </AppShell>
   )
 }

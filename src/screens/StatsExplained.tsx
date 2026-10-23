@@ -1,5 +1,17 @@
 // Converted from Stitch export: stitch-raw/04-stats-explained.html
-export default function StatsExplained() {
+// M4: the exported markup below is the DEMO variant (sora_playz). The
+// real variant at the bottom renders the same reveal with the linked
+// player's own interpretation cards (§4.3) and a live mode switcher —
+// switching mode regenerates that mode's profile on the spot (§5.4).
+import { useNavigate } from 'react-router-dom'
+import StatCards from '../components/StatCards'
+import { ModePills } from '../components/AppShell'
+import { useProfileData, type ProfileData } from '../lib/profileService'
+import { useModeStore } from '../lib/modeStore'
+import { MODE_LABELS } from '../lib/mode'
+import { fmtInt, interpretProfile } from '../lib/interpretations'
+
+function StatsExplainedDemo() {
   return (
     <div className="osu-grid-bg text-slate-100 font-inter antialiased min-h-screen flex flex-col justify-between select-none relative overflow-x-hidden">
     {/* Ambient backdrop lighting */}
@@ -332,4 +344,117 @@ export default function StatsExplained() {
     {/* END: BottomStatusBar */}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Real variant (M4): the stats reveal with the player's own numbers.
+// ---------------------------------------------------------------------------
+
+function StatsExplainedReal({ data }: { data: ProfileData }) {
+  const navigate = useNavigate()
+  const mode = useModeStore((s) => s.mode)
+  const { user, skillProfile: p } = data
+
+  return (
+    <div className="osu-grid-bg text-slate-100 font-inter antialiased min-h-screen flex flex-col justify-between select-none relative overflow-x-hidden">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 ambient-glow-mania z-0"></div>
+      <header className="relative z-10 w-full px-8 py-7 flex items-center justify-between max-w-7xl mx-auto">
+        <div className="flex items-center space-x-3" data-purpose="brand-logo">
+          <div className="w-10 h-10 rounded-full bg-[#FF66AA] flex items-center justify-center shadow-[0_0_18px_rgba(255,102,170,0.65)]">
+            <span className="font-outfit font-black text-white text-base tracking-tighter lowercase">osu!</span>
+          </div>
+          <div className="font-outfit font-bold text-2xl tracking-tight flex items-center text-white">
+            <span>Rec</span>
+            <span className="text-[#FF66AA]">Osuk</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <ModePills />
+          <div className="flex items-center space-x-2 px-4 py-1.5 rounded-full bg-[#201530] border border-[#3b2959] text-xs font-medium text-slate-300 shadow-sm" data-purpose="step-indicator">
+            <span className="w-2 h-2 rounded-full bg-[#9D6BFF] shadow-[0_0_8px_#9D6BFF]"></span>
+            <span>Step 4 of 6 • Your profile</span>
+          </div>
+        </div>
+      </header>
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-4 max-w-4xl mx-auto w-full text-center">
+        <div className="flex flex-col w-full max-w-5xl mx-auto py-2 px-2 md:px-6">
+          <section className="flex flex-col items-center text-center relative mb-8">
+            <div className="relative flex items-center justify-center w-28 h-28 mb-5">
+              <div className="absolute inset-0 rounded-full border-2 border-primary animate-ping opacity-25 pointer-events-none"></div>
+              <div className="absolute -inset-2 rounded-full border border-primary-container opacity-40 animate-pulse pointer-events-none"></div>
+              <div className="w-20 h-20 rounded-full overflow-hidden shadow-xl shadow-primary-container/20 relative z-10">
+                <img className="w-full h-full object-cover" alt="" src={`https://a.ppy.sh/${user.id}`} />
+              </div>
+              <div className="absolute top-0 right-1 w-6 h-6 rounded-full bg-surface-container-highest shadow-md flex items-center justify-center">
+                <span className="material-symbols-outlined text-secondary text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
+              </div>
+            </div>
+            <div className="space-y-2 max-w-2xl">
+              <h1 className="font-headline-xl text-headline-lg md:text-headline-xl text-on-surface font-extrabold tracking-tight">Here's what your{' '}
+                <span className="text-primary-container">{MODE_LABELS[mode]}</span>{' '}profile says{' '}
+              </h1>
+              <p className="font-body-lg text-body-lg text-on-surface-variant">
+                {p.isStarter
+                  ? `No top plays in ${MODE_LABELS[mode]} yet — these are starter estimates, not your real numbers.`
+                  : `We analyzed your top ${p.topPlayCount} plays to pinpoint exactly where to focus your training.`}
+              </p>
+            </div>
+            <div className="mt-4 inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-surface-container-low shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-primary-container"></span>
+              <span className="font-label-md text-label-md text-on-surface-variant">{user.username}{user.country_code ? ` [${user.country_code}]` : ''} • {MODE_LABELS[mode]}{p.mainKeyCount ? ` ${p.mainKeyCount}K` : ''} • {fmtInt(p.pp)} pp analyzed</span>
+            </div>
+          </section>
+          <div className="mb-10 text-left">
+            <StatCards cards={interpretProfile(p)} />
+          </div>
+          <section className="flex flex-col items-center justify-center gap-3 mt-2 mb-6">
+            <button
+              className="group relative px-9 py-4 rounded-full bg-secondary text-on-secondary font-headline-sm text-headline-sm font-bold shadow-xl shadow-secondary/30 hover:shadow-secondary/50 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex items-center gap-3 cursor-pointer"
+              id="see-recommendations-btn"
+              type="button"
+              onClick={(e) => { e.stopPropagation(); navigate('/welcome-recs') }}
+            >
+              <span>See my first recommendations</span>
+              <span className="material-symbols-outlined transition-transform duration-200 group-hover:translate-x-1" style={{ fontVariationSettings: "'FILL' 1" }}>arrow_forward</span>
+            </button>
+            <div className="flex items-center gap-1.5 text-on-surface-variant text-label-sm font-label-sm opacity-70 mt-1">
+              <span>Switch modes above to build another mode's profile on the spot</span>
+            </div>
+          </section>
+        </div>
+      </main>
+      <footer className="relative z-10 w-full px-8 py-5 border-t border-[#291E3B]/70 bg-[#120B1A]/80 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex items-center justify-between text-xs">
+          <div className="flex items-center space-x-3" data-purpose="current-player-status">
+            <div className="w-8 h-8 rounded-full bg-[#2A1D3F] border border-[#44335F] flex items-center justify-center font-bold text-[11px] text-[#C9ADFF] shadow-inner">{user.country_code ?? user.username.slice(0, 2).toUpperCase()}</div>
+            <div className="text-left">
+              <div className="text-[#7A7289] text-[11px] font-medium leading-tight">Ready for player</div>
+              <div className="text-slate-200 font-semibold tracking-tight">{user.username} <span className="text-slate-400 font-normal">({fmtInt(p.pp)} pp)</span></div>
+            </div>
+          </div>
+          <nav aria-label="Onboarding Progress" className="flex items-center space-x-2" data-purpose="pagination-dots">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#FF66AA] opacity-75 cursor-default" title="Step 1 completed"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#FF66AA] opacity-75 cursor-default" title="Step 2 completed"></span>
+            <span className="w-8 h-2.5 rounded-full bg-gradient-to-r from-[#9D6BFF] to-[#FF66AA] shadow-[0_0_12px_#9D6BFF] cursor-default" title="Step 3: Current step"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#2F2145] cursor-default" title="Step 4"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#2F2145] cursor-default" title="Step 5"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#2F2145] cursor-default" title="Step 6"></span>
+          </nav>
+          <div className="text-[#7A7289] font-medium flex items-center gap-1.5" data-purpose="auto-advance-indicator">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#7EE787] animate-pulse"></span>
+            <span>Your profile is ready</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  )
+}
+
+export default function StatsExplained() {
+  const mode = useModeStore((s) => s.mode)
+  const { status, data } = useProfileData(mode)
+  if ((status === 'ready' || status === 'empty') && data) {
+    return <StatsExplainedReal data={data} />
+  }
+  return <StatsExplainedDemo />
 }
