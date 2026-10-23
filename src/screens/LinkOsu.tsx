@@ -1,5 +1,118 @@
 // Converted from Stitch export: stitch-raw/02-link-osu.html
+import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../lib/auth'
+import { useGuestStore } from '../lib/guestStore'
+import type { GameMode } from '../lib/mode'
+import { isProxyConfigured, validateOsuUsername } from '../lib/osu'
+
+type Status = { kind: 'error' | 'note'; text: string } | null
+
 export default function LinkOsu() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const linkGuest = useGuestStore((s) => s.linkGuest)
+  const [username, setUsername] = useState('sora_playz')
+  const [selectedMode, setSelectedMode] = useState<GameMode>('mania')
+  const [autoDetect, setAutoDetect] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<Status>(null)
+
+  /**
+   * Validate the entered username against osu! (when the proxy is
+   * configured) and resolve which mode the link should use.
+   * Returns null when blocked — `status` explains why, no navigation.
+   * In demo mode (proxy not configured) the entered name is accepted
+   * as-is and the Generating screen falls back to the demo profile.
+   */
+  async function resolveLink(): Promise<{
+    osuUserId: number | null
+    playmode: GameMode
+    mode: GameMode
+  } | null> {
+    const name = username.trim()
+    if (!name) {
+      setStatus({ kind: 'error', text: 'Enter your osu! username first.' })
+      return null
+    }
+    if (!isProxyConfigured) {
+      return { osuUserId: null, playmode: selectedMode, mode: selectedMode }
+    }
+    setBusy(true)
+    const res = await validateOsuUsername(name, selectedMode)
+    setBusy(false)
+    if (res.error || !res.data) {
+      setStatus({
+        kind: 'error',
+        text:
+          res.error?.kind === 'not-found'
+            ? `No osu! player named "${name}" — check the spelling and try again.`
+            : 'osu! lookup failed just now — try again in a moment.',
+      })
+      return null
+    }
+    return {
+      osuUserId: res.data.osuUserId,
+      playmode: res.data.playmode,
+      mode: autoDetect ? res.data.playmode : selectedMode,
+    }
+  }
+
+  async function handleLink(e: FormEvent) {
+    e.preventDefault()
+    if (busy) return
+    const resolved = await resolveLink()
+    if (!resolved) return
+    try {
+      window.localStorage.setItem(
+        'recosuk-pending-link',
+        JSON.stringify({
+          osuUsername: username.trim(),
+          osuUserId: resolved.osuUserId,
+          playmode: resolved.playmode,
+          selectedMode: resolved.mode,
+          accountLinked: Boolean(user),
+          linkedAt: new Date().toISOString(),
+        }),
+      )
+    } catch {
+      /* storage unavailable — Generating falls back to demo data */
+    }
+    navigate('/onboarding/generating')
+  }
+
+  async function handleGuest() {
+    if (busy) return
+    const resolved = await resolveLink()
+    if (!resolved) return
+    linkGuest({
+      osuUsername: username.trim(),
+      osuUserId: resolved.osuUserId,
+      playmode: resolved.playmode,
+      selectedMode: resolved.mode,
+    })
+    navigate('/onboarding/generating')
+  }
+
+  function handleWithoutLinking() {
+    try {
+      window.localStorage.setItem('recosuk-onboarded', '1')
+    } catch {
+      /* ignore — the entry gate just shows onboarding again */
+    }
+    navigate('/dashboard')
+  }
+
+  function pickMode(mode: GameMode) {
+    setAutoDetect(false)
+    setSelectedMode(mode)
+  }
+
+  const modeOutline = (mode: GameMode) =>
+    !autoDetect && selectedMode === mode
+      ? { outline: '2px solid #FF66AA', outlineOffset: '-2px' as const }
+      : undefined
+
   return (
     <div className="bg-grid-osu flex flex-col justify-between min-h-screen relative selection:bg-[#FF66AA] selection:text-white">
     {/* Ambient Glow Blobs */}
@@ -68,7 +181,7 @@ export default function LinkOsu() {
             </div>
             <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none">
             </div>
-            <form className="relative z-10 flex flex-col gap-6 text-left" id="osu-link-form">
+            <form className="relative z-10 flex flex-col gap-6 text-left" id="osu-link-form" onSubmit={handleLink}>
               {/* Input Group: osu! Username */}
               <div className="flex flex-col gap-2">
                 <label className="font-label-md text-label-md text-on-surface flex items-center justify-between" htmlFor="osu-username">
@@ -83,7 +196,7 @@ export default function LinkOsu() {
                     <img className="w-full h-full object-cover" data-alt="A stylized digital anime gaming avatar with headphones, vibrant magenta and deep purple backlight, neon glow in rhythm game aesthetic, detailed portrait photography style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA7eHobcIQQBAEjAgjrDPLn3jt5xtARIK0V0_qZS4tY4ZRpR-fhVPF7rqcLIl251Hfd2kXu3DP5X5X8b6lroiFx_eFF0-3s04_oUT1807VICF2BaUT2Au0wv_7ligvtQFvjSD1GkuKZ3RSvQ0zyO_nGb3K3qW6LOpaQ83AXPeVR32Zvh-WODbbKRHcVbBfRQC21kcxwZGaIxMJG5BJvMkIdC9KTfGb9PA3KV0d7mx9HpfQX3fYU7PJn" />
                   </div>
                   {/* Input Field */}
-                  <input className="w-full bg-surface-container-low text-on-surface pl-14 pr-24 py-3.5 rounded-full font-body-md text-body-md focus:outline-none focus:bg-surface-container-highest transition-colors placeholder:text-outline-variant" id="osu-username" placeholder="e.g. WhiteCat, sora_playz" type="text" value="sora_playz" />
+                  <input className="w-full bg-surface-container-low text-on-surface pl-14 pr-24 py-3.5 rounded-full font-body-md text-body-md focus:outline-none focus:bg-surface-container-highest transition-colors placeholder:text-outline-variant" id="osu-username" placeholder="e.g. WhiteCat, sora_playz" type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
                   {/* Verified Status Badge */}
                   <div className="absolute right-3.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high text-secondary font-label-sm text-label-sm">
                     <span className="material-symbols-outlined text-[15px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified
@@ -99,7 +212,7 @@ export default function LinkOsu() {
                   <span className="font-label-md text-label-md text-on-surface">Start with this mode
                   </span>
                   {/* Auto-detect Toggle Button */}
-                  <button className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-highest transition-all group" id="autodetect-toggle" type="button">
+                  <button className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-highest transition-all group" id="autodetect-toggle" type="button" onClick={() => setAutoDetect((v) => !v)} aria-pressed={autoDetect}>
                     <span className="w-3.5 h-3.5 rounded-full bg-secondary flex items-center justify-center transition-transform scale-100" id="autodetect-indicator">
                       <span className="material-symbols-outlined text-[11px] text-on-secondary font-bold">check
                       </span>
@@ -111,7 +224,7 @@ export default function LinkOsu() {
                 {/* 4 Mode Nodes Container */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {/* Standard Mode */}
-                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest transition-all text-left shadow-sm group" data-mode="standard" type="button">
+                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest transition-all text-left shadow-sm group" data-mode="standard" type="button" onClick={() => pickMode('osu')} style={modeOutline('osu')}>
                     <div className="w-10 h-10 rounded-full bg-secondary-container flex items-center justify-center text-on-surface font-headline-sm text-headline-sm shadow-md transition-transform group-hover:scale-105">
                       <span className="material-symbols-outlined text-lg">adjust
                       </span>
@@ -124,7 +237,7 @@ export default function LinkOsu() {
                     </div>
                   </button>
                   {/* Taiko Mode */}
-                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-low hover:bg-surface-container-highest transition-all text-left group" data-mode="taiko" type="button">
+                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-low hover:bg-surface-container-highest transition-all text-left group" data-mode="taiko" type="button" onClick={() => pickMode('taiko')} style={modeOutline('taiko')}>
                     <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-on-surface-variant group-hover:text-on-surface transition-transform group-hover:scale-105">
                       <span className="material-symbols-outlined text-lg">circle
                       </span>
@@ -137,7 +250,7 @@ export default function LinkOsu() {
                     </div>
                   </button>
                   {/* Catch Mode */}
-                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-low hover:bg-surface-container-highest transition-all text-left group" data-mode="catch" type="button">
+                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-low hover:bg-surface-container-highest transition-all text-left group" data-mode="catch" type="button" onClick={() => pickMode('fruits')} style={modeOutline('fruits')}>
                     <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-tertiary transition-transform group-hover:scale-105">
                       <span className="material-symbols-outlined text-lg">sports_esports
                       </span>
@@ -150,7 +263,7 @@ export default function LinkOsu() {
                     </div>
                   </button>
                   {/* Mania Mode */}
-                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-low hover:bg-surface-container-highest transition-all text-left group" data-mode="mania" type="button">
+                  <button className="mode-node flex items-center gap-3 p-2.5 rounded-full bg-surface-container-low hover:bg-surface-container-highest transition-all text-left group" data-mode="mania" type="button" onClick={() => pickMode('mania')} style={modeOutline('mania')}>
                     <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center text-primary-fixed-dim transition-transform group-hover:scale-105">
                       <span className="material-symbols-outlined text-lg">grid_view
                       </span>
@@ -165,13 +278,26 @@ export default function LinkOsu() {
                 </div>
               </div>
               {/* Primary Submit Button */}
-              <button className="relative w-full py-4 px-6 rounded-full bg-secondary-container hover:bg-on-secondary-fixed-variant active:scale-[0.98] text-on-surface font-headline-sm text-headline-sm flex items-center justify-center gap-2.5 shadow-lg shadow-secondary-container/40 transition-all cursor-pointer group" id="link-btn" type="submit">
+              <button className="relative w-full py-4 px-6 rounded-full bg-secondary-container hover:bg-on-secondary-fixed-variant active:scale-[0.98] text-on-surface font-headline-sm text-headline-sm flex items-center justify-center gap-2.5 shadow-lg shadow-secondary-container/40 transition-all cursor-pointer group" id="link-btn" type="submit" onClick={(e) => e.stopPropagation()}>
                 <span>Link my osu! account
                 </span>
                 <span className="material-symbols-outlined text-xl transition-transform group-hover:translate-x-1">arrow_forward
                 </span>
               </button>
             </form>
+            {status && (
+              <p
+                className={`relative z-10 mt-4 text-left font-body-sm text-body-sm ${status.kind === 'error' ? 'text-error' : 'text-on-surface-variant'}`}
+                role={status.kind === 'error' ? 'alert' : undefined}
+              >
+                {status.text}
+              </p>
+            )}
+            {!isProxyConfigured && !status && (
+              <p className="relative z-10 mt-4 text-left font-body-sm text-body-sm text-on-surface-variant">
+                Demo mode — Supabase isn't connected yet, so usernames aren't checked against osu! and the demo profile is used.
+              </p>
+            )}
           </div>
           {/* Dual Action Split Card */}
           <div className="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -187,7 +313,7 @@ export default function LinkOsu() {
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-4">{' '}Create a free RecOsuk account — save maps, build lists, and rate beatmaps so recommendations learn from you.{' '}
                 </p>
               </div>
-              <button className="relative z-10 w-full py-2.5 px-4 rounded-full bg-primary-container/20 hover:bg-primary-container text-on-surface font-label-md text-label-md transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm" type="button">
+              <button className="relative z-10 w-full py-2.5 px-4 rounded-full bg-primary-container/20 hover:bg-primary-container text-on-surface font-label-md text-label-md transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm" type="button" onClick={(e) => { e.stopPropagation(); navigate('/auth') }}>
                 <span className="material-symbols-outlined text-[16px]">person_add
                 </span>
                 <span>Create account
@@ -206,7 +332,7 @@ export default function LinkOsu() {
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-4">{' '}Continue as guest — get your profile and recommendations now, but saving, lists, and ratings stay locked.{' '}
                 </p>
               </div>
-              <button className="relative z-10 w-full py-2.5 px-4 rounded-full bg-surface-container-highest hover:bg-surface-bright text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm" type="button">
+              <button className="relative z-10 w-full py-2.5 px-4 rounded-full bg-surface-container-highest hover:bg-surface-bright text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm" type="button" onClick={(e) => { e.stopPropagation(); void handleGuest() }}>
                 <span className="material-symbols-outlined text-[16px]">visibility
                 </span>
                 <span>Continue as guest
@@ -216,7 +342,7 @@ export default function LinkOsu() {
           </div>
           {/* Quiet Bypass Link */}
           <div className="text-center pb-4">
-            <button className="font-body-sm text-body-sm text-outline hover:text-on-surface underline underline-offset-4 decoration-outline-variant hover:decoration-on-surface transition-all active:opacity-70" type="button">{' '}Continue without linking{' '}
+            <button className="font-body-sm text-body-sm text-outline hover:text-on-surface underline underline-offset-4 decoration-outline-variant hover:decoration-on-surface transition-all active:opacity-70" type="button" onClick={(e) => { e.stopPropagation(); handleWithoutLinking() }}>{' '}Continue without linking{' '}
             </button>
           </div>
         </div>

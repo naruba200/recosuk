@@ -1,5 +1,94 @@
 // Converted from Stitch export: stitch-raw/12-auth.html
+import { useState, type FormEvent, type MouseEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { NOT_CONFIGURED, useAuth } from '../lib/auth'
+
+type Notice = { kind: 'error' | 'note'; text: string } | null
+
+const TAB_ACTIVE =
+  'py-2.5 px-4 rounded-full font-label-md text-label-md bg-secondary-container text-on-secondary-container shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer font-bold'
+const TAB_INACTIVE =
+  'py-2.5 px-4 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-all flex items-center justify-center gap-2 cursor-pointer'
+
+const DEMO_NOTICE =
+  "Demo mode — Supabase isn't connected yet, so accounts can't be created or signed in. Connect it with docs/M1-SETUP.md, then try again."
+
 export default function Auth() {
+  const navigate = useNavigate()
+  const { signUp, signIn, configured } = useAuth()
+  const [activeTab, setActiveTab] = useState<'signup' | 'signin'>('signup')
+  const [signupEmail, setSignupEmail] = useState('sora.plays.osu@gmail.com')
+  const [signupPassword, setSignupPassword] = useState('masterKey2024!')
+  const [osuUsername, setOsuUsername] = useState('sora_playz')
+  const [signinEmail, setSigninEmail] = useState('sora.plays.osu@gmail.com')
+  const [signinPassword, setSigninPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<Notice>(null)
+
+  // Clicks on wired controls must not be double-handled by the
+  // label-based NavigationBridge in App.tsx.
+  const stop = (e: MouseEvent) => e.stopPropagation()
+
+  const oauthNotice = (e: MouseEvent) => {
+    stop(e)
+    setNotice({
+      kind: 'note',
+      text: 'osu! / GitHub sign-in arrives in a later milestone — email sign-in is the M1 path.',
+    })
+  }
+
+  async function handleSignUp(e: FormEvent) {
+    e.preventDefault()
+    if (busy) return
+    if (!configured) {
+      setNotice({ kind: 'error', text: DEMO_NOTICE })
+      return
+    }
+    setBusy(true)
+    const { error } = await signUp(signupEmail.trim(), signupPassword)
+    setBusy(false)
+    if (error) {
+      setNotice({
+        kind: 'error',
+        text: error === NOT_CONFIGURED ? DEMO_NOTICE : error,
+      })
+      return
+    }
+    // Carry the optional osu! username into the link step (guest
+    // profiles carry over the same way via the guest store).
+    if (osuUsername.trim()) {
+      try {
+        window.localStorage.setItem(
+          'recosuk-pending-link',
+          JSON.stringify({ osuUsername: osuUsername.trim() }),
+        )
+      } catch {
+        /* storage unavailable — the link step just starts blank */
+      }
+    }
+    navigate('/onboarding/link')
+  }
+
+  async function handleSignIn(e: FormEvent) {
+    e.preventDefault()
+    if (busy) return
+    if (!configured) {
+      setNotice({ kind: 'error', text: DEMO_NOTICE })
+      return
+    }
+    setBusy(true)
+    const { error } = await signIn(signinEmail.trim(), signinPassword)
+    setBusy(false)
+    if (error) {
+      setNotice({
+        kind: 'error',
+        text: error === NOT_CONFIGURED ? DEMO_NOTICE : error,
+      })
+      return
+    }
+    navigate('/onboarding/link')
+  }
+
   return (
     <div className="bg-grid-osu flex flex-col justify-between min-h-screen relative selection:bg-[#FF66AA] selection:text-white">
     {/* Ambient Glow Blobs */}
@@ -68,24 +157,32 @@ export default function Auth() {
           <div className="w-full bg-surface-container-low/95 rounded-lg p-6 sm:p-8 shadow-2xl relative z-10 backdrop-blur-xl">
             {/* Top Mode Switcher Tabs */}
             <div className="grid grid-cols-2 p-1.5 bg-surface-container-lowest rounded-full mb-8" id="auth-tab-bar">
-              <button className="py-2.5 px-4 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-all flex items-center justify-center gap-2 cursor-pointer" id="tab-signin" type="button">
+              <button className={activeTab === 'signin' ? TAB_ACTIVE : TAB_INACTIVE} id="tab-signin" type="button" onClick={(e) => { stop(e); setActiveTab('signin') }}>
                 <span className="material-symbols-outlined text-sm">login
                 </span>{' '}Sign in{' '}
               </button>
-              <button className="py-2.5 px-4 rounded-full font-label-md text-label-md bg-secondary-container text-on-secondary-container shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer font-bold" id="tab-signup" type="button">
+              <button className={activeTab === 'signup' ? TAB_ACTIVE : TAB_INACTIVE} id="tab-signup" type="button" onClick={(e) => { stop(e); setActiveTab('signup') }}>
                 <span className="material-symbols-outlined text-sm">person_add
                 </span>{' '}Create account{' '}
               </button>
             </div>
+            {notice && (
+              <p
+                className={`mb-4 text-left font-body-sm text-body-sm ${notice.kind === 'error' ? 'text-error' : 'text-tertiary'}`}
+                role="alert"
+              >
+                {notice.text}
+              </p>
+            )}
             {/* Auth Form Stage */}
-            <div className="flex flex-col" id="signup-panel">
+            <div className={activeTab === 'signup' ? 'flex flex-col' : 'hidden flex-col'} id="signup-panel">
               <div className="mb-6 text-left">
                 <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight mb-1">Create your RecOsuk account
                 </h2>
                 <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">{' '}Keep your calibrated beatmap drills, pp recommendations, and custom collections synced across devices.{' '}
                 </p>
               </div>
-              <form className="flex flex-col gap-4 text-left">
+              <form className="flex flex-col gap-4 text-left" onSubmit={handleSignUp}>
                 {/* Email Input with Inline Active Error State */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-baseline">
@@ -97,7 +194,7 @@ export default function Auth() {
                     </span>
                   </div>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md bg-error-container/20 text-on-surface focus:outline-none transition-all placeholder:text-outline" id="email-field" placeholder="you@domain.com" type="email" value="sora.plays.osu@gmail.com" />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md bg-error-container/20 text-on-surface focus:outline-none transition-all placeholder:text-outline" id="email-field" placeholder="you@domain.com" type="email" value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} />
                     <span className="material-symbols-outlined absolute left-3.5 text-error text-lg">mail
                     </span>
                     <span className="material-symbols-outlined absolute right-3.5 text-error text-lg">warning
@@ -105,7 +202,7 @@ export default function Auth() {
                   </div>
                   <div className="flex items-center gap-1.5 px-2 text-error">
                     <span className="font-label-sm text-label-sm">That email already has an account.{' '}
-                      <a className="underline hover:text-secondary-fixed font-semibold" href="#">Try signing in
+                      <a className="underline hover:text-secondary-fixed font-semibold" href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setActiveTab('signin') }}>Try signing in
                       </a>{' '}instead.
                     </span>
                   </div>
@@ -119,7 +216,7 @@ export default function Auth() {
                     </span>
                   </div>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 pr-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="password-field" placeholder="••••••••••••" type="password" value="masterKey2024!" />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 pr-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="password-field" placeholder="••••••••••••" type="password" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} />
                     <span className="material-symbols-outlined absolute left-3.5 text-outline text-lg">lock
                     </span>
                     <button className="absolute right-3.5 text-outline hover:text-on-surface transition-colors cursor-pointer p-0.5 flex items-center" title="Toggle password visibility" type="button">
@@ -156,7 +253,7 @@ export default function Auth() {
                     </div>
                   </div>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 pr-24 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="osu-username" placeholder="e.g. sora_playz" type="text" value="sora_playz" />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 pr-24 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="osu-username" placeholder="e.g. sora_playz" type="text" value={osuUsername} onChange={(e) => setOsuUsername(e.target.value)} />
                     <div className="absolute left-3 w-5 h-5 rounded-full bg-secondary-container flex items-center justify-center text-[9px] font-black text-on-secondary">{' '}o!{' '}
                     </div>
                     <div className="absolute right-3 flex items-center gap-1 bg-surface-container-high px-2 py-0.5 rounded-full">
@@ -170,7 +267,7 @@ export default function Auth() {
                   </span>
                 </div>
                 {/* Primary Submit Button */}
-                <button className="mt-3 w-full py-3.5 px-6 rounded-full bg-secondary-container text-on-secondary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-secondary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit">
+                <button className="mt-3 w-full py-3.5 px-6 rounded-full bg-secondary-container text-on-secondary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-secondary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit" onClick={stop}>
                   <span className="material-symbols-outlined text-lg">bolt
                   </span>{' '}Create account{' '}
                 </button>
@@ -185,12 +282,12 @@ export default function Auth() {
               {/* Social OAuth Suite */}
               <div className="grid grid-cols-2 gap-3">
                 {/* osu! Official OAuth */}
-                <button className="w-full py-2.5 px-3 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95" type="button">
+                <button className="w-full py-2.5 px-3 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95" type="button" onClick={oauthNotice}>
                   <div className="w-4 h-4 rounded-full bg-secondary-container flex items-center justify-center text-[8px] font-black text-on-secondary">{' '}o!{' '}
                   </div>{' '}osu! Bancho{' '}
                 </button>
                 {/* GitHub OAuth Button */}
-                <button className="w-full py-2.5 px-3 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95" type="button">
+                <button className="w-full py-2.5 px-3 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95" type="button" onClick={oauthNotice}>
                   <svg aria-hidden="true" className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
                     <path clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" fillRule="evenodd">
                     </path>
@@ -199,19 +296,19 @@ export default function Auth() {
               </div>
             </div>
             {/* Sign In Alternate State (Hidden initially via script toggle) */}
-            <div className="hidden flex-col text-left" id="signin-panel">
+            <div className={activeTab === 'signin' ? 'flex flex-col text-left' : 'hidden flex-col text-left'} id="signin-panel">
               <div className="mb-6">
                 <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight mb-1">Welcome back, player
                 </h2>
                 <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">{' '}Enter your credentials to access your skill telemetry, hit-error calibrations, and training routine.{' '}
                 </p>
               </div>
-              <form className="flex flex-col gap-4">
+              <form className="flex flex-col gap-4" onSubmit={handleSignIn}>
                 <div className="flex flex-col gap-1.5">
                   <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="signin-email">Email or osu! Username
                   </label>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-email" placeholder="sora_playz or player@osu.sh" type="text" value="sora.plays.osu@gmail.com" />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-email" placeholder="sora_playz or player@osu.sh" type="text" value={signinEmail} onChange={(e) => setSigninEmail(e.target.value)} />
                     <span className="material-symbols-outlined absolute left-3.5 text-primary text-lg">account_circle
                     </span>
                   </div>
@@ -224,12 +321,12 @@ export default function Auth() {
                     </a>
                   </div>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-pw" placeholder="Your secret key" type="password" />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-pw" placeholder="Your secret key" type="password" value={signinPassword} onChange={(e) => setSigninPassword(e.target.value)} />
                     <span className="material-symbols-outlined absolute left-3.5 text-outline text-lg">lock
                     </span>
                   </div>
                 </div>
-                <button className="mt-2 w-full py-3.5 px-6 rounded-full bg-primary-container text-on-primary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-primary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit">
+                <button className="mt-2 w-full py-3.5 px-6 rounded-full bg-primary-container text-on-primary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-primary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit" onClick={stop}>
                   <span className="material-symbols-outlined text-lg">login
                   </span>{' '}Sign in to stage{' '}
                 </button>
@@ -240,7 +337,7 @@ export default function Auth() {
                 <span className="absolute bg-surface-container-low px-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">{' '}or instant login{' '}
                 </span>
               </div>
-              <button className="w-full py-2.5 px-4 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm" type="button">
+              <button className="w-full py-2.5 px-4 rounded-full bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm" type="button" onClick={oauthNotice}>
                 <div className="w-4 h-4 rounded-full bg-secondary-container flex items-center justify-center text-[8px] font-black text-on-secondary">{' '}o!{' '}
                 </div>{' '}One-Click Bancho Login{' '}
               </button>
@@ -254,7 +351,7 @@ export default function Auth() {
                 </p>
               </div>
               <div className="flex justify-end pt-1">
-                <a className="inline-flex items-center gap-1.5 font-label-md text-label-md text-secondary hover:text-secondary-fixed hover:underline font-bold transition-colors cursor-pointer group" href="#guest-stage">
+                <a className="inline-flex items-center gap-1.5 font-label-md text-label-md text-secondary hover:text-secondary-fixed hover:underline font-bold transition-colors cursor-pointer group" href="#guest-stage" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate('/onboarding/link') }}>
                   <span>Continue as guest
                   </span>
                   <span className="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform">arrow_forward

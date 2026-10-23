@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { AuthProvider } from './lib/auth'
 import OnboardingWelcome from './screens/OnboardingWelcome'
 import LinkOsu from './screens/LinkOsu'
 import Generating from './screens/Generating'
@@ -178,6 +179,7 @@ function NavigationBridge() {
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <NavigationBridge />
       <Routes>
         <Route path="/onboarding" element={<OnboardingWelcome />} />
@@ -196,6 +198,7 @@ export default function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </AuthProvider>
     </BrowserRouter>
   )
 }
