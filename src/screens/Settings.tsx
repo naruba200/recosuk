@@ -1,4 +1,5 @@
 // Converted from Stitch export: stitch-raw/13-settings.html
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
@@ -6,11 +7,45 @@ import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
 import { useModeStore } from '../lib/modeStore'
 import { useProfileData } from '../lib/profileService'
+import { useDownloadSettings } from '../lib/downloadSettings'
+import {
+  isFileSystemAccessSupported,
+  pickSongsFolder,
+  songsFolderStore,
+} from '../lib/songsFolder'
 import { MODE_LABELS } from '../lib/mode'
 export default function Settings() {
   const { user, tier, guestSession, signOut } = useAuth()
   const mode = useModeStore((s) => s.mode)
   const { status, data, identity } = useProfileData(mode)
+  const noVideo = useDownloadSettings((s) => s.noVideo)
+  const setNoVideo = useDownloadSettings((s) => s.setNoVideo)
+  const autoCopy = useDownloadSettings((s) => s.autoCopy)
+  const setAutoCopy = useDownloadSettings((s) => s.setAutoCopy)
+  const songsFolderName = useDownloadSettings((s) => s.songsFolderName)
+  const setSongsFolderName = useDownloadSettings((s) => s.setSongsFolderName)
+  const [folderBusy, setFolderBusy] = useState(false)
+  const [folderNote, setFolderNote] = useState<string | null>(null)
+  const fsaSupported = isFileSystemAccessSupported()
+
+  const chooseFolder = async () => {
+    setFolderBusy(true)
+    setFolderNote(null)
+    const handle = await pickSongsFolder()
+    setFolderBusy(false)
+    if (handle) {
+      setSongsFolderName(handle.name)
+      setFolderNote(`Songs folder set to “${handle.name}”. New downloads copy there when auto-copy is on.`)
+    } else if (fsaSupported) {
+      setFolderNote('No folder chosen — pick one to enable the copy, or leave auto-copy off.')
+    }
+  }
+
+  const forgetFolder = async () => {
+    await songsFolderStore.forgetHandle()
+    setSongsFolderName(null)
+    setFolderNote('Songs folder forgotten. Auto-copy will ask again on the next download.')
+  }
   const navigate = useNavigate()
   const linkedName = data?.user.username ?? identity?.username ?? guestSession?.osuUsername ?? null
   const settingsIdentity = {
@@ -222,7 +257,109 @@ export default function Settings() {
                 )}
               </div>
             </div>
-            {/* SECTION 2: DOWNLOADS & CLIENT SYNC */}
+            {/* SECTION 2: DOWNLOAD OPTIONS — live preferences (QA
+                batch 2). Kept separate from the ExampleBlock sample
+                settings below: these switches change behaviour. */}
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(255,102,170,0.7)]">
+                  </span>
+                  <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">Download options
+                  </span>
+                </div>
+                <span className="font-label-sm text-label-sm text-on-surface-variant">Applies to every download button
+                </span>
+              </div>
+              <div className="flex flex-col divide-y divide-surface-container-highest/60">
+                {/* Row: Download without video */}
+                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                  <div className="flex flex-col max-w-xl">
+                    <span className="font-label-md text-label-md text-on-surface">Download without video</span>
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">
+                      Downloads the smaller no-video .osz where the mirror supports it. Today that means catboy.best (its no-video file); Beatconnect, Nerinyan and Sayobot don&apos;t publish a verified no-video form yet, so they still serve the full file, and the official osu! option is unaffected.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-label-sm text-label-sm text-on-surface-variant">{noVideo ? 'On' : 'Off'}</span>
+                    <button
+                      role="switch"
+                      aria-checked={noVideo}
+                      aria-label="Download without video"
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${noVideo ? 'bg-primary' : 'bg-surface-container-highest'}`}
+                      type="button"
+                      onClick={() => setNoVideo(!noVideo)}
+                    >
+                      <span className={`${noVideo ? 'translate-x-6' : 'translate-x-1'} pointer-events-none inline-block h-4 w-4 transform rounded-full bg-on-surface shadow transition duration-200 ease-in-out my-1`} />
+                    </button>
+                  </div>
+                </div>
+                {/* Row: Auto-copy into osu! Songs folder (item 8) */}
+                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                  <div className="flex flex-col max-w-xl">
+                    <span className="font-label-md text-label-md text-on-surface">Auto-copy downloads into osu! Songs folder</span>
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">
+                      Off by default. When on, every download is ALSO written straight into your osu! Songs folder, so the map is in-game on osu!&apos;s next launch (or press F5 in song select). Your normal browser download still happens as a backup, and a failed copy never blocks it. The desktop app (coming later) will do this natively with no browser permission dance.
+                    </span>
+                    {!fsaSupported && (
+                      <span className="font-body-sm text-body-sm text-tertiary mt-1">
+                        Your browser can&apos;t pick folders — this needs Chrome or Edge on desktop. Downloads still work normally.
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-label-sm text-label-sm text-on-surface-variant">{autoCopy ? 'On' : 'Off'}</span>
+                    <button
+                      role="switch"
+                      aria-checked={autoCopy}
+                      aria-label="Auto-copy downloads into osu! Songs folder"
+                      disabled={!fsaSupported}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${autoCopy ? 'bg-primary' : 'bg-surface-container-highest'}`}
+                      type="button"
+                      onClick={() => setAutoCopy(!autoCopy)}
+                    >
+                      <span className={`${autoCopy ? 'translate-x-6' : 'translate-x-1'} pointer-events-none inline-block h-4 w-4 transform rounded-full bg-on-surface shadow transition duration-200 ease-in-out my-1`} />
+                    </button>
+                  </div>
+                </div>
+                {/* Row: Songs folder picker */}
+                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                  <div className="flex flex-col max-w-xl">
+                    <span className="font-label-md text-label-md text-on-surface">osu! Songs folder</span>
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">
+                      {fsaSupported
+                        ? (songsFolderName
+                          ? `Chosen folder: ${songsFolderName}. RecOsuk only ever writes inside this folder.`
+                          : 'No folder chosen yet. You can pick one here, or you will be asked on your first download with auto-copy on.')
+                        : 'Folder picking is not supported in this browser.'}
+                    </span>
+                    {folderNote && (
+                      <span className="font-body-sm text-body-sm text-tertiary mt-1">{folderNote}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-space-sm flex-shrink-0">
+                    {songsFolderName && (
+                      <button
+                        className="px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-error-container/30 text-error font-label-md text-label-md transition-colors"
+                        type="button"
+                        onClick={() => void forgetFolder()}
+                      >
+                        Forget folder
+                      </button>
+                    )}
+                    <button
+                      className="px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-primary hover:text-on-primary text-on-surface transition-all font-label-md text-label-md disabled:opacity-60"
+                      type="button"
+                      disabled={!fsaSupported || folderBusy}
+                      onClick={() => void chooseFolder()}
+                    >
+                      {folderBusy ? 'Choosing…' : songsFolderName ? 'Change folder' : 'Choose osu! Songs folder'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* SECTION 3: DOWNLOADS & CLIENT SYNC */}
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
                 <div className="flex items-center gap-2.5">
@@ -386,6 +523,27 @@ export default function Settings() {
                       <span>Replay the introduction
                       </span>
                     </a>
+                  </div>
+                </div>
+                {/* Row: Get the desktop app */}
+                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                  <div className="flex flex-col">
+                    <span className="font-label-md text-label-md text-on-surface">Get the desktop app
+                    </span>
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">The Windows desktop app is coming later (native Songs-folder copy, no permission dance). See the download page — no binary yet.
+                    </span>
+                  </div>
+                  <div>
+                    <button
+                      className="inline-flex items-center gap-2 px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface transition-all font-label-md text-label-md"
+                      type="button"
+                      onClick={() => navigate('/download')}
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-tertiary">download
+                      </span>
+                      <span>View download page
+                      </span>
+                    </button>
                   </div>
                 </div>
                 {/* Row: Data Export */}

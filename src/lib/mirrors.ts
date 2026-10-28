@@ -14,11 +14,29 @@ import { seenStore } from './seenStore'
  *   Nerinyan    https://api.nerinyan.moe/d/{id}
  *   Beatconnect https://beatconnect.io/b/{id}
  *   Sayobot     https://txy1.sayobot.cn/beatmaps/download/full/{id}
+ *
+ * No-video variants (QA batch 2, researched 2026-10-29):
+ *   catboy.best https://catboy.best/d/{id}n — the `{id}n` suffix IS
+ *     catboy's no-video form: the hinai mirror FAQ
+ *     (mirror.hinamizawa.ai) documents the ecosystem's no-video
+ *     conventions and names the `{id}n` suffix "catboy style".
+ *   beatconnect / Nerinyan / Sayobot: no no-video URL shape could be
+ *     verified from a public doc actually read, so they FALL BACK to
+ *     the full file even when the no-video setting is on. The
+ *     osu-api-extended wiki confirms these hosts support a no-video
+ *     CONCEPT, but gives no URL shape — do not guess one here. If a
+ *     shape is verified later, add it with its source cited.
+ *   official: unaffected — it opens the osu! page, never a file URL.
  */
+export interface MirrorUrlOptions {
+  /** Request the mirror's no-video file variant where one is verified. */
+  noVideo?: boolean
+}
+
 export interface MirrorSource {
   id: string
   name: string
-  url: (beatmapsetId: number) => string
+  url: (beatmapsetId: number, opts?: MirrorUrlOptions) => string
 }
 
 export const MIRRORS: MirrorSource[] = [
@@ -30,7 +48,7 @@ export const MIRRORS: MirrorSource[] = [
   {
     id: 'catboy',
     name: 'catboy.best',
-    url: (id) => `https://catboy.best/d/${id}`,
+    url: (id, opts) => `https://catboy.best/d/${id}${opts?.noVideo ? 'n' : ''}`,
   },
   {
     id: 'nerinyan',

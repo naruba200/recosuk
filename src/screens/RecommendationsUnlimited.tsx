@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
+import LoadingState from '../components/LoadingState'
 import RecFiltersPanel from '../components/RecFiltersPanel'
 import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profileService'
 import { useModeStore } from '../lib/modeStore'
@@ -882,7 +883,13 @@ function RecommendationsUnlimitedDemo() {
 
 const PAGE_TAKE = 20
 
-function FeedReal({ data }: { data: ProfileData }) {
+function FeedReal({
+  data,
+  onBrowseSamples,
+}: {
+  data: ProfileData
+  onBrowseSamples: () => void
+}) {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
   const profile = data.skillProfile
@@ -906,10 +913,15 @@ function FeedReal({ data }: { data: ProfileData }) {
   }, [key, data.user.id, mode])
 
   const startSession = useCallback(
-    async (nextFilters: RecFilters, seenOverride?: SeenState) => {
+    async (
+      nextFilters: RecFilters,
+      seenOverride?: SeenState,
+      opts: { fresh?: boolean } = {},
+    ) => {
       const seen = seenOverride ?? seenStore.load(key)
       const session = new FeedSession(profile, mode, nextFilters, seen, key, (k, ids) =>
         seenStore.markMany(k, 'served', ids),
+      { fresh: opts.fresh },
       )
       sessionRef.current = session
       setItems([])
@@ -1004,7 +1016,7 @@ function FeedReal({ data }: { data: ProfileData }) {
 
   const startOver = () => {
     const seen = seenStore.load(key)
-    void startSession(filters, { ...seen, served: [], skipped: [] })
+    void startSession(filters, { ...seen, served: [], skipped: [] }, { fresh: true })
   }
 
   const downloaded = seenStore.load(key).downloaded
@@ -1058,8 +1070,12 @@ function FeedReal({ data }: { data: ProfileData }) {
             <p className="font-body-sm text-body-sm text-tertiary px-space-xs">Filters changed — feed restarted.</p>
           )}
           {error && (
-            <div className="p-space-md rounded-lg bg-surface-container-low">
+            <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
               <p className="font-body-sm text-body-sm text-error">{error}</p>
+              <div className="flex items-center gap-space-sm flex-shrink-0">
+                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void startSession(filters, undefined, { fresh: true })}>Retry</button>
+                <button className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={onBrowseSamples}>Browse sample picks</button>
+              </div>
             </div>
           )}
 
@@ -1117,11 +1133,33 @@ export default function RecommendationsUnlimited() {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
   const { status, data, identity } = useProfileData(mode)
+  // Same "continue with demo" escape hatch as Generated mode: a failed
+  // feed load still leaves the sample picks one tap away.
+  const [showDemo, setShowDemo] = useState(false)
 
+  if (showDemo) {
+    return (
+      <div>
+        <div className="flex items-center gap-space-sm px-space-xl pt-space-md">
+          <button
+            className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md"
+            type="button"
+            onClick={() => setShowDemo(false)}
+          >
+            ← Back to your feed
+          </button>
+          <span className="font-label-sm text-label-sm text-on-surface-variant">
+            Showing sample picks — your live feed is one retry away.
+          </span>
+        </div>
+        <RecommendationsUnlimitedDemo />
+      </div>
+    )
+  }
   if (status === 'loading') {
     return (
       <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: 0, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
-        <p className="font-body-md text-body-md text-on-surface-variant">Loading your profile before starting the feed…</p>
+        <LoadingState label="Loading your profile before starting the feed…" />
       </AppShell>
     )
   }
@@ -1137,7 +1175,7 @@ export default function RecommendationsUnlimited() {
         tierLabel: tier === 'account' ? 'account' : 'guest',
       }}
     >
-      <FeedReal data={data} />
+      <FeedReal data={data} onBrowseSamples={() => setShowDemo(true)} />
     </AppShell>
   )
 }

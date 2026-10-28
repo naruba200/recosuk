@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { downloadManager } from '../lib/downloadManager'
 import { MIRRORS, mirrorById, recordDownload } from '../lib/mirrors'
+import { useDownloadSettings } from '../lib/downloadSettings'
+import { attemptSongsCopy } from '../lib/songCopy'
 import { modeLabel, type GameMode } from '../lib/mode'
 
 /**
@@ -13,18 +15,33 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * manager fetches the .osz at full speed. No fetch(), no Blob
  * buffering, and no progress bar — native downloads report no
  * progress to the page, so the UI honestly says "Downloading via
- * your browser…" and then "Check your browser downloads". Nothing
- * here fakes a percentage.
+ * your browser…" while the handoff is fresh. The finished state is
+ * ICON-ONLY (QA batch 2): the button flips to a checkmark and shows
+ * no done-state text at all — the mirror name survives only in the
+ * accessible label/title, never as visible copy.
  *
- * - Main button: Auto (Beatconnect first). The download is recorded
- *   on click (success cannot be observed from the page).
+ * Songs-folder auto-copy (item 8, opt-in): when the setting is on,
+ * the button ALSO fetches the file and writes it into the user's
+ * picked Songs folder (see lib/songCopy.ts). That copy is
+ * best-effort and never blocks the browser download; a failed copy
+ * is reported honestly in the transient note, and a successful one
+ * is never claimed before the stream actually closes.
+ *
+ * - Main button: Auto (Beatconnect first; catboy first when
+ *   no-video is on). The download is recorded on click (success
+ *   cannot be observed from the page).
  * - Expand menu: pick one mirror, or the official osu! page. The
  *   official option is a plain new-tab link: osu! downloads need an
  *   osu! login session and are not available via the API, so RecOsuk
  *   cannot fetch that file itself.
  */
 
-type ButtonState = { kind: 'idle' } | { kind: 'downloading'; mirrorId: string } | { kind: 'done'; mirrorId: string }
+type CopyState = 'idle' | 'copying' | 'copied' | 'failed'
+
+type ButtonState =
+  | { kind: 'idle' }
+  | { kind: 'downloading'; mirrorId: string; noVideoApplied: boolean; copy: CopyState }
+  | { kind: 'done'; mirrorId: string; noVideoApplied: boolean; copy: CopyState }
 
 interface DownloadButtonProps {
   beatmapsetId: number
@@ -38,6 +55,8 @@ interface DownloadButtonProps {
 
 export default function DownloadButton({
   beatmapsetId,
+  artist,
+  title,
   mode,
   seenKeyValue,
   downloaded = false,
@@ -46,6 +65,9 @@ export default function DownloadButton({
   const [menuOpen, setMenuOpen] = useState(false)
   const [state, setState] = useState<ButtonState>({ kind: 'idle' })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copyRunRef = useRef(0)
+  const noVideo = useDownloadSettings((s) => s.noVideo)
+  const autoCopy = useDownloadSettings((s) => s.autoCopy)
 
   useEffect(
     () => () => {
@@ -57,13 +79,40 @@ export default function DownloadButton({
   const start = (mirrorId?: string) => {
     setMenuOpen(false)
     if (timerRef.current) clearTimeout(timerRef.current)
-    const result = downloadManager.startDownload({ beatmapsetId, mirrorId, seenKeyValue })
-    setState({ kind: 'downloading', mirrorId: result.mirrorId })
+    const result = downloadManager.startDownload({
+      beatmapsetId,
+      mirrorId,
+      seenKeyValue,
+      noVideo,
+    })
+    const copyRun = ++copyRunRef.current
+    setState({
+      kind: 'downloading',
+      mirrorId: result.mirrorId,
+      noVideoApplied: result.noVideoApplied,
+      copy: autoCopy ? 'copying' : 'idle',
+    })
     onDownloaded?.()
+    // Songs-folder auto-copy (item 8): best-effort, in addition to
+    // the browser download above. A stale resolution (user clicked
+    // another download meanwhile) must not rewrite the new state.
+    if (autoCopy) {
+      void attemptSongsCopy({ beatmapsetId, artist, title, noVideo }).then((outcome) => {
+        if (copyRunRef.current !== copyRun) return
+        const copy: CopyState = outcome.status === 'copied' ? 'copied' : outcome.status === 'failed' ? 'failed' : 'idle'
+        setState((prev) =>
+          prev.kind === 'idle' ? prev : { ...prev, copy },
+        )
+      })
+    }
     // Native downloads give the page no completion signal; resolve to
     // "done" shortly after the handoff instead of faking progress.
     timerRef.current = setTimeout(() => {
-      setState({ kind: 'done', mirrorId: result.mirrorId })
+      setState((prev) =>
+        prev.kind === 'downloading'
+          ? { kind: 'done', mirrorId: prev.mirrorId, noVideoApplied: prev.noVideoApplied, copy: prev.copy }
+          : prev,
+      )
     }, 2500)
   }
 
@@ -73,11 +122,16 @@ export default function DownloadButton({
     onDownloaded?.()
   }
 
+  // Transient handoff text only. The finished state renders NO
+  // visible text (icon-only, QA batch 2) — the mirror name is kept
+  // in the button's title/aria-label, not in on-screen copy. The one
+  // exception is an honest copy FAILURE note: a failed Songs-folder
+  // copy must be visible, never silently swallowed.
   const statusNote =
     state.kind === 'downloading'
-      ? `Downloading via your browser (${mirrorById(state.mirrorId).name}) — check your downloads`
-      : state.kind === 'done'
-        ? `.osz requested via ${mirrorById(state.mirrorId).name} — check your browser downloads`
+      ? `Downloading via your browser (${mirrorById(state.mirrorId).name}${state.noVideoApplied ? ' · no video' : ''}) — check your downloads${state.copy === 'copying' ? ' · copying to Songs folder…' : state.copy === 'copied' ? ' · copied to Songs folder' : state.copy === 'failed' ? ' · Songs-folder copy failed' : ''}`
+      : state.kind === 'done' && state.copy === 'failed'
+        ? 'Browser download started — the Songs-folder copy failed. Check Settings.'
         : null
 
   return (
@@ -85,6 +139,15 @@ export default function DownloadButton({
       <div className="flex items-center gap-1.5 relative">
         <button
           className={`w-9 h-9 rounded-full ${downloaded || state.kind === 'done' ? 'bg-surface-container-highest text-tertiary' : state.kind === 'downloading' ? 'bg-primary text-on-primary' : 'bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface'} flex items-center justify-center transition-all shadow-sm`}
+          aria-label={
+            state.kind === 'downloading'
+              ? `Download handed to your browser via ${mirrorById(state.mirrorId).name}`
+              : state.kind === 'done'
+                ? `Download requested via ${mirrorById(state.mirrorId).name} — check your browser downloads`
+                : downloaded
+                  ? 'Downloaded — click to download again'
+                  : 'Download .osz'
+          }
           title={
             state.kind === 'downloading'
               ? 'Download handed to your browser'
@@ -121,7 +184,7 @@ export default function DownloadButton({
               type="button"
               onClick={() => start()}
             >
-              Auto — Beatconnect first
+              {noVideo ? 'Auto — catboy first (no video)' : 'Auto — Beatconnect first'}
             </button>
             {MIRRORS.filter((m) => m.id !== 'official').map((mirror) => (
               <button
@@ -131,6 +194,7 @@ export default function DownloadButton({
                 onClick={() => start(mirror.id)}
               >
                 {mirror.name}
+                {noVideo && mirror.id === 'catboy' ? ' (no video)' : ''}
               </button>
             ))}
             <a
@@ -143,6 +207,9 @@ export default function DownloadButton({
               osu! official — opens osu! page (needs your osu! login)
             </a>
             <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">Full .osz set · {modeLabel(mode)} difficulty shown</span>
+            {noVideo && (
+              <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">No-video downloads use catboy&apos;s no-video file; other mirrors serve the full file.</span>
+            )}
           </div>
         )}
       </div>

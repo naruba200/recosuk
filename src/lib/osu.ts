@@ -138,9 +138,12 @@ export function createOsuClient(deps: OsuClientDeps): OsuClient {
       )
     }
 
-    const sessionToken = deps.getAuthToken ? await deps.getAuthToken() : null
+    // The auth-token fetch used to sit OUTSIDE the try/catch below: a
+    // throwing session read became an uncaught rejection in the
+    // caller's promise chain instead of a surfaced upstream error.
     let res: Response
     try {
+      const sessionToken = deps.getAuthToken ? await deps.getAuthToken() : null
       res = await fetchFn(functionUrl, {
         method: 'POST',
         headers: {
@@ -172,7 +175,14 @@ export function createOsuClient(deps: OsuClientDeps): OsuClient {
         status,
       )
     }
-    return payload?.data as T
+    // A 200 with no `data` must fail HERE as an upstream error. The
+    // old code returned `undefined`, and every downstream reader then
+    // threw its own confusing TypeError (the shape behind the
+    // Recommendations crash report) instead of the honest error panel.
+    if (!payload || payload.data === undefined) {
+      throw new OsuServiceError('upstream', 'osu-proxy returned an empty response.')
+    }
+    return payload.data
   }
 
   async function getOsuUser(

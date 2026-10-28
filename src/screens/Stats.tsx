@@ -5,6 +5,7 @@
 // the interpretation layer, top plays, and snapshot history.
 import { useState } from 'react'
 import AppShell from '../components/AppShell'
+import LoadingState from '../components/LoadingState'
 import AccBandChart from '../components/AccBandChart'
 import StatCards from '../components/StatCards'
 import LockedButton from '../components/LockedButton'
@@ -1205,7 +1206,7 @@ export default function Stats() {
           tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
         }}
       >
-        <p className="font-body-md text-body-md text-on-surface-variant">Loading your {MODE_LABELS[mode]} stats from osu!…</p>
+        <LoadingState label={`Loading your ${MODE_LABELS[mode]} stats from osu!…`} />
       </AppShell>
     )
   }

@@ -31,11 +31,20 @@ import { MIRRORS, recordDownload, type MirrorSource } from './mirrors'
 /** Mirrors that serve the .osz file directly, in preference order. */
 export const NATIVE_MIRROR_ORDER = ['beatconnect', 'catboy', 'nerinyan', 'sayobot'] as const
 
+/**
+ * Auto order when "Download without video" is on: catboy goes first,
+ * because it is the only mirror whose no-video URL form is verified
+ * (see mirrors.ts). The other mirrors still serve the full file.
+ */
+export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan', 'sayobot'] as const
+
 export interface DownloadRequest {
   beatmapsetId: number
   /** Start from this mirror only (menu pick). Omitted = Auto order. */
   mirrorId?: string
   seenKeyValue: string
+  /** Request the no-video variant where the mirror supports one. */
+  noVideo?: boolean
 }
 
 export interface DownloadResult {
@@ -43,6 +52,9 @@ export interface DownloadResult {
   status: 'started'
   /** The mirror the download was handed to. */
   mirrorId: string
+  /** True only when the handed-to mirror actually serves a no-video
+   *  file (today: catboy). Never claim a no-video copy otherwise. */
+  noVideoApplied: boolean
 }
 
 export interface DownloadManagerDeps {
@@ -74,13 +86,15 @@ export function createDownloadManager(deps: DownloadManagerDeps = {}) {
   const record = deps.record ?? recordDownload
 
   function startDownload(request: DownloadRequest): DownloadResult {
+    const order = request.noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
     const mirror = request.mirrorId
       ? mirrorByIdOrThrow(request.mirrorId)
-      : mirrorByIdOrThrow(NATIVE_MIRROR_ORDER[0])
-    startBrowserDownload(mirror.url(request.beatmapsetId))
+      : mirrorByIdOrThrow(order[0])
+    const noVideoApplied = request.noVideo === true && mirror.id === 'catboy'
+    startBrowserDownload(mirror.url(request.beatmapsetId, { noVideo: request.noVideo }))
     // Recorded on click: native downloads report no completion.
     void record(request.seenKeyValue, request.beatmapsetId, mirror.id)
-    return { status: 'started', mirrorId: mirror.id }
+    return { status: 'started', mirrorId: mirror.id, noVideoApplied }
   }
 
   return { startDownload }

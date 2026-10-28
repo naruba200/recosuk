@@ -194,7 +194,21 @@ function requireId(params: Params, key: string): string {
 
 async function runAction(params: Params): Promise<unknown> {
   const action = requireString(params, 'action')
-  const mode = requireMode(params)
+  // Mode is required ONLY by the actions whose upstream endpoint is
+  // mode-scoped. `getMostPlayed` takes no mode upstream (the osu!
+  // most_played endpoint has no mode parameter), the beatmap-pack
+  // endpoints are mode-agnostic, and `getBeatmap` is a single-map
+  // lookup — requiring mode for them 400'd every client call that
+  // (correctly) omitted it, which is how most-played silently stayed
+  // empty in every profile generation. The client still sends mode
+  // for getMostPlayed; the function simply stops demanding it.
+  const MODE_FREE_ACTIONS = new Set([
+    'getMostPlayed',
+    'getBeatmap',
+    'getBeatmapPacks',
+    'getBeatmapPack',
+  ])
+  const mode = MODE_FREE_ACTIONS.has(action) ? undefined : requireMode(params)
 
   switch (action) {
     case 'getUser': {
@@ -218,7 +232,8 @@ async function runAction(params: Params): Promise<unknown> {
     }
     case 'searchBeatmapsets': {
       const search = new URLSearchParams()
-      search.set('mode', mode)
+      // `mode` is guaranteed present here: this action is not mode-free.
+      search.set('mode', mode as GameMode)
       if (typeof params.query === 'string' && params.query.trim() !== '') {
         search.set('q', params.query)
       }
@@ -246,6 +261,17 @@ async function runAction(params: Params): Promise<unknown> {
         method: 'POST',
         body: JSON.stringify(body),
       })
+    }
+    // Beatmap packs (Collections page): osu!'s public pack listing.
+    // BeatConnect's own pack API needs a supporter key, so RecOsuk
+    // lists the public osu! packs instead and never fabricates pack
+    // metadata. Mode-free: packs span all modes.
+    case 'getBeatmapPacks': {
+      return osuFetch('/beatmaps/packs')
+    }
+    case 'getBeatmapPack': {
+      const pack = encodeURIComponent(requireString(params, 'pack'))
+      return osuFetch(`/beatmaps/packs/${pack}`)
     }
     default:
       throw new ProxyError(`Unknown action: ${action}`, 400)

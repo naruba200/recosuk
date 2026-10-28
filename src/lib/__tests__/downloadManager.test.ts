@@ -21,7 +21,7 @@ describe('downloadManager (native browser downloads)', () => {
 
     const result = manager.startDownload(REQ)
 
-    expect(result).toEqual({ status: 'started', mirrorId: 'beatconnect' })
+    expect(result).toEqual({ status: 'started', mirrorId: 'beatconnect', noVideoApplied: false })
     expect(startBrowserDownload).toHaveBeenCalledTimes(1)
     expect(startBrowserDownload).toHaveBeenCalledWith('https://beatconnect.io/b/42')
     expect(record).toHaveBeenCalledWith(REQ.seenKeyValue, 42, 'beatconnect')
@@ -33,10 +33,43 @@ describe('downloadManager (native browser downloads)', () => {
 
     const result = manager.startDownload({ ...REQ, mirrorId: 'sayobot' })
 
-    expect(result).toEqual({ status: 'started', mirrorId: 'sayobot' })
+    expect(result).toEqual({ status: 'started', mirrorId: 'sayobot', noVideoApplied: false })
     expect(startBrowserDownload).toHaveBeenCalledWith(
       'https://txy1.sayobot.cn/beatmaps/download/full/42',
     )
+  })
+
+  // No-video (QA batch 2): Auto goes to catboy first and uses its
+  // verified `{id}n` form; an explicit non-catboy pick keeps the full
+  // file and reports noVideoApplied: false honestly.
+  it('with noVideo, Auto uses catboy first with the no-video suffix', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, noVideo: true })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'catboy', noVideoApplied: true })
+    expect(startBrowserDownload).toHaveBeenCalledWith('https://catboy.best/d/42n')
+  })
+
+  it('with noVideo, an explicit beatconnect pick serves the full file', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'beatconnect', noVideo: true })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'beatconnect', noVideoApplied: false })
+    expect(startBrowserDownload).toHaveBeenCalledWith('https://beatconnect.io/b/42')
+  })
+
+  it('with noVideo, an explicit catboy pick uses the no-video suffix', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'catboy', noVideo: true })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'catboy', noVideoApplied: true })
+    expect(startBrowserDownload).toHaveBeenCalledWith('https://catboy.best/d/42n')
   })
 
   it('never calls fetch — the browser downloader does the fetching', () => {

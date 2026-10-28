@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
-import { isProxyConfigured, proxyCall, type OsuScore, type OsuUser } from './osu'
+import { isProxyConfigured, OsuServiceError, proxyCall, type OsuScore, type OsuUser } from './osu'
 import { computeSkillProfile, type MostPlayedEntry, type SkillProfile } from './skillProfile'
 import { getGuestSession, useGuestStore } from './guestStore'
 import { useAuth } from './auth'
@@ -32,14 +32,15 @@ export function getWelcomeRecs(username: string, mode: GameMode): RecCandidate[]
  * (from most-played + recent + top plays) so the recommendation engine
  * can penalise/exclude them (§13.2.4).
  */
-export function seedPlayedSets(key: string, data: ProfileData): void {
+export function seedPlayedSets(key: string, data: ProfileData | null | undefined): void {
+  if (!data) return
   const ids = new Set<number>()
-  for (const entry of data.mostPlayed) {
-    if (entry.beatmapset?.id) ids.add(entry.beatmapset.id)
-    if (entry.beatmap?.beatmapset_id) ids.add(entry.beatmap.beatmapset_id)
+  for (const entry of data.mostPlayed ?? []) {
+    if (entry?.beatmapset?.id) ids.add(entry.beatmapset.id)
+    if (entry?.beatmap?.beatmapset_id) ids.add(entry.beatmap.beatmapset_id)
   }
-  for (const play of [...data.recentPlays, ...data.topPlays]) {
-    if (play.beatmap?.beatmapset_id) ids.add(play.beatmap.beatmapset_id)
+  for (const play of [...(data.recentPlays ?? []), ...(data.topPlays ?? [])]) {
+    if (play?.beatmap?.beatmapset_id) ids.add(play.beatmap.beatmapset_id)
   }
   if (ids.size > 0) seenStore.markMany(key, 'played', [...ids])
 }
@@ -115,13 +116,22 @@ export async function generateProfile(
 ): Promise<ProfileData> {
   onStep?.('profile')
   const user = await proxyCall<OsuUser>('getUser', { username, mode })
+  // A 200 with no usable user must fail loudly here (as not-found),
+  // never slide into `user.id` reads on undefined downstream.
+  if (!user || typeof user.id !== 'number') {
+    throw new OsuServiceError('not-found', 'osu! user not found')
+  }
   onStep?.('plays')
   const [topPlays, recentPlays, mostPlayed] = await Promise.all([
     proxyCall<OsuScore[]>('getTopPlays', { userId: user.id, mode, limit: 100 }),
     proxyCall<OsuScore[]>('getRecentPlays', { userId: user.id, mode }).catch(
       () => [] as OsuScore[],
     ),
-    proxyCall<MostPlayedEntry[]>('getMostPlayed', { userId: user.id }).catch(
+    // CRASH FIX (QA batch 2): this call used to omit `mode`, and the
+    // Edge Function 400'd every profile generation (most-played was
+    // always empty). The function no longer requires mode for this
+    // action, but the client still sends it — correct either way.
+    proxyCall<MostPlayedEntry[]>('getMostPlayed', { userId: user.id, mode }).catch(
       () => [] as MostPlayedEntry[],
     ),
   ])
@@ -301,6 +311,24 @@ export function useProfileData(mode: GameMode): UseProfileData {
 
   const username = identity?.username ?? null
 
+  // Mode-change loading (QA batch 2, item 5): when the requested
+  // (username, mode) changes, drop the previous mode's data
+  // SYNCHRONOUSLY (render-phase adjustment) so screens render the
+  // loading state instead of showing stale data for a frame while
+  // the new mode loads. A cached profile for the new key renders
+  // immediately, with no fetch at all (see load() below).
+  const requestKey = username ? cacheKey(username, mode) : null
+  const [lastRequestKey, setLastRequestKey] = useState<string | null>(requestKey)
+  if (requestKey !== lastRequestKey) {
+    setLastRequestKey(requestKey)
+    const cached = requestKey ? getCachedProfile(username as string, mode) : null
+    setData(cached)
+    setStatus(
+      cached ? (cached.skillProfile.isStarter ? 'empty' : 'ready') : 'loading',
+    )
+    setError(null)
+  }
+
   const load = useCallback(
     async (force: boolean, snapshot: boolean) => {
       if (!username || !isProxyConfigured) return
@@ -311,6 +339,9 @@ export function useProfileData(mode: GameMode): UseProfileData {
         setStatus(cached.skillProfile.isStarter ? 'empty' : 'ready')
         return
       }
+      // Uncached load (new mode, or explicit refresh): clear the old
+      // mode's data so the loading state shows instead of stale rows.
+      setData(null)
       setStatus('loading')
       setError(null)
       try {

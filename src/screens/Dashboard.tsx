@@ -4,6 +4,7 @@
 // not configured. The real variant at the bottom renders the same
 // design with the linked player's live data via useProfileData().
 import AppShell from '../components/AppShell'
+import LoadingState from '../components/LoadingState'
 import AccBandChart from '../components/AccBandChart'
 import { useProfileData, type ProfileData } from '../lib/profileService'
 import { useModeStore } from '../lib/modeStore'
@@ -941,7 +942,7 @@ export default function Dashboard() {
             tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
           }}
         >
-          <p className="font-body-md text-body-md text-on-surface-variant">Loading your {MODE_LABELS[mode]} profile from osu!…</p>
+          <LoadingState label={`Loading your ${MODE_LABELS[mode]} profile from osu!…`} />
         </AppShell>
       )
     }

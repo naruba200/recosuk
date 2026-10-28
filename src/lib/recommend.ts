@@ -1,4 +1,5 @@
 import { proxyCall } from './osu'
+import { dataCache } from './dataCache'
 import type { GameMode } from './mode'
 import { modeLabel } from './mode'
 import type { SkillProfile } from './skillProfile'
@@ -157,7 +158,16 @@ export function pickDifficulty(
   mode: GameMode,
   profile: SkillProfile,
 ): SearchDifficulty | null {
-  const inMode = (set.beatmaps ?? []).filter((b) => b.mode === mode)
+  // A difficulty without a finite star rating cannot be ranked: drop
+  // it instead of letting NaN through the sort (NaN bands downstream
+  // read as a broken profile, not a crash — but a wrong one).
+  const inMode = (set?.beatmaps ?? []).filter(
+    (b) =>
+      b &&
+      b.mode === mode &&
+      typeof b.difficulty_rating === 'number' &&
+      Number.isFinite(b.difficulty_rating),
+  )
   if (inMode.length === 0) return null
   const target = profile.comfortSrMax + 0.2
   return [...inMode].sort(
@@ -181,15 +191,18 @@ export function setToCandidate(
   mode: GameMode,
   profile: SkillProfile,
 ): RecCandidate | null {
+  // Malformed search entries (null set, missing id) are skipped, not
+  // dereferenced: a single bad entry used to take down the whole list.
+  if (!set || typeof set.id !== 'number') return null
   const diff = pickDifficulty(set, mode, profile)
   if (!diff) return null
   return {
     beatmapsetId: set.id,
     beatmapId: diff.id,
-    title: set.title,
-    artist: set.artist,
-    creator: set.creator,
-    version: diff.version,
+    title: set.title ?? '',
+    artist: set.artist ?? '',
+    creator: set.creator ?? '',
+    version: diff.version ?? '',
     cover: set.covers?.card ?? set.covers?.cover,
     sr: diff.difficulty_rating,
     bpm: diff.bpm ?? set.beatmaps?.[0]?.bpm ?? 0,
@@ -198,7 +211,7 @@ export function setToCandidate(
     ar: diff.ar ?? 0,
     od: diff.od ?? 0,
     tags: splitTags(set.tags),
-    status: set.status,
+    status: set.status ?? '',
     playCount: set.play_count ?? 0,
     favouriteCount: set.favourite_count ?? 0,
     popularity: 0,
@@ -316,13 +329,14 @@ export function scoreCandidate(
     0,
     1 - Math.abs(Math.log(ppPotential / level)) / 1.6,
   )
-  const tagOverlap = profile.playstyleTags.filter((t) =>
+  const playstyleTags = profile.playstyleTags ?? []
+  const tagOverlap = playstyleTags.filter((t) =>
     c.tags.some((ct) => ct === t || ct.startsWith(t)),
   )
   const tagMatch =
-    profile.playstyleTags.length === 0
+    playstyleTags.length === 0
       ? 0.4
-      : Math.min(1, tagOverlap.length / Math.min(2, profile.playstyleTags.length))
+      : Math.min(1, tagOverlap.length / Math.min(2, playstyleTags.length))
 
   let score =
     45 * gapFit(c.sr, profile) +
@@ -362,17 +376,48 @@ export function scoreAndSort(
 // Orchestration — Generated mode
 // ---------------------------------------------------------------------------
 
+/** Search pages are cached per (query, mode, cursor) so switching
+ *  back to a mode/query already loaded renders instantly (item 5).
+ *  Explicit Regenerate/refresh passes fresh=true to bypass the read
+ *  (the fresh page still overwrites the entry). */
+const SEARCH_PAGE_TTL_MS = 5 * 60 * 1000
+
 async function fetchSearchPage(
   query: string,
   mode: GameMode,
   cursor?: string | null,
+  opts: { fresh?: boolean } = {},
 ): Promise<SearchPage> {
-  return proxyCall<SearchPage>('searchBeatmapsets', {
-    mode,
-    query,
-    cursor_string: cursor ?? undefined,
-    filters: { sort: 'plays_desc' },
-  })
+  const cacheKey = JSON.stringify(['rec-search', query, mode, cursor ?? null])
+  if (!opts.fresh) {
+    const hit = dataCache.get<SearchPage>(cacheKey)
+    if (hit) return hit
+  }
+  const page = normalizeSearchPage(
+    await proxyCall<SearchPage>('searchBeatmapsets', {
+      mode,
+      query,
+      cursor_string: cursor ?? undefined,
+      filters: { sort: 'plays_desc' },
+    }),
+  )
+  dataCache.set(cacheKey, page, SEARCH_PAGE_TTL_MS)
+  return page
+}
+
+function normalizeSearchPage(page: unknown): SearchPage {
+  // Normalize a malformed page (missing/undefined `beatmapsets`, or a
+  // non-object payload) into an empty page. Callers treat "no more
+  // results" as an honest end state; they must never dereference
+  // `undefined.beatmapsets` and crash the list.
+  if (!page || typeof page !== 'object' || !Array.isArray((page as SearchPage).beatmapsets)) {
+    const total =
+      page && typeof page === 'object' && typeof (page as SearchPage).total === 'number'
+        ? (page as SearchPage).total
+        : undefined
+    return { beatmapsets: [], cursor_string: null, total }
+  }
+  return page as SearchPage
 }
 
 export interface GenerateResult {
@@ -389,6 +434,8 @@ export async function generateRecommendations(
     filters: RecFilters
     seen?: SeenState | null
     enrichTop?: number
+    /** Bypass the search-page cache (explicit Regenerate). */
+    fresh?: boolean
   },
 ): Promise<GenerateResult> {
   const queries = buildCandidateQueries(profile, mode, opts.filters)
@@ -399,11 +446,14 @@ export async function generateRecommendations(
     if (bySet.size >= 150) break
     let cursor: string | null | undefined = undefined
     for (let page = 0; page < 2; page++) {
-      const result = await fetchSearchPage(query, mode, cursor)
+      const result = await fetchSearchPage(query, mode, cursor, { fresh: opts.fresh })
       if (totalMatched === null && typeof result.total === 'number') {
         totalMatched = result.total
       }
-      for (const set of result.beatmapsets ?? []) bySet.set(set.id, set)
+      for (const set of result.beatmapsets ?? []) {
+        if (!set || typeof set.id !== 'number') continue
+        bySet.set(set.id, set)
+      }
       cursor = result.cursor_string
       if (!cursor) break
     }
@@ -435,7 +485,7 @@ export async function generateRecommendations(
             'getDifficultyAttributes',
             { beatmapId: c.beatmapId, mode },
           )
-          const sr = res.attributes?.star_rating
+          const sr = res?.attributes?.star_rating
           if (typeof sr === 'number' && sr > 0) {
             return { ...c, sr, ppPotential: estimatePp(sr, c.lengthSec, mode) }
           }
@@ -479,6 +529,7 @@ export class FeedSession {
   private seen: SeenState
   private seenKeyValue: string
   private markServed: (key: string, ids: number[]) => void
+  private fresh: boolean
 
   constructor(
     profile: SkillProfile,
@@ -487,6 +538,7 @@ export class FeedSession {
     seen: SeenState,
     seenKeyValue: string,
     markServed: (key: string, ids: number[]) => void,
+    opts: { fresh?: boolean } = {},
   ) {
     this.profile = profile
     this.mode = mode
@@ -494,6 +546,7 @@ export class FeedSession {
     this.seen = seen
     this.seenKeyValue = seenKeyValue
     this.markServed = markServed
+    this.fresh = opts.fresh ?? false
     this.queries = buildCandidateQueries(profile, mode, filters)
   }
 
@@ -513,12 +566,14 @@ export class FeedSession {
           this.queries[this.queryIndex],
           this.mode,
           this.cursor,
+          { fresh: this.fresh },
         )
         pages += 1
         if (this.totalMatched === null && typeof result.total === 'number') {
           this.totalMatched = result.total
         }
         for (const set of result.beatmapsets ?? []) {
+          if (!set || typeof set.id !== 'number') continue
           if (this.servedIds.has(set.id)) continue
           if (isHardSeen(this.seen, set.id) && !this.seen.served.includes(set.id)) continue
           if (this.seen.served.includes(set.id)) continue

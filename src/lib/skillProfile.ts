@@ -207,7 +207,7 @@ export function computeSkillProfile(
     generatedAt: now.toISOString(),
   }
 
-  const plays = (topPlays ?? []).filter((p) => p.beatmap)
+  const plays = (topPlays ?? []).filter((p) => p && p.beatmap)
   if (plays.length === 0) {
     const d = STARTER_DEFAULTS[mode]
     return {
@@ -233,9 +233,22 @@ export function computeSkillProfile(
     }
   }
 
-  const srs = plays.map((p) => p.beatmap!.difficulty_rating).sort((a, b) => a - b)
-  const comfortSrMin = round1(percentile(srs, 0.25))
-  const comfortSrMax = round1(percentile(srs, 0.75))
+  // Calibration needs star ratings. Plays whose beatmap lacks a finite
+  // difficulty_rating carry no calibration signal — a malformed
+  // top-plays payload used to poison every band with NaN. When no
+  // play has one, fall back to the starter band values while keeping
+  // the real play count, tags, and stats, so the profile stays honest
+  // about what it actually knows.
+  const srPlays = plays.filter(
+    (p) =>
+      typeof p.beatmap!.difficulty_rating === 'number' &&
+      Number.isFinite(p.beatmap!.difficulty_rating),
+  )
+  const srs = srPlays.map((p) => p.beatmap!.difficulty_rating).sort((a, b) => a - b)
+  const comfortSrMin =
+    srs.length > 0 ? round1(percentile(srs, 0.25)) : STARTER_DEFAULTS[mode].comfortSrMin
+  const comfortSrMax =
+    srs.length > 0 ? round1(percentile(srs, 0.75)) : STARTER_DEFAULTS[mode].comfortSrMax
 
   const inComfort = plays.filter(
     (p) =>
@@ -247,7 +260,8 @@ export function computeSkillProfile(
   const bands = accuracyBandsBySr(plays)
   // Ceiling: first band above the comfort range whose accuracy falls at
   // least 4 points below the comfort-band accuracy.
-  let srCeiling = round1(comfortSrMax + 0.3)
+  let srCeiling =
+    srs.length > 0 ? round1(comfortSrMax + 0.3) : STARTER_DEFAULTS[mode].srCeiling
   for (const band of bands) {
     if (band.min >= comfortSrMax && band.avgAccuracy <= comfortAccuracy - 4) {
       srCeiling = band.min

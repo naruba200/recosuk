@@ -104,6 +104,34 @@ describe('osu client — response mapping (mocked fetch)', () => {
     const result = await client.getOsuUser('sora_playz', 'osu')
     expect(result.error?.kind).toBe('upstream')
   })
+
+  it('maps a 200 with no data to upstream instead of returning undefined downstream', async () => {
+    // CRASH FIX (QA batch 2): the old code returned payload?.data
+    // unchecked, so an empty 200 became downstream TypeErrors in the
+    // Recommendations path. The client must fail loudly here.
+    const fetchFn: FetchFn = async () => jsonResponse(200, {})
+    const client = createOsuClient({ ...CONFIG, fetchFn })
+    const result = await client.getOsuUser('sora_playz', 'osu')
+    expect(result.data).toBeNull()
+    expect(result.error?.kind).toBe('upstream')
+  })
+
+  it('maps a throwing auth-token read to upstream instead of an uncaught rejection', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () =>
+      jsonResponse(200, { data: { id: 1, username: 'x', playmode: 'osu' } }),
+    )
+    const client = createOsuClient({
+      ...CONFIG,
+      fetchFn,
+      getAuthToken: async () => {
+        throw new Error('session storage corrupt')
+      },
+    })
+    const result = await client.getOsuUser('x', 'osu')
+    expect(result.data).toBeNull()
+    expect(result.error?.kind).toBe('upstream')
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
 })
 
 describe('validateOsuUsername (module client, env unset)', () => {

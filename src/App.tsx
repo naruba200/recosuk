@@ -14,10 +14,12 @@ import Stats from './screens/Stats'
 import Recommendations from './screens/Recommendations'
 import RecommendationsUnlimited from './screens/RecommendationsUnlimited'
 import Mirror from './screens/Mirror'
+import Collections from './screens/Collections'
 import Lists from './screens/Lists'
 import History from './screens/History'
 import Auth from './screens/Auth'
 import Settings from './screens/Settings'
+import Download from './screens/Download'
 
 /**
  * Entry choice: `/` is a first-visit gate, and it always REDIRECTS —
@@ -188,6 +190,7 @@ function NavigationBridge() {
         else if (text.includes('dashboard')) to = '/dashboard'
         else if (text.includes('recommendations')) to = '/recommendations'
         else if (text.includes('mirror')) to = '/mirror'
+        else if (text.includes('collections')) to = '/collections'
         else if (text === 'stats' || text.endsWith(' stats') || text.startsWith('stats ')) to = '/stats'
         else if (text.includes('your lists') || text === 'lists' || text.endsWith(' lists')) to = '/lists'
         else if (text.includes('history')) to = '/history'
@@ -224,9 +227,11 @@ export default function App() {
         <Route path="/stats" element={<RequireSession><Stats /></RequireSession>} />
         <Route path="/recommendations" element={<RequireSession><RecommendationsPage /></RequireSession>} />
         <Route path="/mirror" element={<RequireSession><Mirror /></RequireSession>} />
+        <Route path="/collections" element={<RequireSession><Collections /></RequireSession>} />
         <Route path="/lists" element={<RequireSession><Lists /></RequireSession>} />
         <Route path="/history" element={<RequireSession><History /></RequireSession>} />
         <Route path="/auth" element={<Auth />} />
+        <Route path="/download" element={<Download />} />
         <Route path="/settings" element={<RequireSession><Settings /></RequireSession>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

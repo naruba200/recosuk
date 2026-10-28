@@ -13,6 +13,7 @@ export const PROTECTED_PATHS = [
   '/stats',
   '/recommendations',
   '/mirror',
+  '/collections',
   '/lists',
   '/history',
   '/settings',

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
+import LoadingState from '../components/LoadingState'
 import RecFiltersPanel from '../components/RecFiltersPanel'
 import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profileService'
 import { useModeStore } from '../lib/modeStore'
@@ -788,7 +789,13 @@ function RecommendationsDemo() {
 // Real variant (M3): Generated mode — fixed top-N from the windowed pool.
 // ---------------------------------------------------------------------------
 
-function RecommendationsReal({ data }: { data: ProfileData }) {
+function RecommendationsReal({
+  data,
+  onBrowseSamples,
+}: {
+  data: ProfileData
+  onBrowseSamples: () => void
+}) {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
   const profile = data.skillProfile
@@ -809,7 +816,7 @@ function RecommendationsReal({ data }: { data: ProfileData }) {
   }, [key, data.user.id, mode])
 
   const generate = useCallback(
-    async (nextFilters: RecFilters, nextCount: number) => {
+    async (nextFilters: RecFilters, nextCount: number, opts: { fresh?: boolean } = {}) => {
       const run = ++runRef.current
       setBusy(true)
       setError(null)
@@ -819,6 +826,7 @@ function RecommendationsReal({ data }: { data: ProfileData }) {
           count: nextCount,
           filters: nextFilters,
           seen,
+          fresh: opts.fresh,
         })
         if (runRef.current !== run) return
         setItems(result.items)
@@ -838,11 +846,15 @@ function RecommendationsReal({ data }: { data: ProfileData }) {
     [key, mode, profile],
   )
 
-  // (Re)generate when the profile/mode lands or changes.
+  // (Re)generate when the profile/mode lands or changes. The old
+  // mode's rows are cleared first (item 5): showing them as if
+  // current while the new mode generates would be stale data.
   useEffect(() => {
     const fresh = defaultFiltersFor(profile)
     setFilters(fresh)
     setDraft(fresh)
+    setItems([])
+    setTotalMatched(null)
     void generate(fresh, count)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, mode])
@@ -887,7 +899,7 @@ function RecommendationsReal({ data }: { data: ProfileData }) {
             id="regenerate-btn"
             type="button"
             disabled={busy}
-            onClick={() => void generate(filters, count)}
+            onClick={() => void generate(filters, count, { fresh: true })}
           >
             <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
             <span>{busy ? 'Generating…' : 'Regenerate'}</span>
@@ -923,13 +935,16 @@ function RecommendationsReal({ data }: { data: ProfileData }) {
           </div>
 
           {error && (
-            <div className="p-space-md rounded-lg bg-surface-container-low flex items-center justify-between gap-space-md">
+            <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
               <p className="font-body-sm text-body-sm text-error">{error}</p>
-              <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count)}>Retry</button>
+              <div className="flex items-center gap-space-sm flex-shrink-0">
+                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count, { fresh: true })}>Retry</button>
+                <button className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={onBrowseSamples}>Browse sample picks</button>
+              </div>
             </div>
           )}
           {busy && items.length === 0 && !error && (
-            <p className="font-body-md text-body-md text-on-surface-variant px-space-xs">Searching osu! and scoring your window…</p>
+            <LoadingState label="Searching osu! and scoring your window…" />
           )}
           {!busy && !error && items.length === 0 && (
             <p className="font-body-md text-body-md text-on-surface-variant px-space-xs">
@@ -957,11 +972,33 @@ export default function Recommendations() {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
   const { status, data, identity } = useProfileData(mode)
+  // "Continue with demo": when generation itself fails, the user can
+  // still browse the sample picks instead of staring at an error.
+  const [showDemo, setShowDemo] = useState(false)
 
+  if (showDemo) {
+    return (
+      <div>
+        <div className="flex items-center gap-space-sm px-space-xl pt-space-md">
+          <button
+            className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md"
+            type="button"
+            onClick={() => setShowDemo(false)}
+          >
+            ← Back to your recommendations
+          </button>
+          <span className="font-label-sm text-label-sm text-on-surface-variant">
+            Showing sample picks — your live recommendations are one retry away.
+          </span>
+        </div>
+        <RecommendationsDemo />
+      </div>
+    )
+  }
   if (status === 'loading') {
     return (
       <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: 0, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
-        <p className="font-body-md text-body-md text-on-surface-variant">Loading your profile before generating recommendations…</p>
+        <LoadingState label="Loading your profile before generating recommendations…" />
       </AppShell>
     )
   }
@@ -977,7 +1014,7 @@ export default function Recommendations() {
         tierLabel: tier === 'account' ? 'account' : 'guest',
       }}
     >
-      <RecommendationsReal data={data} />
+      <RecommendationsReal data={data} onBrowseSamples={() => setShowDemo(true)} />
     </AppShell>
   )
 }

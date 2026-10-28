@@ -27,6 +27,7 @@ const NAV: { path: string; icon: string; label: string }[] = [
   { path: 'stats', icon: 'insights', label: 'Stats' },
   { path: 'recommendations', icon: 'auto_awesome', label: 'Recommendations' },
   { path: 'mirror', icon: 'compare_arrows', label: 'Mirror' },
+  { path: 'collections', icon: 'inventory_2', label: 'Collections' },
   { path: 'lists', icon: 'queue_music', label: 'Lists' },
   { path: 'history', icon: 'history', label: 'History' },
   { path: 'settings', icon: 'tune', label: 'Settings' },
@@ -227,6 +228,14 @@ export default function AppShell({
           </div>
           <ModePills />
           <div className="flex items-center gap-space-md">
+            <NavLink
+              to="/download"
+              title="Get the RecOsuk app"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high hover:bg-primary hover:text-on-primary text-on-surface font-label-md text-label-md transition-all"
+            >
+              <span className="material-symbols-outlined text-[16px]">download</span>
+              <span>Get the app</span>
+            </NavLink>
             <HeaderAuthControl />
             <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm">
               <span className="material-symbols-outlined text-[16px] text-tertiary">sync</span>

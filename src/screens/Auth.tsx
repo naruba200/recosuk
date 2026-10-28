@@ -30,7 +30,6 @@ export default function Auth() {
   // in, which read as a mock page). Placeholders only.
   const [signupEmail, setSignupEmail] = useState('')
   const [signupPassword, setSignupPassword] = useState('')
-  const [osuUsername, setOsuUsername] = useState('')
   const [signinEmail, setSigninEmail] = useState('')
   const [signinPassword, setSigninPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -55,6 +54,17 @@ export default function Auth() {
       setNotice({ kind: 'error', text: DEMO_NOTICE })
       return
     }
+    // The button is never input-disabled (QA batch 2: it read as
+    // permanently greyed out); invalid input is reported here, in the
+    // same notice area real Supabase errors use.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(signupEmail.trim())) {
+      setNotice({ kind: 'error', text: 'Enter a valid email address.' })
+      return
+    }
+    if (signupPassword.length < 8) {
+      setNotice({ kind: 'error', text: 'Password needs at least 8 characters.' })
+      return
+    }
     setBusy(true)
     const { error } = await signUp(signupEmail.trim(), signupPassword)
     setBusy(false)
@@ -65,18 +75,9 @@ export default function Auth() {
       })
       return
     }
-    // Carry the optional osu! username into the link step (guest
-    // profiles carry over the same way via the guest store).
-    if (osuUsername.trim()) {
-      try {
-        window.localStorage.setItem(
-          'recosuk-pending-link',
-          JSON.stringify({ osuUsername: osuUsername.trim() }),
-        )
-      } catch {
-        /* storage unavailable — the link step just starts blank */
-      }
-    }
+    // No osu! username is collected here (QA batch 2): it is entered
+    // exactly once, on the Link step — the Link screen is the single
+    // source for the linked username.
     navigate('/onboarding/link')
   }
 
@@ -260,32 +261,15 @@ export default function Auth() {
                     )}
                   </div>
                 </div>
-                {/* osu! Username Link Field */}
-                <div className="flex flex-col gap-1.5 mt-1">
-                  <div className="flex justify-between items-baseline">
-                    <label className="font-label-md text-label-md text-on-surface font-semibold flex items-center gap-1.5" htmlFor="osu-username">{' '}osu! Username{' '}
-                      <span className="text-[10px] px-1.5 py-0.2 bg-surface-container-high rounded text-on-surface-variant font-medium">Bancho ID
-                      </span>
-                    </label>
-                    <div className="flex items-center gap-1 text-tertiary font-label-sm text-label-sm">
-                      <span className="w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse">
-                      </span>
-                      <span>Bancho Ready
-                      </span>
-                    </div>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="osu-username" placeholder="Your osu! username" type="text" value={osuUsername} onChange={(e) => setOsuUsername(e.target.value)} />
-                    <div className="absolute left-3 w-5 h-5 rounded-full bg-secondary-container flex items-center justify-center text-[9px] font-black text-on-secondary">{' '}o!{' '}
-                    </div>
-                  </div>
-                  <span className="font-label-sm text-label-sm text-outline px-2">{' '}Optional now — you can link later, and guest profiles carry over automatically.{' '}
-                  </span>
-                </div>
-                {/* Primary Submit Button */}
-                <button className="mt-3 w-full py-3.5 px-6 rounded-full bg-secondary-container text-on-secondary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-secondary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit" onClick={stop}>
+                {/* Primary Submit Button — always visibly enabled
+                    except while the request is in flight (QA batch 2:
+                    the muted secondary-container styling read as a
+                    permanently disabled button). Sign-up collects
+                    email + password only; the osu! username is
+                    entered once, on the Link step. */}
+                <button className="mt-3 w-full py-3.5 px-6 rounded-full bg-primary text-on-primary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-primary/20 flex items-center justify-center gap-2 cursor-pointer font-bold disabled:opacity-60 disabled:cursor-not-allowed" type="submit" onClick={stop} disabled={busy}>
                   <span className="material-symbols-outlined text-lg">bolt
-                  </span>{' '}Create account{' '}
+                  </span>{busy ? 'Creating account…' : 'Create account'}
                 </button>
               </form>
               {/* Divider with Beatmap Grid Dot */}

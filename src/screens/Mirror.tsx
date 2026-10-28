@@ -3,10 +3,11 @@
 // rendered unchanged when the proxy is not configured. The real
 // variant at the bottom wires the search to the osu! API via the
 // proxy, with mode tabs (incl. All) and real mirror download links.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
-import { isProxyConfigured, proxyCall } from '../lib/osu'
+import LoadingState from '../components/LoadingState'
+import { isProxyConfigured } from '../lib/osu'
 import { GAME_MODES, MODE_LABELS, type GameMode } from '../lib/mode'
 import { useModeStore } from '../lib/modeStore'
 import { computeSkillProfile } from '../lib/skillProfile'
@@ -15,6 +16,20 @@ import {
   type RecCandidate,
   type SearchPage,
 } from '../lib/recommend'
+import {
+  buildMirrorQueryText,
+  DEFAULT_MIRROR_SORT,
+  defaultMirrorFilters,
+  fetchMirrorPage,
+  MIRROR_GENRES,
+  MIRROR_LANGUAGES,
+  MIRROR_SORTS,
+  MIRROR_STATUSES,
+  mirrorCandidateMatches,
+  type MirrorFilters,
+  type MirrorSort,
+  type RangeFilter,
+} from '../lib/mirrorSearch'
 import { seenKey, seenStore } from '../lib/seenStore'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
@@ -789,47 +804,106 @@ function MirrorReal() {
   const guestSession = useGuestStore((s) => s.session)
   const [tab, setTab] = useState<MirrorTab>(globalMode)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [sort, setSort] = useState<MirrorSort>(DEFAULT_MIRROR_SORT)
+  const [filters, setFilters] = useState<MirrorFilters>(() => defaultMirrorFilters())
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [results, setResults] = useState<MirrorResult[]>([])
   const [total, setTotal] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loadWarning, setLoadWarning] = useState<string | null>(null)
   const [downloadedTick, setDownloadedTick] = useState(0)
+  const [cursors, setCursors] = useState<Partial<Record<GameMode, string | null>>>({})
+  const [exhausted, setExhausted] = useState<Partial<Record<GameMode, boolean>>>({})
   const runRef = useRef(0)
-  const debounceRef = useRef<number | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const loadingMoreRef = useRef(false)
 
   const username = guestSession?.osuUsername ?? null
   const key = seenKey(tier, username ?? 'mirror')
+  const queryText = useMemo(
+    () => buildMirrorQueryText(debouncedQuery, filters),
+    [debouncedQuery, filters],
+  )
+  const searchedModes: GameMode[] = tab === 'all' ? [...GAME_MODES] : [tab]
+  const allExhausted =
+    results.length > 0 && searchedModes.every((m) => exhausted[m] === true)
 
-  const runSearch = useCallback(
-    async (q: string, activeTab: MirrorTab) => {
+  const pageToResults = useCallback(
+    (
+      pages: { mode: GameMode; page: SearchPage }[],
+      into: Map<number, MirrorResult>,
+    ): Map<number, MirrorResult> => {
+      for (const { mode: m, page } of pages) {
+        const profile = neutralProfile(m)
+        for (const set of page.beatmapsets ?? []) {
+          if (!set || typeof set.id !== 'number' || into.has(set.id)) continue
+          const candidate = setToCandidate(set, m, profile)
+          if (!candidate || !mirrorCandidateMatches(candidate, filters)) continue
+          candidate.reason = `${set.status} · ${(set.play_count ?? 0).toLocaleString('en-US')} plays · ${(set.favourite_count ?? 0).toLocaleString('en-US')} favourites`
+          into.set(set.id, { candidate, mode: m })
+        }
+      }
+      return into
+    },
+    [filters],
+  )
+
+  // Fresh search: any change to tab/sort/filters/query restarts the
+  // list from the first cursor page. Cached pages (item 5) render
+  // immediately; Refresh bypasses the cache.
+  const runFreshSearch = useCallback(
+    async (opts: { fresh: boolean; queryText?: string }) => {
       const run = ++runRef.current
+      // The Search button passes the live input text: the debounced
+      // query may still hold the previous keystrokes.
+      const effectiveQueryText = opts.queryText ?? queryText
       setBusy(true)
       setError(null)
+      setLoadWarning(null)
+      setResults([])
+      setTotal(null)
+      setCursors({})
+      setExhausted({})
       try {
-        // The proxy search is per-mode (§8), so "All" runs one search
-        // per mode and merges, deduped by beatmapset id.
-        const modes: GameMode[] = activeTab === 'all' ? [...GAME_MODES] : [activeTab]
-        const merged = new Map<number, MirrorResult>()
-        let totalSum = 0
-        for (const m of modes) {
-          const page = await proxyCall<SearchPage>('searchBeatmapsets', {
+        const modes: GameMode[] = tab === 'all' ? [...GAME_MODES] : [tab]
+        const settled = await Promise.allSettled(
+          modes.map(async (m) => ({
             mode: m,
-            query: q.trim() || undefined,
-            filters: { sort: 'plays_desc' },
-          })
-          if (typeof page.total === 'number') totalSum += page.total
-          const profile = neutralProfile(m)
-          for (const set of page.beatmapsets ?? []) {
-            if (merged.has(set.id)) continue
-            const candidate = setToCandidate(set, m, profile)
-            if (!candidate) continue
-            candidate.reason = `${set.status} · ${(set.play_count ?? 0).toLocaleString('en-US')} plays · ${(set.favourite_count ?? 0).toLocaleString('en-US')} favourites`
-            merged.set(set.id, { candidate, mode: m })
-          }
-        }
+            page: await fetchMirrorPage(
+              { mode: m, queryText: effectiveQueryText, filters, sort },
+              { fresh: opts.fresh },
+            ),
+          })),
+        )
         if (runRef.current !== run) return
+        let totalSum = 0
+        let failures = 0
+        const fulfilled: { mode: GameMode; page: SearchPage }[] = []
+        const nextCursors: Partial<Record<GameMode, string | null>> = {}
+        const nextExhausted: Partial<Record<GameMode, boolean>> = {}
+        for (const s of settled) {
+          if (s.status === 'rejected') {
+            failures += 1
+            continue
+          }
+          fulfilled.push(s.value)
+          if (typeof s.value.page.total === 'number') totalSum += s.value.page.total
+          nextCursors[s.value.mode] = s.value.page.cursor_string ?? null
+          nextExhausted[s.value.mode] = !s.value.page.cursor_string
+        }
+        const merged = pageToResults(fulfilled, new Map())
+        setCursors(nextCursors)
+        setExhausted(nextExhausted)
         setResults([...merged.values()])
         setTotal(totalSum > 0 ? totalSum : null)
+        if (failures > 0 && merged.size === 0) {
+          setError('Mirror search failed just now — osu! or the proxy may be busy. Try again.')
+        } else if (failures > 0) {
+          setLoadWarning('Some modes failed to load — showing the ones that did.')
+        }
       } catch {
         if (runRef.current !== run) return
         setError('Mirror search failed just now — osu! or the proxy may be busy. Try again.')
@@ -838,7 +912,7 @@ function MirrorReal() {
         if (runRef.current === run) setBusy(false)
       }
     },
-    [],
+    [tab, queryText, filters, sort, pageToResults],
   )
 
   // Follow the global mode when it changes elsewhere (top-bar pills).
@@ -846,19 +920,75 @@ function MirrorReal() {
     setTab(globalMode)
   }, [globalMode])
 
-  // Initial + tab searches run immediately; typing is debounced.
+  // Typing is debounced; filter/sort/tab changes search immediately
+  // through the effect below (they change queryText/filters/sort).
   useEffect(() => {
-    void runSearch(query, tab)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 500)
+    return () => window.clearTimeout(timer)
+  }, [query])
 
-  const onQueryChange = (value: string) => {
-    setQuery(value)
-    if (debounceRef.current) window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => {
-      void runSearch(value, tab)
-    }, 500)
-  }
+  useEffect(() => {
+    void runFreshSearch({ fresh: false })
+  }, [runFreshSearch])
+
+  // Infinite scroll: the sentinel loads the next cursor page per
+  // mode and appends, deduped. Changing anything above resets the
+  // list and cursors (fresh search), so the feed never mixes pages
+  // from two different filter sets.
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || busy) return
+    const modes = searchedModes.filter((m) => !exhausted[m])
+    if (modes.length === 0) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    const run = runRef.current
+    try {
+      const settled = await Promise.allSettled(
+        modes.map(async (m) => ({
+          mode: m,
+          page: await fetchMirrorPage({
+            mode: m,
+            queryText,
+            filters,
+            sort,
+            cursor: cursors[m] ?? null,
+          }),
+        })),
+      )
+      if (runRef.current !== run) return
+      const fulfilled: { mode: GameMode; page: SearchPage }[] = []
+      const nextCursors: Partial<Record<GameMode, string | null>> = {}
+      const nextExhausted: Partial<Record<GameMode, boolean>> = {}
+      for (const s of settled) {
+        if (s.status !== 'fulfilled') continue
+        fulfilled.push(s.value)
+        nextCursors[s.value.mode] = s.value.page.cursor_string ?? null
+        nextExhausted[s.value.mode] = !s.value.page.cursor_string
+      }
+      setResults((prev) => {
+        const merged = new Map(prev.map((r) => [r.candidate.beatmapsetId, r]))
+        return [...pageToResults(fulfilled, merged).values()]
+      })
+      setCursors((prev) => ({ ...prev, ...nextCursors }))
+      setExhausted((prev) => ({ ...prev, ...nextExhausted }))
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [busy, searchedModes, exhausted, cursors, queryText, filters, sort, pageToResults])
+
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMore()
+      },
+      { rootMargin: '600px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loadMore, results.length])
 
   const pickTab = (next: MirrorTab) => {
     setTab(next)
@@ -866,6 +996,26 @@ function MirrorReal() {
     // the global mode; "All" is a Mirror-local view and leaves it be.
     if (next !== 'all') setGlobalMode(next)
   }
+
+  const updateFilters = (patch: Partial<MirrorFilters>) =>
+    setFilters((f) => ({ ...f, ...patch }))
+
+  const updateRange = (field: 'sr' | 'bpm' | 'lengthSec' | 'ar' | 'od' | 'hp' | 'cs', range: RangeFilter) =>
+    updateFilters({ [field]: range } as Partial<MirrorFilters>)
+
+  const clearFilters = () => {
+    setFilters(defaultMirrorFilters())
+    setSort(DEFAULT_MIRROR_SORT)
+  }
+
+  const filtersActive =
+    filters.status !== 'any' ||
+    filters.genre !== 0 ||
+    filters.language !== 0 ||
+    filters.creator.trim() !== '' ||
+    [filters.sr, filters.bpm, filters.lengthSec, filters.ar, filters.od, filters.hp, filters.cs].some(
+      (r) => r.min !== null || r.max !== null,
+    )
 
   const downloaded = seenStore.load(key).downloaded
   const sessionDownloads = results.filter((r) => downloaded.includes(r.candidate.beatmapsetId))
@@ -915,19 +1065,135 @@ function MirrorReal() {
               placeholder="Search beatmaps, artists, or mappers"
               type="text"
               value={query}
-              onChange={(e) => onQueryChange(e.target.value)}
+              onChange={(e) => setQuery(e.target.value)}
             />
             <div className="absolute right-1.5 flex items-center">
               <button
                 className="px-space-lg h-9 rounded-full bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1 shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all"
                 type="button"
-                onClick={() => void runSearch(query, tab)}
+                onClick={() => {
+                  setDebouncedQuery(query)
+                  void runFreshSearch({
+                    fresh: false,
+                    queryText: buildMirrorQueryText(query, filters),
+                  })
+                }}
               >
                 <span className="material-symbols-outlined text-[18px]">tune</span>
                 <span>Search</span>
               </button>
             </div>
           </div>
+          {/* Sort + quick filters rail */}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
+              <span className="text-on-surface-variant">Sort:</span>
+              <select
+                aria-label="Sort results"
+                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as MirrorSort)}
+              >
+                {MIRROR_SORTS.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
+              <span className="text-on-surface-variant">Status:</span>
+              <select
+                aria-label="Beatmap status"
+                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
+                value={filters.status}
+                onChange={(e) => updateFilters({ status: e.target.value as MirrorFilters['status'] })}
+              >
+                {MIRROR_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
+              <span className="text-on-surface-variant">Genre:</span>
+              <select
+                aria-label="Genre"
+                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
+                value={filters.genre}
+                onChange={(e) => updateFilters({ genre: Number(e.target.value) })}
+              >
+                {MIRROR_GENRES.map((g) => (
+                  <option key={g.value} value={g.value}>{g.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
+              <span className="text-on-surface-variant">Language:</span>
+              <select
+                aria-label="Language"
+                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
+                value={filters.language}
+                onChange={(e) => updateFilters({ language: Number(e.target.value) })}
+              >
+                {MIRROR_LANGUAGES.map((l) => (
+                  <option key={l.value} value={l.value}>{l.label}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full font-label-sm text-label-sm transition-colors ${showAdvanced || filtersActive ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant hover:text-on-surface'}`}
+              type="button"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              <span className="material-symbols-outlined text-[14px]">filter_list</span>
+              <span>More filters{filtersActive ? ' •' : ''}</span>
+            </button>
+            <button
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors"
+              type="button"
+              title="Refresh (bypass cache)"
+              onClick={() => void runFreshSearch({ fresh: true })}
+            >
+              <span className="material-symbols-outlined text-[14px]">refresh</span>
+              <span>Refresh</span>
+            </button>
+            {filtersActive && (
+              <button
+                className="px-3 py-1 rounded-full bg-surface-container text-error font-label-sm text-label-sm hover:bg-error-container/30 transition-colors"
+                type="button"
+                onClick={clearFilters}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+          {/* Advanced filters panel */}
+          {showAdvanced && (
+            <div className="flex flex-col gap-space-md p-space-md rounded-lg bg-surface-container-low shadow-sm">
+              <div className="flex flex-col gap-1.5 max-w-md">
+                <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="mirror-creator">Mapper / creator</label>
+                <input
+                  id="mirror-creator"
+                  className="w-full h-10 px-4 rounded-full bg-surface-container text-on-surface placeholder:text-on-surface-variant/60 font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                  placeholder="Mapper username"
+                  type="text"
+                  value={filters.creator}
+                  onChange={(e) => updateFilters({ creator: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-wrap gap-x-space-lg gap-y-space-md">
+                <RangePair label="Star rating" range={filters.sr} step={0.1} onChange={(r) => updateRange('sr', r)} />
+                <RangePair label="BPM" range={filters.bpm} step={1} onChange={(r) => updateRange('bpm', r)} />
+                <LengthRangePair range={filters.lengthSec} onChange={(r) => updateRange('lengthSec', r)} />
+                <RangePair label="AR" range={filters.ar} step={0.1} onChange={(r) => updateRange('ar', r)} />
+                <RangePair label="OD" range={filters.od} step={0.1} onChange={(r) => updateRange('od', r)} />
+                <RangePair label="HP" range={filters.hp} step={0.1} onChange={(r) => updateRange('hp', r)} />
+                <RangePair label="CS / keys" range={filters.cs} step={1} onChange={(r) => updateRange('cs', r)} />
+              </div>
+              <p className="font-label-sm text-label-sm text-on-surface-variant">
+                Stat ranges narrow the search on osu! and are re-checked on every result. Genre, language and HP are applied by osu! only.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -948,16 +1214,20 @@ function MirrorReal() {
           </div>
 
           {error && (
-            <div className="p-space-md rounded-lg bg-surface-container-low">
+            <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
               <p className="font-body-sm text-body-sm text-error">{error}</p>
+              <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0" type="button" onClick={() => void runFreshSearch({ fresh: true })}>Retry</button>
             </div>
           )}
-          {busy && results.length === 0 && !error && (
-            <p className="font-body-md text-body-md text-on-surface-variant">Searching osu!…</p>
+          {loadWarning && !error && (
+            <p className="font-body-sm text-body-sm text-tertiary">{loadWarning}</p>
+          )}
+          {busy && (
+            <LoadingState label={`Searching osu! in ${tab === 'all' ? 'all modes' : MODE_LABELS[tab]}…`} />
           )}
           {!busy && !error && results.length === 0 && (
             <p className="font-body-md text-body-md text-on-surface-variant">
-              No beatmapsets found for this search in {tab === 'all' ? 'any mode' : MODE_LABELS[tab]}. Try a different artist, mapper, or title.
+              No beatmapsets found for this search in {tab === 'all' ? 'any mode' : MODE_LABELS[tab]}. Try a different artist, mapper, or title — or loosen the filters.
             </p>
           )}
           <div className="flex flex-col gap-3">
@@ -973,6 +1243,16 @@ function MirrorReal() {
             ))}
           </div>
           <span className="hidden">{downloadedTick}</span>
+          {/* Infinite-scroll sentinel: loads the next cursor page. */}
+          <div ref={sentinelRef} className="h-2" aria-hidden="true"></div>
+          {loadingMore && (
+            <p className="font-body-md text-body-md text-on-surface-variant text-center">Loading more…</p>
+          )}
+          {!busy && !loadingMore && allExhausted && (
+            <p className="font-body-md text-body-md text-on-surface-variant text-center">
+              You&apos;ve reached the end — {results.length} beatmapsets match these filters.
+            </p>
+          )}
         </section>
 
         <aside className="xl:col-span-4 flex flex-col gap-space-md">
@@ -1006,6 +1286,86 @@ function MirrorReal() {
             </p>
           </div>
         </aside>
+      </div>
+    </div>
+  )
+}
+
+function RangePair({
+  label,
+  range,
+  step,
+  onChange,
+}: {
+  label: string
+  range: RangeFilter
+  step: number
+  onChange: (range: RangeFilter) => void
+}) {
+  const num = (value: string): number | null =>
+    value === '' ? null : Number(value)
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-label-md text-label-md text-on-surface font-semibold">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <input
+          aria-label={`${label} minimum`}
+          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
+          type="number"
+          step={step}
+          min={0}
+          value={range.min ?? ''}
+          onChange={(e) => onChange({ ...range, min: num(e.target.value) })}
+        />
+        <span className="text-on-surface-variant">–</span>
+        <input
+          aria-label={`${label} maximum`}
+          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
+          type="number"
+          step={step}
+          min={0}
+          value={range.max ?? ''}
+          onChange={(e) => onChange({ ...range, max: num(e.target.value) })}
+        />
+      </div>
+    </div>
+  )
+}
+
+function LengthRangePair({
+  range,
+  onChange,
+}: {
+  range: RangeFilter
+  onChange: (range: RangeFilter) => void
+}) {
+  const toMinutes = (sec: number | null): string =>
+    sec === null ? '' : String(Math.round((sec / 60) * 100) / 100)
+  const toSeconds = (value: string): number | null =>
+    value === '' ? null : Number(value) * 60
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-label-md text-label-md text-on-surface font-semibold">Length (minutes)</span>
+      <div className="flex items-center gap-1.5">
+        <input
+          aria-label="Length minimum (minutes)"
+          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
+          type="number"
+          step={0.5}
+          min={0}
+          value={toMinutes(range.min)}
+          onChange={(e) => onChange({ ...range, min: toSeconds(e.target.value) })}
+        />
+        <span className="text-on-surface-variant">–</span>
+        <input
+          aria-label="Length maximum (minutes)"
+          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
+          type="number"
+          step={0.5}
+          min={0}
+          value={toMinutes(range.max)}
+          onChange={(e) => onChange({ ...range, max: toSeconds(e.target.value) })}
+        />
       </div>
     </div>
   )
