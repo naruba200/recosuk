@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { useGuestStore } from './lib/guestStore'
 import { PreviewRouteStop } from './lib/previewPlayer'
+import { readOnboardedFlag, resolveRoute } from './lib/routeGuard'
 import OnboardingWelcome from './screens/OnboardingWelcome'
 import LinkOsu from './screens/LinkOsu'
 import Generating from './screens/Generating'
@@ -41,6 +42,28 @@ function EntryGate() {
     return <Navigate to="/onboarding" replace />
   }
   return <Dashboard />
+}
+
+/**
+ * Route guard: the app-shell routes need SOME session — a signed-in
+ * account, a guest link, or a completed onboarding. A completely fresh
+ * visitor landing directly on one is redirected to /onboarding.
+ * While the auth session is still resolving, render nothing rather
+ * than flashing a redirect. /auth and /onboarding/* are public and
+ * never wrapped in this; / is owned by EntryGate.
+ */
+function RequireSession({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth()
+  const guestSession = useGuestStore((s) => s.session)
+  const location = useLocation()
+  if (loading) return null
+  const target = resolveRoute(location.pathname, {
+    isAccount: user !== null,
+    isGuest: guestSession !== null,
+    onboarded: readOnboardedFlag(),
+  })
+  if (target) return <Navigate to={target} replace />
+  return <>{children}</>
 }
 
 /** The two Stitch Recommendations variants wired together with a toggle. */
@@ -195,14 +218,14 @@ export default function App() {
         <Route path="/onboarding/stats" element={<StatsExplained />} />
         <Route path="/welcome-recs" element={<WelcomeRecs />} />
         <Route path="/" element={<EntryGate />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/stats" element={<Stats />} />
-        <Route path="/recommendations" element={<RecommendationsPage />} />
-        <Route path="/mirror" element={<Mirror />} />
-        <Route path="/lists" element={<Lists />} />
-        <Route path="/history" element={<History />} />
+        <Route path="/dashboard" element={<RequireSession><Dashboard /></RequireSession>} />
+        <Route path="/stats" element={<RequireSession><Stats /></RequireSession>} />
+        <Route path="/recommendations" element={<RequireSession><RecommendationsPage /></RequireSession>} />
+        <Route path="/mirror" element={<RequireSession><Mirror /></RequireSession>} />
+        <Route path="/lists" element={<RequireSession><Lists /></RequireSession>} />
+        <Route path="/history" element={<RequireSession><History /></RequireSession>} />
         <Route path="/auth" element={<Auth />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route path="/settings" element={<RequireSession><Settings /></RequireSession>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </AuthProvider>

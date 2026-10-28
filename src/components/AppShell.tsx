@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { GAME_MODES, MODE_LABELS } from '../lib/mode'
 import { MODE_ACCENTS, MODE_PILL_LABELS, useModeStore } from '../lib/modeStore'
 import { fmtInt } from '../lib/interpretations'
+import { useAuth } from '../lib/auth'
 
 /**
  * The Stitch app shell (sidebar + top bar) as a parameterized component.
@@ -64,6 +66,35 @@ export function ModePills() {
   )
 }
 
+/**
+ * Header auth control: signed-out and guest users get a visible
+ * "Sign in" entry point (the Auth page was previously reachable only
+ * by label-matching); signed-in accounts get "Log out", which signs
+ * out, clears the guest session, and lands on the sign-in tab.
+ */
+function HeaderAuthControl() {
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  const onClick = async () => {
+    if (user) {
+      await signOut()
+    }
+    navigate('/auth?mode=signin')
+  }
+
+  return (
+    <button
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-md text-label-md transition-all"
+      type="button"
+      onClick={onClick}
+    >
+      <span className="material-symbols-outlined text-[16px]">{user ? 'logout' : 'login'}</span>
+      <span>{user ? 'Log out' : 'Sign in'}</span>
+    </button>
+  )
+}
+
 export default function AppShell({
   identity,
   children,
@@ -122,15 +153,20 @@ export default function AppShell({
           </div>
           <nav className="flex flex-col gap-1">
             {NAV.map((item) => (
-              <a
+              <NavLink
                 key={item.path}
-                className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all"
-                data-path={item.path}
-                href="#"
+                to={`/${item.path}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT transition-all ${
+                    isActive
+                      ? 'bg-primary-container text-on-primary-container font-semibold shadow-[0_0_14px_rgba(164,118,255,0.35)]'
+                      : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                  }`
+                }
               >
                 <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
                 <span className="font-label-md text-label-md">{item.label}</span>
-              </a>
+              </NavLink>
             ))}
           </nav>
         </div>
@@ -157,6 +193,7 @@ export default function AppShell({
           </div>
           <ModePills />
           <div className="flex items-center gap-space-md">
+            <HeaderAuthControl />
             <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm">
               <span className="material-symbols-outlined text-[16px] text-tertiary">sync</span>
               <span>synced</span>

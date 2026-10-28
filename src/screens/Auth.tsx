@@ -1,6 +1,6 @@
 // Converted from Stitch export: stitch-raw/12-auth.html
-import { useState, type FormEvent, type MouseEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, type FormEvent, type MouseEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { NOT_CONFIGURED, useAuth } from '../lib/auth'
 
 type Notice = { kind: 'error' | 'note'; text: string } | null
@@ -15,12 +15,23 @@ const DEMO_NOTICE =
 
 export default function Auth() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { signUp, signIn, configured } = useAuth()
-  const [activeTab, setActiveTab] = useState<'signup' | 'signin'>('signup')
-  const [signupEmail, setSignupEmail] = useState('sora.plays.osu@gmail.com')
-  const [signupPassword, setSignupPassword] = useState('masterKey2024!')
-  const [osuUsername, setOsuUsername] = useState('sora_playz')
-  const [signinEmail, setSigninEmail] = useState('sora.plays.osu@gmail.com')
+  // Sign in is a first-class tab: ?mode=signin (used by the shell's
+  // Sign in button and post-logout landing) opens it directly.
+  const [activeTab, setActiveTab] = useState<'signup' | 'signin'>(
+    searchParams.get('mode') === 'signin' ? 'signin' : 'signup',
+  )
+  useEffect(() => {
+    if (searchParams.get('mode') === 'signin') setActiveTab('signin')
+  }, [searchParams])
+  // Fields start EMPTY — no baked-in sample credentials (QA fix: the
+  // Stitch export shipped with a fake email/password/username filled
+  // in, which read as a mock page). Placeholders only.
+  const [signupEmail, setSignupEmail] = useState('')
+  const [signupPassword, setSignupPassword] = useState('')
+  const [osuUsername, setOsuUsername] = useState('')
+  const [signinEmail, setSigninEmail] = useState('')
   const [signinPassword, setSigninPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(null)
@@ -86,8 +97,27 @@ export default function Auth() {
       })
       return
     }
-    navigate('/onboarding/link')
+    // Signed in: straight to the dashboard (returning-user flow).
+    navigate('/dashboard')
   }
+
+  // Live password-strength meter (the export's static "Strong" bar
+  // claimed strength for any input, including an empty one).
+  const strengthScore =
+    (signupPassword.length >= 8 ? 1 : 0) +
+    (signupPassword.length >= 12 ? 1 : 0) +
+    (/[a-z]/.test(signupPassword) && /[A-Z]/.test(signupPassword) ? 1 : 0) +
+    (/[0-9]/.test(signupPassword) || /[^A-Za-z0-9]/.test(signupPassword) ? 1 : 0)
+  const strengthLabel =
+    signupPassword.length === 0
+      ? ''
+      : strengthScore <= 1
+        ? 'Weak'
+        : strengthScore === 2
+          ? 'Fair'
+          : strengthScore === 3
+            ? 'Good'
+            : 'Strong'
 
   return (
     <div className="bg-grid-osu flex flex-col justify-between min-h-screen relative selection:bg-[#FF66AA] selection:text-white">
@@ -215,18 +245,19 @@ export default function Auth() {
                       </span>
                     </button>
                   </div>
-                  {/* Dynamic Strength Bar */}
+                  {/* Dynamic Strength Bar (live: from the typed password) */}
                   <div className="flex items-center gap-1 px-1 mt-0.5">
-                    <span className="h-1 flex-1 rounded-full bg-secondary">
-                    </span>
-                    <span className="h-1 flex-1 rounded-full bg-secondary">
-                    </span>
-                    <span className="h-1 flex-1 rounded-full bg-secondary">
-                    </span>
-                    <span className="h-1 flex-1 rounded-full bg-surface-container-highest">
-                    </span>
-                    <span className="font-label-sm text-label-sm text-secondary ml-1 font-semibold">Strong
-                    </span>
+                    {[0, 1, 2, 3].map((i) => (
+                      <span
+                        key={i}
+                        className={`h-1 flex-1 rounded-full ${i < strengthScore ? 'bg-secondary' : 'bg-surface-container-highest'}`}
+                      >
+                      </span>
+                    ))}
+                    {strengthLabel && (
+                      <span className="font-label-sm text-label-sm text-secondary ml-1 font-semibold">{strengthLabel}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {/* osu! Username Link Field */}
@@ -244,14 +275,8 @@ export default function Auth() {
                     </div>
                   </div>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 pr-24 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="osu-username" placeholder="e.g. sora_playz" type="text" value={osuUsername} onChange={(e) => setOsuUsername(e.target.value)} />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="osu-username" placeholder="Your osu! username" type="text" value={osuUsername} onChange={(e) => setOsuUsername(e.target.value)} />
                     <div className="absolute left-3 w-5 h-5 rounded-full bg-secondary-container flex items-center justify-center text-[9px] font-black text-on-secondary">{' '}o!{' '}
-                    </div>
-                    <div className="absolute right-3 flex items-center gap-1 bg-surface-container-high px-2 py-0.5 rounded-full">
-                      <span className="material-symbols-outlined text-xs text-tertiary">check_circle
-                      </span>
-                      <span className="font-label-sm text-label-sm text-on-surface font-medium">5,284 pp
-                      </span>
                     </div>
                   </div>
                   <span className="font-label-sm text-label-sm text-outline px-2">{' '}Optional now — you can link later, and guest profiles carry over automatically.{' '}
@@ -296,10 +321,10 @@ export default function Auth() {
               </div>
               <form className="flex flex-col gap-4" onSubmit={handleSignIn}>
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="signin-email">Email or osu! Username
+                  <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="signin-email">Email address
                   </label>
                   <div className="relative flex items-center">
-                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-email" placeholder="sora_playz or player@osu.sh" type="text" value={signinEmail} onChange={(e) => setSigninEmail(e.target.value)} />
+                    <input className="w-full bg-surface-container px-4 py-3 pl-11 rounded-full text-on-surface font-body-md text-body-md focus:bg-surface-container-high focus:outline-none transition-all placeholder:text-outline" id="signin-email" placeholder="you@example.com" type="email" value={signinEmail} onChange={(e) => setSigninEmail(e.target.value)} />
                     <span className="material-symbols-outlined absolute left-3.5 text-primary text-lg">account_circle
                     </span>
                   </div>
@@ -359,10 +384,6 @@ export default function Auth() {
             </span>
             <span>•
             </span>
-            <span>Latency: 14ms (Tokyo-01)
-            </span>
-            <span>•
-            </span>
             <span>v2.4.9
             </span>
           </div>
@@ -371,14 +392,14 @@ export default function Auth() {
     </main>
     {/* Bottom Navigation / Progress Dots */}
     <footer className="w-full px-12 py-8 flex items-center justify-between z-10 border-t border-white/5 bg-[#150F1F]/60 backdrop-blur-md">
-      {/* Player hint preview */}
+      {/* Brand mark (no sample player shown here) */}
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-[#9D6BFF]/20 border border-[#9D6BFF]/50 flex items-center justify-center text-xs font-bold text-[#9D6BFF]">{' '}VN{' '}
+        <div className="w-8 h-8 rounded-full bg-[#FF66AA]/20 border border-[#FF66AA]/50 flex items-center justify-center text-xs font-bold text-[#FF66AA]">{' '}o!{' '}
         </div>
         <div className="text-left">
-          <span className="text-xs text-[#A59AB5] block">Ready for player
+          <span className="text-xs text-[#A59AB5] block">RecOsuk
           </span>
-          <span className="text-xs font-bold text-[#F5F1FA]">sora_playz (5,284 pp)
+          <span className="text-xs font-bold text-[#F5F1FA]">rhythm companion
           </span>
         </div>
       </div>

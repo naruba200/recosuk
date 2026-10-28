@@ -15,157 +15,17 @@ import { fmtAcc, fmtInt, interpretProfile } from '../lib/interpretations'
 import { useAuth } from '../lib/auth'
 import { useCapabilities } from '../lib/capabilities'
 
+// Identity shown by the demo fallback variant: sample data, not a real player.
+const DEMO_IDENTITY = {
+  username: 'sora_playz',
+  pp: 5284,
+  countryCode: 'VN',
+  tierLabel: 'free tier',
+}
+
 function StatsDemo() {
   return (
-    <div className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
-    <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
-      <div className="flex flex-col gap-space-md px-space-md">
-        <div className="flex items-center gap-space-sm px-space-xs pt-space-xs">
-          <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgba(255,176,204,0.35)]">
-            <span className="text-on-secondary font-headline-md text-headline-md leading-none">o!
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-headline-md text-headline-md tracking-tight text-on-surface leading-none">RecOsuk
-            </span>
-            <span className="font-label-sm text-label-sm text-on-surface-variant">rhythm companion
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-space-sm p-space-sm rounded-DEFAULT bg-surface-container-high">
-          <div className="relative flex-shrink-0">
-            <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-              <span className="material-symbols-outlined text-primary text-[22px]">face
-              </span>
-            </div>
-            <div className="absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full bg-surface-container-lowest font-label-sm text-[9px] leading-none text-secondary font-bold uppercase">VN
-            </div>
-          </div>
-          <div className="flex flex-col min-w-0 flex-1">
-            <span className="font-label-md text-label-md text-on-surface truncate">sora_playz
-            </span>
-            <div className="flex items-center gap-1">
-              <span className="font-label-sm text-label-sm text-primary font-bold">5,284
-              </span>
-              <span className="font-label-sm text-label-sm text-on-surface-variant">pp
-              </span>
-            </div>
-          </div>
-        </div>
-        <nav className="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary-container font-semibold rounded-DEFAULT">
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="dashboard" href="#">
-            <span className="material-symbols-outlined text-[20px]">grid_view
-            </span>
-            <span className="font-label-md text-label-md">Dashboard
-            </span>
-          </a>
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="stats" href="#">
-            <span className="material-symbols-outlined text-[20px]">insights
-            </span>
-            <span className="font-label-md text-label-md">Stats
-            </span>
-          </a>
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="recommendations" href="#">
-            <span className="material-symbols-outlined text-[20px]">auto_awesome
-            </span>
-            <span className="font-label-md text-label-md">Recommendations
-            </span>
-          </a>
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="mirror" href="#">
-            <span className="material-symbols-outlined text-[20px]">compare_arrows
-            </span>
-            <span className="font-label-md text-label-md">Mirror
-            </span>
-          </a>
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="lists" href="#">
-            <span className="material-symbols-outlined text-[20px]">queue_music
-            </span>
-            <span className="font-label-md text-label-md">Lists
-            </span>
-          </a>
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="history" href="#">
-            <span className="material-symbols-outlined text-[20px]">history
-            </span>
-            <span className="font-label-md text-label-md">History
-            </span>
-          </a>
-          <a className="flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all" data-path="settings" href="#">
-            <span className="material-symbols-outlined text-[20px]">tune
-            </span>
-            <span className="font-label-md text-label-md">Settings
-            </span>
-          </a>
-        </nav>
-      </div>
-      <div className="px-space-md flex flex-col gap-space-xs">
-        <div className="flex items-center justify-between p-space-sm rounded-DEFAULT bg-surface-container">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#7EE787] animate-pulse">
-            </span>
-            <span className="font-label-sm text-label-sm text-on-surface-variant">osu! server
-            </span>
-          </div>
-          <span className="font-label-sm text-label-sm text-on-surface">online
-          </span>
-        </div>
-        <div className="flex items-center justify-between px-space-xs text-on-surface-variant font-label-sm text-label-sm">
-          <span>RecOsuk v2.4
-          </span>
-          <a className="hover:text-primary transition-colors" data-path="changelog" href="#">notes
-          </a>
-        </div>
-      </div>
-    </aside>
-    <div className="pl-[232px]">
-      <header className="fixed top-0 left-[232px] right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-xl z-40 flex items-center justify-between px-space-xl shadow-[0_1px_8px_rgba(0,0,0,0.3)]">
-        <div className="flex items-center gap-space-sm">
-          <span className="font-label-sm text-label-sm text-on-surface-variant">Stage context
-          </span>
-          <span className="text-outline-variant font-label-sm text-label-sm">/
-          </span>
-          <span className="font-label-md text-label-md text-primary font-medium">Active trainer
-          </span>
-        </div>
-        <div className="flex items-center gap-space-sm bg-surface-container-low px-space-sm py-1.5 rounded-full">
-          <button className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-all" title="osu!standard" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">std
-            </span>
-          </button>
-          <button className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-[#FF5C39] hover:text-on-primary transition-all" title="osu!taiko" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">tai
-            </span>
-          </button>
-          <button className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" title="osu!catch" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">ctb
-            </span>
-          </button>
-          <button className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container shadow-[0_0_14px_rgba(164,118,255,0.45)] flex items-center justify-center transition-all" title="osu!mania" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">mna
-            </span>
-          </button>
-        </div>
-        <div className="flex items-center gap-space-md">
-          <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm">
-            <span className="material-symbols-outlined text-[16px] text-tertiary">sync
-            </span>
-            <span>synced
-            </span>
-          </div>
-          <div className="flex items-center gap-space-sm pl-space-sm py-1 pr-1.5 rounded-full bg-surface-container-high">
-            <div className="flex flex-col text-right">
-              <span className="font-label-sm text-label-sm text-on-surface leading-none">sora_playz
-              </span>
-              <span className="font-label-sm text-[10px] text-on-surface-variant leading-none mt-0.5">free tier
-              </span>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-              <span className="material-symbols-outlined text-on-primary text-[18px]">person
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
-      <main className="w-full pt-16 bg-surface min-h-screen px-space-xl py-space-xl">
+    <AppShell identity={DEMO_IDENTITY}>
         <div className="flex flex-col w-full">
           {/* Active Tab Sidebar Override Script for Visual Integrity */}
           {/* Top Page Header Bar */}
@@ -1016,9 +876,7 @@ function StatsDemo() {
           </div>
           {/* Interactive Sync Button Toast Simulation JS */}
         </div>
-      </main>
-    </div>
-    </div>
+    </AppShell>
   )
 }
 

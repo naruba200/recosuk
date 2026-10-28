@@ -12,7 +12,8 @@ export default function LinkOsu() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const linkGuest = useGuestStore((s) => s.linkGuest)
-  const [username, setUsername] = useState('sora_playz')
+  // Starts empty: the Stitch export pre-filled the demo username here.
+  const [username, setUsername] = useState('')
   const [selectedMode, setSelectedMode] = useState<GameMode>('mania')
   const [autoDetect, setAutoDetect] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -196,14 +197,7 @@ export default function LinkOsu() {
                     <img className="w-full h-full object-cover" data-alt="A stylized digital anime gaming avatar with headphones, vibrant magenta and deep purple backlight, neon glow in rhythm game aesthetic, detailed portrait photography style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA7eHobcIQQBAEjAgjrDPLn3jt5xtARIK0V0_qZS4tY4ZRpR-fhVPF7rqcLIl251Hfd2kXu3DP5X5X8b6lroiFx_eFF0-3s04_oUT1807VICF2BaUT2Au0wv_7ligvtQFvjSD1GkuKZ3RSvQ0zyO_nGb3K3qW6LOpaQ83AXPeVR32Zvh-WODbbKRHcVbBfRQC21kcxwZGaIxMJG5BJvMkIdC9KTfGb9PA3KV0d7mx9HpfQX3fYU7PJn" />
                   </div>
                   {/* Input Field */}
-                  <input className="w-full bg-surface-container-low text-on-surface pl-14 pr-24 py-3.5 rounded-full font-body-md text-body-md focus:outline-none focus:bg-surface-container-highest transition-colors placeholder:text-outline-variant" id="osu-username" placeholder="e.g. WhiteCat, sora_playz" type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
-                  {/* Verified Status Badge */}
-                  <div className="absolute right-3.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high text-secondary font-label-sm text-label-sm">
-                    <span className="material-symbols-outlined text-[15px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified
-                    </span>
-                    <span>5,284 pp
-                    </span>
-                  </div>
+                  <input className="w-full bg-surface-container-low text-on-surface pl-14 py-3.5 rounded-full font-body-md text-body-md focus:outline-none focus:bg-surface-container-highest transition-colors placeholder:text-outline-variant" id="osu-username" placeholder="Your osu! username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
                 </div>
               </div>
               {/* Mode Select Area */}

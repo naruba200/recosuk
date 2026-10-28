@@ -1,129 +1,41 @@
 // Converted from Stitch export: stitch-raw/13-settings.html
+import { useNavigate } from 'react-router-dom'
+import AppShell from '../components/AppShell'
+import ExampleBlock from '../components/ExampleBlock'
+import { useAuth } from '../lib/auth'
+import { useGuestStore } from '../lib/guestStore'
+import { useModeStore } from '../lib/modeStore'
+import { useProfileData } from '../lib/profileService'
+import { MODE_LABELS } from '../lib/mode'
 export default function Settings() {
+  const { user, tier, guestSession, signOut } = useAuth()
+  const mode = useModeStore((s) => s.mode)
+  const { status, data, identity } = useProfileData(mode)
+  const navigate = useNavigate()
+  const linkedName = data?.user.username ?? identity?.username ?? guestSession?.osuUsername ?? null
+  const settingsIdentity = {
+    username: linkedName ?? user?.email ?? 'Guest',
+    pp: data?.skillProfile.pp ?? 0,
+    countryCode: data?.user.country_code,
+    avatarUrl: data ? `https://a.ppy.sh/${data.user.id}` : undefined,
+    tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
+  }
+  const handleLogout = async () => {
+    await signOut()
+    navigate('/auth?mode=signin')
+  }
+  const handleUnlink = () => {
+    // Clears the local link (guest session + pending link); the
+    // account row keeps its fields until the next link overwrites
+    // them, so this re-opens the link flow rather than deleting data.
+    useGuestStore.getState().clearGuest()
+    try { window.localStorage?.removeItem('recosuk-pending-link') } catch { /* ignore */ }
+    navigate('/onboarding/link')
+  }
   return (
-    <div className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
-    <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
-      <div className="flex flex-col gap-space-md px-space-md">
-        <div className="flex items-center gap-space-sm px-space-xs pt-space-xs">
-          <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgba(255,176,204,0.35)]">
-            <span className="text-on-secondary font-headline-md text-headline-md leading-none">o!
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-headline-md text-headline-md tracking-tight text-on-surface leading-none">RecOsuk
-            </span>
-            <span className="font-label-sm text-label-sm text-on-surface-variant">rhythm companion
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-space-sm p-space-sm rounded-DEFAULT bg-surface-container-high">
-          <div className="relative flex-shrink-0">
-            <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-              <span className="material-symbols-outlined text-primary text-[22px]">face
-              </span>
-            </div>
-            <div className="absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full bg-surface-container-lowest font-label-sm text-[9px] leading-none text-secondary font-bold uppercase">VN
-            </div>
-          </div>
-          <div className="flex flex-col min-w-0 flex-1">
-            <span className="font-label-md text-label-md text-on-surface truncate">sora_playz
-            </span>
-            <div className="flex items-center gap-1">
-              <span className="font-label-sm text-label-sm text-primary font-bold">5,284
-              </span>
-              <span className="font-label-sm text-label-sm text-on-surface-variant">pp
-              </span>
-            </div>
-          </div>
-        </div>
-        <nav className="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary-container font-semibold rounded-DEFAULT">
-          <a className="px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all font-label-md text-label-md" data-path="dashboard" href="#">Dashboard
-          </a>
-          <a className="px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all font-label-md text-label-md" data-path="stats" href="#">Stats
-          </a>
-          <a className="px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all font-label-md text-label-md" data-path="recommendations" href="#">Recommendations
-          </a>
-          <a className="px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all font-label-md text-label-md" data-path="mirror" href="#">Mirror
-          </a>
-          <a className="px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all font-label-md text-label-md" data-path="lists" href="#">Lists
-          </a>
-          <a className="px-space-md py-2.5 rounded-DEFAULT text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all font-label-md text-label-md" data-path="history" href="#">History
-          </a>
-          <a aria-current="page" className="px-space-md py-2.5 transition-all shadow-[0_0_14px_rgba(164,118,255,0.35)] bg-primary-container text-on-primary-container font-semibold rounded-DEFAULT" data-path="settings" href="#">Settings
-          </a>
-        </nav>
-      </div>
-      <div className="px-space-md flex flex-col gap-space-xs">
-        <div className="flex items-center justify-between p-space-sm rounded-DEFAULT bg-surface-container">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#7EE787] animate-pulse">
-            </span>
-            <span className="font-label-sm text-label-sm text-on-surface-variant">Bancho server
-            </span>
-          </div>
-          <span className="font-label-sm text-label-sm text-on-surface">online
-          </span>
-        </div>
-        <div className="flex items-center justify-between px-space-xs text-on-surface-variant font-label-sm text-label-sm">
-          <span>RecOsuk v2.4
-          </span>
-          <a className="hover:text-primary transition-colors" data-path="changelog" href="#">notes
-          </a>
-        </div>
-      </div>
-    </aside>
-    <div className="pl-[232px]">
-      <header className="fixed top-0 left-[232px] right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-xl z-40 flex items-center justify-between px-space-xl shadow-[0_1px_8px_rgba(0,0,0,0.3)]">
-        <div className="flex items-center gap-space-sm">
-          <span className="font-label-sm text-label-sm text-on-surface-variant">Stage context
-          </span>
-          <span className="text-outline-variant font-label-sm text-label-sm">/
-          </span>
-          <span className="font-label-md text-label-md text-primary font-medium">User configuration
-          </span>
-        </div>
-        <div className="flex items-center gap-space-sm bg-surface-container-low px-space-sm py-1.5 rounded-full">
-          <button className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-secondary hover:text-on-secondary transition-all" title="osu!standard" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">std
-            </span>
-          </button>
-          <button className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-[#FF5C39] hover:text-on-primary transition-all" title="osu!taiko" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">tai
-            </span>
-          </button>
-          <button className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-tertiary-container hover:text-on-tertiary-container transition-all" title="osu!catch" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">ctb
-            </span>
-          </button>
-          <button className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container shadow-[0_0_14px_rgba(164,118,255,0.45)] flex items-center justify-center transition-all" title="osu!mania" type="button">
-            <span className="font-headline-sm text-[13px] leading-none">mna
-            </span>
-          </button>
-        </div>
-        <div className="flex items-center gap-space-md">
-          <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm">
-            <span className="material-symbols-outlined text-[16px] text-tertiary">sync
-            </span>
-            <span>Bancho synced
-            </span>
-          </div>
-          <div className="flex items-center gap-space-sm pl-space-sm py-1 pr-1.5 rounded-full bg-surface-container-high">
-            <div className="flex flex-col text-right">
-              <span className="font-label-sm text-label-sm text-on-surface leading-none">sora_playz
-              </span>
-              <span className="font-label-sm text-[10px] text-on-surface-variant leading-none mt-0.5">free tier
-              </span>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-              <span className="material-symbols-outlined text-on-primary text-[18px]">person
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
-      <main className="w-full pt-16 bg-surface min-h-screen px-space-xl py-space-xl">
+    <AppShell identity={settingsIdentity}>
         <div className="flex flex-col w-full max-w-5xl mx-auto space-y-10 pb-16">
-          {/* GUEST STATE ALERT BANNER */}
+          {/* SESSION BANNER — live state, not the baked guest copy. */}
           <div className="relative overflow-hidden rounded-DEFAULT bg-surface-container-high p-space-md shadow-lg shadow-surface-container-lowest/50 flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
             <div className="absolute -right-12 -top-12 w-48 h-48 bg-secondary/10 rounded-full blur-3xl pointer-events-none">
             </div>
@@ -134,24 +46,40 @@ export default function Settings() {
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
-                  <span className="font-headline-sm text-headline-sm text-on-surface">Guest session active
+                  <span className="font-headline-sm text-headline-sm text-on-surface">
+                    {tier === 'account'
+                      ? 'Signed in'
+                      : tier === 'guest'
+                        ? 'Guest session active'
+                        : 'No account linked'}
                   </span>
-                  <span className="px-2 py-0.5 rounded-full bg-secondary/20 text-secondary font-label-sm text-[10px] uppercase font-bold tracking-wider">Unverified
+                  <span className="px-2 py-0.5 rounded-full bg-secondary/20 text-secondary font-label-sm text-[10px] uppercase font-bold tracking-wider">
+                    {tier === 'account' ? 'Account' : tier === 'guest' ? 'Unverified' : 'Demo'}
                   </span>
                 </div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{' '}You're browsing as a guest linked to{' '}
-                  <strong className="text-on-surface font-semibold">sora_playz
-                  </strong>. Create an account to permanently sync recommendations and lists.{' '}
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+                  {tier === 'account' ? (
+                    <>Signed in as <strong className="text-on-surface font-semibold">{user?.email}</strong>{linkedName ? <> · linked to <strong className="text-on-surface font-semibold">{linkedName}</strong></> : null}. Your snapshots and lists sync to your account.</>
+                  ) : tier === 'guest' ? (
+                    <>You&apos;re browsing as a guest linked to <strong className="text-on-surface font-semibold">{guestSession?.osuUsername}</strong>. Create an account to permanently sync recommendations and lists.</>
+                  ) : (
+                    <>Nothing is linked yet — sign in or link an osu! username to see your own data instead of the demo.</>
+                  )}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-space-sm z-10 flex-shrink-0">
-              <a className="inline-flex items-center gap-1.5 px-space-md py-2 rounded-full bg-secondary hover:bg-secondary-fixed text-on-secondary transition-all font-label-md text-label-md font-bold shadow-[0_0_18px_rgba(255,176,204,0.4)] active:scale-95" href="/auth">
-                <span>Create account
-                </span>
-                <span className="material-symbols-outlined text-[16px]">arrow_forward
-                </span>
-              </a>
+              {tier === 'account' ? (
+                <button className="inline-flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-highest hover:bg-surface-bright text-on-surface transition-all font-label-md text-label-md font-bold active:scale-95" type="button" onClick={handleLogout}>
+                  <span>Log out</span>
+                  <span className="material-symbols-outlined text-[16px]">logout</span>
+                </button>
+              ) : (
+                <button className="inline-flex items-center gap-1.5 px-space-md py-2 rounded-full bg-secondary hover:bg-secondary-fixed text-on-secondary transition-all font-label-md text-label-md font-bold shadow-[0_0_18px_rgba(255,176,204,0.4)] active:scale-95" type="button" onClick={() => navigate('/auth')}>
+                  <span>{tier === 'guest' ? 'Create account' : 'Sign in'}</span>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
+              )}
             </div>
           </div>
           {/* PAGE HEADER TITLE */}
@@ -181,22 +109,24 @@ export default function Settings() {
               </div>
               {/* Rows Container */}
               <div className="flex flex-col divide-y divide-surface-container-highest/60">
-                {/* Row: Email */}
+                {/* Row: Email — live: the signed-in account's email, or the honest guest state. */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
                   <div className="flex flex-col">
                     <span className="font-label-md text-label-md text-on-surface">Registered Email
                     </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">No email registered (Browsing as guest)
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">
+                      {user?.email ?? (tier === 'guest' ? 'No email registered (browsing as guest)' : 'No account signed in')}
                     </span>
                   </div>
-                  <div className="flex items-center gap-space-sm">
-                    <a className="px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-primary hover:text-on-surface transition-all font-label-md text-label-md flex items-center gap-1.5" href="/auth">
-                      <span className="material-symbols-outlined text-[16px]">add
-                      </span>
-                      <span>Add permanent email
-                      </span>
-                    </a>
-                  </div>
+                  {!user && (
+                    <div className="flex items-center gap-space-sm">
+                      <button className="px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-primary hover:text-on-surface transition-all font-label-md text-label-md flex items-center gap-1.5" type="button" onClick={() => navigate('/auth')}>
+                        <span className="material-symbols-outlined text-[16px]">add
+                        </span>
+                        <span>{tier === 'guest' ? 'Add permanent email' : 'Sign in'}</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
                 {/* Row: Linked osu! Account */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
@@ -207,51 +137,89 @@ export default function Settings() {
                     </span>
                   </div>
                   <div className="flex items-center flex-wrap gap-space-sm">
-                    {/* Account badge */}
-                    <div className="flex items-center gap-space-sm px-3 py-1.5 rounded-full bg-surface-container-high shadow-inner">
-                      <div className="relative w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center flex-shrink-0">
-                        <span className="material-symbols-outlined text-[15px] text-primary">face
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-label-md text-label-md text-on-surface font-bold">sora_playz
-                        </span>
-                        <span className="px-1.5 py-0.2 rounded bg-surface-container-lowest text-[10px] font-bold text-secondary">VN
-                        </span>
-                        <span className="font-label-sm text-label-sm text-primary">5,284 pp
-                        </span>
-                      </div>
-                      <span className="inline-flex items-center gap-1 font-label-sm text-[10px] text-[#7EE787] pl-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#7EE787] animate-pulse">
-                        </span>
-                        <span>Synced
-                        </span>
-                      </span>
-                    </div>
-                    {/* Actions */}
-                    <button className="px-3 py-1.5 rounded-full hover:bg-error-container/30 text-error hover:text-on-error-container font-label-md text-label-md transition-colors" type="button">{' '}Unlink{' '}
+                    {linkedName ? (
+                      <>
+                        {/* Account badge — live identity */}
+                        <div className="flex items-center gap-space-sm px-3 py-1.5 rounded-full bg-surface-container-high shadow-inner">
+                          <div className="relative w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center flex-shrink-0">
+                            {data ? (
+                              <img className="w-6 h-6 rounded-full object-cover" alt="" src={`https://a.ppy.sh/${data.user.id}`} />
+                            ) : (
+                              <span className="material-symbols-outlined text-[15px] text-primary">face</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-label-md text-label-md text-on-surface font-bold">{linkedName}
+                            </span>
+                            {data?.user.country_code && (
+                              <span className="px-1.5 py-0.2 rounded bg-surface-container-lowest text-[10px] font-bold text-secondary">{data.user.country_code}
+                              </span>
+                            )}
+                            {data && (
+                              <span className="font-label-sm text-label-sm text-primary">{data.skillProfile.pp.toLocaleString()} pp
+                              </span>
+                            )}
+                          </div>
+                          <span className="inline-flex items-center gap-1 font-label-sm text-[10px] text-[#7EE787] pl-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#7EE787] animate-pulse">
+                            </span>
+                            <span>{status === 'loading' ? 'Loading…' : 'Synced'}
+                            </span>
+                          </span>
+                        </div>
+                        {/* Actions */}
+                        <button className="px-3 py-1.5 rounded-full hover:bg-error-container/30 text-error hover:text-on-error-container font-label-md text-label-md transition-colors" type="button" onClick={handleUnlink}>{' '}Unlink{' '}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="font-body-sm text-body-sm text-on-surface-variant">No osu! account linked yet</span>
+                    )}
+                    <button className="px-3 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-colors" type="button" onClick={() => navigate('/onboarding/link')}>{linkedName ? 'Use a different account' : 'Link an osu! account'}
                     </button>
-                    <a className="px-3 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-colors" href="/auth">{' '}Use a different account{' '}
-                    </a>
                   </div>
                 </div>
-                {/* Row: Account Tier / Status */}
+                {/* Row: Account Tier / Status — live tier */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
                   <div className="flex flex-col">
                     <span className="font-label-md text-label-md text-on-surface">Account Tier & Persistence
                     </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Local browser storage keeps this session until cache is cleared
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">
+                      {tier === 'account'
+                        ? 'Account data (snapshots, lists, ratings) syncs to Supabase'
+                        : tier === 'guest'
+                          ? 'Local browser storage keeps this session until cache is cleared'
+                          : 'Browsing the demo — link an account to keep anything'}
                     </span>
                   </div>
                   <div className="flex items-center gap-space-sm">
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-low text-on-surface-variant font-label-sm text-label-sm">
                       <span className="w-2 h-2 rounded-full bg-secondary-fixed-dim">
                       </span>
-                      <span>Guest Tier • Session Data Temporary
+                      <span>
+                        {tier === 'account'
+                          ? `Account Tier • ${MODE_LABELS[mode]} mode`
+                          : tier === 'guest'
+                            ? 'Guest Tier • Session Data Temporary'
+                            : 'No session • Demo data'}
                       </span>
                     </div>
                   </div>
                 </div>
+                {/* Row: Log out — present whenever there is a session to end. */}
+                {(user || guestSession) && (
+                  <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                    <div className="flex flex-col">
+                      <span className="font-label-md text-label-md text-on-surface">Log out</span>
+                      <span className="font-body-sm text-body-sm text-on-surface-variant">Signs out of the account and clears the linked guest session</span>
+                    </div>
+                    <div className="flex items-center gap-space-sm">
+                      <button className="inline-flex items-center gap-1.5 px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-error hover:text-on-error text-on-surface transition-all font-label-md text-label-md font-bold" type="button" onClick={handleLogout}>
+                        <span className="material-symbols-outlined text-[16px]">logout</span>
+                        <span>Log out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {/* SECTION 2: DOWNLOADS & CLIENT SYNC */}
@@ -266,6 +234,9 @@ export default function Settings() {
                 <span className="font-label-sm text-label-sm text-on-surface-variant">Mirror prioritization and local game paths
                 </span>
               </div>
+              {/* Sample settings: folder path, slots and mirror priority
+                  are illustration, not wired-up preferences. */}
+              <ExampleBlock note="Example settings — these download options don't change behaviour yet.">
               <div className="flex flex-col divide-y divide-surface-container-highest/60">
                 {/* Row: Download Folder Path */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
@@ -370,6 +341,7 @@ export default function Settings() {
                   </div>
                 </div>
               </div>
+              </ExampleBlock>
             </div>
             {/* SECTION 3: APP & CLIENT PREFERENCES */}
             <div className="flex flex-col">
@@ -443,7 +415,8 @@ export default function Settings() {
                     </button>
                   </div>
                 </div>
-                {/* Row: Cache & Local Database */}
+                {/* Row: Cache & Local Database — sample values, not a real measurement. */}
+                <ExampleBlock note="Example — the cache size shown here is a placeholder, not a real measurement.">
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
                   <div className="flex flex-col">
                     <span className="font-label-md text-label-md text-on-surface">Local Audio & Cover Cache
@@ -462,6 +435,7 @@ export default function Settings() {
                     </button>
                   </div>
                 </div>
+                </ExampleBlock>
               </div>
             </div>
             {/* SECTION 4: DANGER ZONE */}
@@ -494,8 +468,6 @@ export default function Settings() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
-    </div>
+    </AppShell>
   )
 }

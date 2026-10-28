@@ -131,7 +131,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  // Log out means log out of everything: the Supabase session AND the
+  // local guest link (plus any pending link), so a signed-out user is
+  // never still half-linked. Guest-only sign-out works with no client.
   const signOut = useCallback(async (): Promise<void> => {
+    useGuestStore.getState().clearGuest()
+    try {
+      globalThis.localStorage?.removeItem('recosuk-pending-link')
+    } catch {
+      /* storage unavailable — nothing to clear */
+    }
     if (!supabase) return
     await supabase.auth.signOut()
   }, [])

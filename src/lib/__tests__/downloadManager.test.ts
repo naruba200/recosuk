@@ -1,157 +1,70 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  createDownloadManager,
-  oszFilename,
-  type DownloadProgress,
-  type FetchFn,
-} from '../downloadManager'
-
-function streamingResponse(chunks: string[], total: number | null) {
-  const buffers = chunks.map((c) => new TextEncoder().encode(c))
-  let i = 0
-  return {
-    ok: true,
-    status: 200,
-    headers: {
-      get: (name: string) =>
-        name.toLowerCase() === 'content-length' && total !== null ? String(total) : null,
-    },
-    body: {
-      getReader: () => ({
-        read: async () => {
-          if (i >= buffers.length) return { done: true as const, value: undefined }
-          return { done: false as const, value: buffers[i++] }
-        },
-      }),
-    },
-  }
-}
-
-function failingResponse(status = 500) {
-  return { ok: false, status, headers: { get: () => null } }
-}
+import { createDownloadManager } from '../downloadManager'
 
 const REQ = {
   beatmapsetId: 42,
-  artist: 'Camellia',
-  title: 'Exit This Earth',
   seenKeyValue: 'recosuk-seen:guest:tester',
 }
 
-describe('downloadManager', () => {
-  it('streams progress and triggers an anchor save with an .osz filename', async () => {
-    const fetchFn = vi.fn<FetchFn>(async () => streamingResponse(['ab', 'cde'], 5))
-    const triggerSave = vi.fn()
+/**
+ * Deliberate design reversal (QA batch, 2026-10-28): the previous
+ * fetch+stream+Blob implementation was abysmally slow, so the download
+ * path now hands the mirror URL to the browser's native downloader via
+ * a hidden iframe. These tests pin the NEW behaviour — in particular,
+ * the download path must never call fetch().
+ */
+describe('downloadManager (native browser downloads)', () => {
+  it('hands the first mirror URL to the browser and records the download', () => {
+    const startBrowserDownload = vi.fn()
     const record = vi.fn()
-    const progress: DownloadProgress[] = []
-    const manager = createDownloadManager({
-      fetchFn,
-      triggerSave,
-      record,
-      createObjectUrl: () => 'blob:fake',
-      revokeObjectUrl: () => {},
-    })
+    const manager = createDownloadManager({ startBrowserDownload, record })
 
-    const result = await manager
-      .download({ ...REQ, onProgress: (p) => progress.push(p) })
-      .promise
+    const result = manager.startDownload(REQ)
 
-    expect(result).toEqual({ status: 'downloaded', mirrorId: 'beatconnect' })
-    expect(fetchFn).toHaveBeenCalledTimes(1)
-    expect(fetchFn.mock.calls[0][0]).toBe('https://beatconnect.io/b/42')
-    expect(progress).toEqual([
-      { received: 2, total: 5, mirrorId: 'beatconnect' },
-      { received: 5, total: 5, mirrorId: 'beatconnect' },
-    ])
-    expect(triggerSave).toHaveBeenCalledWith('blob:fake', 'Camellia - Exit This Earth.osz')
+    expect(result).toEqual({ status: 'started', mirrorId: 'beatconnect' })
+    expect(startBrowserDownload).toHaveBeenCalledTimes(1)
+    expect(startBrowserDownload).toHaveBeenCalledWith('https://beatconnect.io/b/42')
     expect(record).toHaveBeenCalledWith(REQ.seenKeyValue, 42, 'beatconnect')
   })
 
-  it('falls through to the second mirror when the first fails', async () => {
-    const fetchFn = vi.fn<FetchFn>(async (url) =>
-      url.includes('beatconnect.io')
-        ? failingResponse(500)
-        : streamingResponse(['xyz'], 3),
+  it('uses the explicitly picked mirror', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'sayobot' })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'sayobot' })
+    expect(startBrowserDownload).toHaveBeenCalledWith(
+      'https://txy1.sayobot.cn/beatmaps/download/full/42',
     )
+  })
+
+  it('never calls fetch — the browser downloader does the fetching', () => {
+    const fetchSpy = vi.fn(() => {
+      throw new Error('fetch must not be called from the download path')
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
+    try {
+      const manager = createDownloadManager({
+        startBrowserDownload: vi.fn(),
+        record: vi.fn(),
+      })
+      const result = manager.startDownload(REQ)
+      expect(result.status).toBe('started')
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('throws for an unknown mirror id instead of downloading the wrong file', () => {
     const manager = createDownloadManager({
-      fetchFn,
-      triggerSave: vi.fn(),
+      startBrowserDownload: vi.fn(),
       record: vi.fn(),
-      createObjectUrl: () => 'blob:fake',
-      revokeObjectUrl: () => {},
     })
-
-    const result = await manager.download(REQ).promise
-
-    expect(result).toEqual({ status: 'downloaded', mirrorId: 'catboy' })
-    expect(fetchFn).toHaveBeenCalledTimes(2)
-  })
-
-  it('opens the first mirror externally when every mirror fails', async () => {
-    const fetchFn = vi.fn<FetchFn>(async () => {
-      throw new TypeError('Failed to fetch')
-    })
-    const openExternal = vi.fn()
-    const record = vi.fn()
-    const manager = createDownloadManager({
-      fetchFn,
-      openExternal,
-      triggerSave: vi.fn(),
-      record,
-      createObjectUrl: () => 'blob:fake',
-      revokeObjectUrl: () => {},
-    })
-
-    const result = await manager.download(REQ).promise
-
-    expect(result).toEqual({ status: 'opened-externally', mirrorId: 'beatconnect' })
-    expect(fetchFn).toHaveBeenCalledTimes(4)
-    expect(openExternal).toHaveBeenCalledWith('https://beatconnect.io/b/42')
-    expect(record).toHaveBeenCalledWith(REQ.seenKeyValue, 42, 'beatconnect')
-  })
-
-  it('cancel aborts the fetch and reports cancelled without recording', async () => {
-    const fetchFn = vi.fn<FetchFn>(
-      (_url, init) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () =>
-            reject(new DOMException('The operation was aborted.', 'AbortError')),
-          )
-        }),
+    expect(() => manager.startDownload({ ...REQ, mirrorId: 'nope' })).toThrow(
+      'Unknown mirror: nope',
     )
-    const record = vi.fn()
-    const openExternal = vi.fn()
-    const manager = createDownloadManager({ fetchFn, record, openExternal })
-
-    const handle = manager.download(REQ)
-    handle.cancel()
-    const result = await handle.promise
-
-    expect(result.status).toBe('cancelled')
-    expect(record).not.toHaveBeenCalled()
-    expect(openExternal).not.toHaveBeenCalled()
-  })
-
-  it('duplicate calls for the same set share one fetch', async () => {
-    const fetchFn = vi.fn<FetchFn>(async () => streamingResponse(['ok'], 2))
-    const manager = createDownloadManager({
-      fetchFn,
-      triggerSave: vi.fn(),
-      record: vi.fn(),
-      createObjectUrl: () => 'blob:fake',
-      revokeObjectUrl: () => {},
-    })
-
-    const first = manager.download(REQ)
-    const second = manager.download(REQ)
-    expect(second).toBe(first)
-    const [a, b] = await Promise.all([first.promise, second.promise])
-    expect(a).toEqual(b)
-    expect(fetchFn).toHaveBeenCalledTimes(1)
-  })
-
-  it('sanitizes filenames', () => {
-    expect(oszFilename('A/B', 'T: "X"')).toBe('AB - T X.osz')
-    expect(oszFilename('', '')).toBe('beatmap.osz')
   })
 })
