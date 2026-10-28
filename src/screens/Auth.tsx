@@ -1,6 +1,6 @@
 // Converted from Stitch export: stitch-raw/12-auth.html
 import { useEffect, useState, type FormEvent, type MouseEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { NOT_CONFIGURED, useAuth } from '../lib/auth'
 
 type Notice = { kind: 'error' | 'note'; text: string } | null
@@ -392,8 +392,8 @@ export default function Auth() {
     </main>
     {/* Bottom Navigation / Progress Dots */}
     <footer className="w-full px-12 py-8 flex items-center justify-between z-10 border-t border-white/5 bg-[#150F1F]/60 backdrop-blur-md">
-      {/* Brand mark (no sample player shown here) */}
-      <div className="flex items-center gap-3">
+      {/* Brand mark (no sample player shown here) — clickable, goes home */}
+      <Link to="/" title="Go to Dashboard" aria-label="RecOsuk — go to Dashboard" className="flex items-center gap-3 hover:opacity-90 transition-opacity cursor-pointer">
         <div className="w-8 h-8 rounded-full bg-[#FF66AA]/20 border border-[#FF66AA]/50 flex items-center justify-center text-xs font-bold text-[#FF66AA]">{' '}o!{' '}
         </div>
         <div className="text-left">
@@ -402,7 +402,7 @@ export default function Auth() {
           <span className="text-xs font-bold text-[#F5F1FA]">rhythm companion
           </span>
         </div>
-      </div>
+      </Link>
       {/* Progress Dots (Step 1 of 6) */}
       <div className="flex items-center gap-3">
         {/* Step 1: Active */}

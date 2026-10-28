@@ -20,10 +20,11 @@ import Auth from './screens/Auth'
 import Settings from './screens/Settings'
 
 /**
- * Entry choice (simpler option): `/` is a first-visit gate.
- * A first visit (no `recosuk-onboarded` flag in localStorage) is redirected
- * to /onboarding; after that, `/` renders the Dashboard. The Dashboard is
- * also always reachable directly at /dashboard.
+ * Entry choice: `/` is a first-visit gate, and it always REDIRECTS —
+ * it never renders the Dashboard itself, so the address bar always
+ * shows the real route (/dashboard or /onboarding). A first visit (no
+ * `recosuk-onboarded` flag in localStorage) goes to /onboarding;
+ * everyone else goes to /dashboard.
  */
 function EntryGate() {
   const { user, loading } = useAuth()
@@ -34,14 +35,15 @@ function EntryGate() {
   } catch {
     onboarded = false
   }
+  // While the auth session is still resolving, keep showing the
+  // Dashboard shell rather than flashing a redirect.
+  if (loading) return <Dashboard />
   // Returning users (PLAN-v2 §5.6): a guest link or a signed-in account
   // with a linked profile skips onboarding entirely, flag or not.
-  if (guestSession || user) return <Dashboard />
-  if (loading) return <Dashboard />
-  if (!onboarded) {
-    return <Navigate to="/onboarding" replace />
+  if (guestSession || user || onboarded) {
+    return <Navigate to="/dashboard" replace />
   }
-  return <Dashboard />
+  return <Navigate to="/onboarding" replace />
 }
 
 /**

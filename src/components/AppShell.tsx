@@ -95,6 +95,34 @@ function HeaderAuthControl() {
   )
 }
 
+/**
+ * Sidebar-footer auth control: the same Sign in / Log out action as the
+ * header, always visible at the bottom of the sidebar so it can never
+ * be missed (users asked where the login/logout buttons are).
+ */
+function SidebarAuthControl() {
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  const onClick = async () => {
+    if (user) {
+      await signOut()
+    }
+    navigate('/auth?mode=signin')
+  }
+
+  return (
+    <button
+      className="flex w-full items-center justify-center gap-2 px-space-md py-2.5 rounded-DEFAULT bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-md text-label-md transition-all"
+      type="button"
+      onClick={onClick}
+    >
+      <span className="material-symbols-outlined text-[18px]">{user ? 'logout' : 'login'}</span>
+      <span>{user ? 'Log out' : 'Sign in'}</span>
+    </button>
+  )
+}
+
 export default function AppShell({
   identity,
   children,
@@ -111,7 +139,12 @@ export default function AppShell({
     >
       <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
         <div className="flex flex-col gap-space-md px-space-md">
-          <div className="flex items-center gap-space-sm px-space-xs pt-space-xs">
+          <NavLink
+            to="/dashboard"
+            title="Go to Dashboard"
+            aria-label="RecOsuk — go to Dashboard"
+            className="flex items-center gap-space-sm px-space-xs pt-space-xs rounded-DEFAULT hover:opacity-90 transition-opacity cursor-pointer"
+          >
             <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgba(255,176,204,0.35)]">
               <span className="text-on-secondary font-headline-md text-headline-md leading-none">o!</span>
             </div>
@@ -119,7 +152,7 @@ export default function AppShell({
               <span className="font-headline-md text-headline-md tracking-tight text-on-surface leading-none">RecOsuk</span>
               <span className="font-label-sm text-label-sm text-on-surface-variant">rhythm companion</span>
             </div>
-          </div>
+          </NavLink>
           <div className="flex items-center gap-space-sm p-space-sm rounded-DEFAULT bg-surface-container-high">
             <div className="relative flex-shrink-0">
               {identity.avatarUrl ? (
@@ -171,6 +204,7 @@ export default function AppShell({
           </nav>
         </div>
         <div className="px-space-md flex flex-col gap-space-xs">
+          <SidebarAuthControl />
           <div className="flex items-center justify-between p-space-sm rounded-DEFAULT bg-surface-container">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#7EE787] animate-pulse"></span>
