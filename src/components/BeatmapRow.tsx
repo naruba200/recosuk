@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { GameMode } from '../lib/mode'
-import { modeLabel } from '../lib/mode'
 import type { RecCandidate } from '../lib/recommend'
 import { formatLength, modeTagLabel } from '../lib/recommend'
 import { usePreviewPlayer } from '../lib/previewPlayer'
 import { useCapabilities } from '../lib/capabilities'
-import { MIRRORS, recordDownload } from '../lib/mirrors'
 import LockedButton from './LockedButton'
+import DownloadButton from './DownloadButton'
 
 /**
  * One recommendation/mirror result row, shared by Recommendations
@@ -59,18 +58,11 @@ export default function BeatmapRow({
   const preview = usePreviewPlayer()
   const caps = useCapabilities()
   const navigate = useNavigate()
-  const [menuOpen, setMenuOpen] = useState(false)
   const [saved, setSaved] = useState(false)
   const playing = preview.isPlaying(c.beatmapsetId)
   const isDownloaded = downloaded
 
   const goAuth = () => navigate('/auth')
-
-  const handleDownload = (mirrorId: string) => {
-    void recordDownload(seenKeyValue, c.beatmapsetId, mirrorId)
-    setMenuOpen(false)
-    onDownloaded?.()
-  }
 
   return (
     <article className="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
@@ -145,38 +137,15 @@ export default function BeatmapRow({
           >
             <span className="material-symbols-outlined text-[18px]">{playing ? 'pause' : 'play_arrow'}</span>
           </button>
-          <a
-            className={`w-9 h-9 rounded-full ${isDownloaded ? 'bg-surface-container-highest text-tertiary' : 'bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface'} flex items-center justify-center transition-all shadow-sm`}
-            title={isDownloaded ? 'Downloaded — click for mirrors' : 'Download beatmap (official)'}
-            href={MIRRORS[0].url(c.beatmapsetId)}
-            onClick={() => handleDownload('official')}
-          >
-            <span className="material-symbols-outlined text-[18px]">{isDownloaded ? 'check_circle' : 'download'}</span>
-          </a>
-          <button
-            className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-all shadow-sm"
-            title="Download mirrors"
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <span className="material-symbols-outlined text-[18px]">expand_more</span>
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-11 z-30 w-48 rounded-DEFAULT bg-surface-container-high shadow-xl p-1.5 flex flex-col">
-              <span className="px-2 py-1 font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant">Download via</span>
-              {MIRRORS.map((mirror) => (
-                <a
-                  key={mirror.id}
-                  className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md"
-                  href={mirror.url(c.beatmapsetId)}
-                  onClick={() => handleDownload(mirror.id)}
-                >
-                  {mirror.name}
-                </a>
-              ))}
-              <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">Full .osz set · {modeLabel(mode)} difficulty shown</span>
-            </div>
-          )}
+          <DownloadButton
+            beatmapsetId={c.beatmapsetId}
+            artist={c.artist}
+            title={c.title}
+            mode={mode}
+            seenKeyValue={seenKeyValue}
+            downloaded={isDownloaded}
+            onDownloaded={onDownloaded}
+          />
           <LockedButton
             allowed={caps.canSave}
             lockedTitle="Create a free account to save maps"

@@ -1112,9 +1112,11 @@ function MirrorReal() {
           <div className="rounded-lg bg-surface-container-low p-space-md shadow-md">
             <h2 className="font-headline-sm text-headline-sm text-on-surface mb-space-sm">Mirror sources</h2>
             <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Every result can be downloaded from the official osu! site or a community
-              mirror — open the mirror menu on a result. If one mirror is slow, another
-              usually isn't.
+              Hit the download button on a result and RecOsuk fetches the .osz
+              from a community mirror without leaving the page — if a mirror
+              blocks in-page downloads, your browser takes over in a new tab
+              instead. The official osu! option opens the osu! page and
+              needs your osu! login there.
             </p>
           </div>
         </aside>
