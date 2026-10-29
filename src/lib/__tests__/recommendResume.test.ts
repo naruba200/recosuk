@@ -355,7 +355,7 @@ describe('Feed dedupe unchanged (batch 6, part 4)', () => {
   })
 })
 
-describe('Renew shuffle (batch 6, part 4)', () => {
+describe('Renew determinism — no shuffle (shuffle removed 2026-10-29)', () => {
   it('a Generated run with every fetched set seen still returns them (no seen exclusion)', async () => {
     mockPagedSearch()
     const profile = testProfile()
@@ -375,63 +375,45 @@ describe('Renew shuffle (batch 6, part 4)', () => {
     expect(result.items.map((c) => c.beatmapsetId).sort()).toEqual([1, 2, 3, 4])
   })
 
-  it('shuffle with a fixed-seed rng is a deterministic permutation of the ranked pool', async () => {
+  it('identical inputs produce identical order: Renew is deterministic', async () => {
     mockPagedSearch()
     const profile = testProfile()
     const filters = defaultFiltersFor(profile)
     const base = { count: 20, filters, seen: EMPTY_SEEN, ignoreSeen: true }
 
-    const plain = await generateRecommendations(profile, 'mania', base)
-    expect(plain.diagnostics.shuffled).toBe(false)
-    const plainIds = plain.items.map((c) => c.beatmapsetId)
+    const first = await generateRecommendations(profile, 'mania', base)
+    const plainIds = first.items.map((c) => c.beatmapsetId)
 
-    // rng always 0: Fisher-Yates swaps every element toward the
-    // front — a fixed rotation of the ranked order, never the
-    // identity for a pool of 4.
-    const shuffled = await generateRecommendations(profile, 'mania', {
+    // A Renew-style fresh run (restart from page 1) returns the
+    // same PP-anchored fixed ranking — no shuffle, no rng.
+    const renewed = await generateRecommendations(profile, 'mania', {
       ...base,
-      shuffle: true,
-      rng: () => 0,
+      fresh: true,
     })
-    const shuffledIds = shuffled.items.map((c) => c.beatmapsetId)
-    expect([...shuffledIds].sort()).toEqual([...plainIds].sort())
-    expect(shuffledIds).not.toEqual(plainIds)
-    expect(shuffled.diagnostics.shuffled).toBe(true)
+    expect(renewed.items.map((c) => c.beatmapsetId)).toEqual(plainIds)
 
-    // Same seed, same inputs: the identical order comes back.
+    // And again: determinism holds across repeated runs.
     const again = await generateRecommendations(profile, 'mania', {
       ...base,
-      shuffle: true,
-      rng: () => 0,
+      fresh: true,
     })
-    expect(again.items.map((c) => c.beatmapsetId)).toEqual(shuffledIds)
+    expect(again.items.map((c) => c.beatmapsetId)).toEqual(plainIds)
   })
 
-  it('two Renew runs with different rng seeds differ', async () => {
+  it('diagnostics carry no shuffle flag', async () => {
     mockPagedSearch()
     const profile = testProfile()
     const filters = defaultFiltersFor(profile)
-    const base = { count: 20, filters, seen: EMPTY_SEEN, ignoreSeen: true }
-
-    const first = await generateRecommendations(profile, 'mania', {
-      ...base,
-      shuffle: true,
-      rng: () => 0,
+    const result = await generateRecommendations(profile, 'mania', {
+      count: 20,
+      filters,
+      seen: EMPTY_SEEN,
+      ignoreSeen: true,
     })
-    // rng near 1: every Fisher-Yates pick keeps its place, so the
-    // ranked order survives untouched — the opposite draw.
-    const second = await generateRecommendations(profile, 'mania', {
-      ...base,
-      shuffle: true,
-      rng: () => 0.999999,
-    })
-    expect(first.items.map((c) => c.beatmapsetId)).not.toEqual(
-      second.items.map((c) => c.beatmapsetId),
-    )
-    expect(second.diagnostics.shuffled).toBe(true)
+    expect('shuffled' in result.diagnostics).toBe(false)
   })
 
-  it('windowExhausted is still reported on a shuffled run', async () => {
+  it('windowExhausted is still reported on a Renew-style resume run', async () => {
     mockPagedSearch()
     const profile = testProfile()
     const filters = defaultFiltersFor(profile)
@@ -447,11 +429,8 @@ describe('Renew shuffle (batch 6, part 4)', () => {
       seen: EMPTY_SEEN,
       resume: first.nextResume,
       ignoreSeen: true,
-      shuffle: true,
-      rng: () => 0,
     })
     expect(renewed.items.map((c) => c.beatmapsetId).sort()).toEqual([5, 6])
     expect(renewed.diagnostics.windowExhausted).toBe(true)
-    expect(renewed.diagnostics.shuffled).toBe(true)
   })
 })

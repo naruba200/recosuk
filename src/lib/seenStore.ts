@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import type { AuthTier } from './capabilities'
 
 /**
@@ -60,10 +61,25 @@ export interface SeenStore {
   mark: (key: string, kind: SeenKind, beatmapsetId: number) => SeenState
   markMany: (key: string, kind: SeenKind, beatmapsetIds: number[]) => SeenState
   clear: (key: string) => void
+  /** Monotonic counter bumped on every effective mutation (a mark
+   * that changes something, or clearing a present key). Lets React
+   * screens subscribe and re-read fresh state — see
+   * useSeenVersion below. */
+  version: () => number
+  /** Subscribe to version bumps. Returns an unsubscribe function.
+   * The listener is stable per store instance. */
+  subscribe: (listener: () => void) => () => void
 }
 
 export function createSeenStore(storage: StorageLike | null): SeenStore {
   const memory = new Map<string, SeenState>()
+  let version = 0
+  const listeners = new Set<() => void>()
+
+  function notify(): void {
+    version += 1
+    for (const listener of [...listeners]) listener()
+  }
 
   function load(key: string): SeenState {
     const mem = memory.get(key)
@@ -114,6 +130,10 @@ export function createSeenStore(storage: StorageLike | null): SeenStore {
         /* quota/private mode — in-memory copy still works */
       }
     }
+    // Only reached when markMany actually changed something
+    // (it returns early otherwise), so every notify() here
+    // means real new state for subscribers to re-read.
+    notify()
   }
 
   function markMany(key: string, kind: SeenKind, ids: number[]): SeenState {
@@ -137,17 +157,42 @@ export function createSeenStore(storage: StorageLike | null): SeenStore {
     mark: (key, kind, id) => markMany(key, kind, [id]),
     markMany,
     clear: (key) => {
-      memory.delete(key)
+      // Only a present key is a real change worth notifying:
+      // clearing an absent key leaves every load() result as-is.
+      const had = memory.delete(key)
       try {
         storage?.removeItem(`seen:${key}`)
       } catch {
         /* ignore */
+      }
+      if (had) notify()
+    },
+    version: () => version,
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
       }
     },
   }
 }
 
 export const seenStore: SeenStore = createSeenStore(defaultStorage())
+
+/**
+ * Re-render the caller whenever any seen-store mutation lands
+ * (a download/skip/serve mark, or a clear). The version is
+ * global across keys, so a download in one Recommendations view
+ * re-renders the other view too — both re-read via
+ * seenStore.load() during that render and see the fresh
+ * `downloaded` list, with no polling and no focus/visibility
+ * listeners. Served marks also bump the version (they are real
+ * mutations); the re-render is cheap and the downloaded array
+ * keeps its identity across them.
+ */
+export function useSeenVersion(): number {
+  return useSyncExternalStore(seenStore.subscribe, seenStore.version, seenStore.version)
+}
 
 /**
  * Should this set be hidden from a fresh recommendation run? Played

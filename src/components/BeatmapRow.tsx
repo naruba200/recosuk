@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { GameMode } from '../lib/mode'
 import { modeLabel } from '../lib/mode'
 import type { RecCandidate } from '../lib/recommend'
-import { essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
+import { applyTagAllowlist, essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
 import { usePreviewPlayer } from '../lib/previewPlayer'
 import { useCapabilities } from '../lib/capabilities'
 import { supabase } from '../lib/supabase'
@@ -51,6 +51,13 @@ interface BeatmapRowProps {
   hideDownloadedIndicator?: boolean
   /** Card (grid) layout: same content, stacked instead of a row. */
   card?: boolean
+  /**
+   * Recommendations only: narrow the skillset chips to the
+   * list's 7 most-used tags (see lib/recommend
+   * mostUsedEssentialTags). Absent = all essential tags, as on
+   * Mirror / Welcome Recs.
+   */
+  tagAllowlist?: readonly string[]
   /** Unlimited feed only: renders the Skip (✕) action. */
   onSkip?: () => void
   onDownloaded?: () => void
@@ -363,6 +370,7 @@ export default function BeatmapRow({
   downloaded = false,
   hideDownloadedIndicator = false,
   card = false,
+  tagAllowlist,
   onSkip,
   onDownloaded,
   rank,
@@ -451,8 +459,11 @@ export default function BeatmapRow({
             )}
             {/* Skillset-vocabulary tags only (batch 5, item C) —
                 raw mapper tags (song/series/meme tags) are not
-                shown; no chips at all when none match. */}
-            {essentialTags(c.tags).map((tag) => (
+                shown; no chips at all when none match.
+                Recommendations narrows these to the list's 7
+                most-used tags via tagAllowlist; other screens
+                show all essential tags. */}
+            {applyTagAllowlist(essentialTags(c.tags), tagAllowlist).map((tag) => (
               <span key={tag} className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">{tag}</span>
             ))}
           </div>

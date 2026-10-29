@@ -4,7 +4,7 @@
 // bottom runs the windowed recommendation engine (see lib/recommend.ts
 // for the ranking-honesty notes) with working filters, previews and
 // downloads.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
 import LoadingState from '../components/LoadingState'
@@ -13,11 +13,13 @@ import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profile
 import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import {
+  applyDownloadedVisibility,
   clearRecTag,
   defaultFiltersFor,
   emptyGenerationResume,
   emptyPoolReason,
   generateRecommendations,
+  mostUsedEssentialTags,
   widenRecFilters,
   type GenerationDiagnostics,
   type GenerationResume,
@@ -25,7 +27,7 @@ import {
   type RecFilters,
 } from '../lib/recommend'
 import { FeedReal } from './RecommendationsUnlimited'
-import { seenKey, seenStore } from '../lib/seenStore'
+import { seenKey, seenStore, useSeenVersion } from '../lib/seenStore'
 import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
 import { useCapabilities } from '../lib/capabilities'
@@ -840,7 +842,6 @@ function RecommendationsReal({
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [downloadedTick, setDownloadedTick] = useState(0)
   const runRef = useRef(0)
 
   useEffect(() => {
@@ -852,7 +853,7 @@ function RecommendationsReal({
     async (
       nextFilters: RecFilters,
       nextCount: number,
-      opts: { fresh?: boolean; shuffle?: boolean } = {},
+      opts: { fresh?: boolean } = {},
     ) => {
       const run = ++runRef.current
       setBusy(true)
@@ -879,13 +880,12 @@ function RecommendationsReal({
           fresh: opts.fresh,
           resume: resumeRef.current.resume,
           boostFor,
-          // Part 4: Generated mode ALWAYS shows beatmaps, even
-          // already-seen ones — the seen exclusion never applies
-          // here. The run still marks served below (the Endless
-          // feed reads it), which is harmless now that this path
-          // ignores it. `shuffle` is Renew-only.
+          // Part 4: Generated mode's fetch-time seen exclusion
+          // stays off (ignoreSeen) — downloaded maps are hidden
+          // at list level instead (applyDownloadedVisibility),
+          // so the engine pool is unaffected. The run still marks
+          // served below (the Endless feed reads it).
           ignoreSeen: true,
-          shuffle: opts.shuffle,
         })
         if (runRef.current !== run) return
         resumeRef.current = { sig, resume: result.nextResume }
@@ -930,7 +930,29 @@ function RecommendationsReal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, mode])
 
-  const downloaded = seenStore.load(key).downloaded
+  // Live downloaded state: re-render whenever any seen-store
+  // mutation lands (a download in the Endless view included),
+  // so `downloaded` below is never a stale snapshot — the old
+  // per-screen downloadedTick only refreshed on this view's
+  // own downloads. The downloaded array keeps its identity
+  // across served-only marks, so the memos below stay cheap.
+  const seenVersion = useSeenVersion()
+  const downloaded = useMemo(
+    () => seenStore.load(key).downloaded,
+    [key, seenVersion],
+  )
+  // Hide downloaded maps, reappearing when every item in this
+  // window is downloaded (see applyDownloadedVisibility). The
+  // chip allowlist is computed from the VISIBLE rows, so hidden
+  // rows' tags never claim top-7 slots.
+  const { visible: visibleItems, showingDownloadedFallback } = useMemo(
+    () => applyDownloadedVisibility(items, downloaded),
+    [items, downloaded],
+  )
+  // Row chips: only the 7 most-used essential tags across the
+  // rendered list get chips — the rest of the skillset
+  // vocabulary stays hidden on this screen.
+  const tagAllowlist = useMemo(() => mostUsedEssentialTags(visibleItems), [visibleItems])
 
   return (
     <div className="flex flex-col w-full">
@@ -1060,14 +1082,19 @@ function RecommendationsReal({
               </div>
             </div>
           )}
-          {items.map((c) => (
+          {showingDownloadedFallback && (
+            <p className="font-body-sm text-body-sm text-on-surface-variant px-space-xs">
+              Everything in this batch is already downloaded — showing downloaded maps again.
+            </p>
+          )}
+          {visibleItems.map((c) => (
             <BeatmapRow
               key={c.beatmapsetId}
               candidate={c}
               mode={mode}
               seenKeyValue={key}
+              tagAllowlist={tagAllowlist}
               downloaded={downloaded.includes(c.beatmapsetId)}
-              onDownloaded={() => setDownloadedTick((n) => n + 1)}
               feedback={rowMaps.feedbackById.get(c.beatmapId) ?? null}
               containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
               onFeedbackChange={rowMaps.onFeedbackChange}
@@ -1076,18 +1103,17 @@ function RecommendationsReal({
           ))}
           {/* Part 4 + batch 7, item 3 — Renew: rendered at the bottom
               of the list whenever items were returned (NOT gated on
-              windowExhausted). Every press restarts from page 1 with
-              a fresh shuffle, so consecutive Renews show different
-              orders/selections. Generation keeps the PP-anchored
-              fixed ranking — only Renew shuffles, and the label says
-              so. There is no separate Regenerate button anymore. */}
+              windowExhausted). Every press restarts from page 1 in
+              the deterministic PP-anchored fixed ranking — no
+              shuffling, so consecutive Renews show the same order
+              (minus newly downloaded maps, which stay hidden until
+              every item in the window is downloaded). There is no
+              separate Regenerate button anymore. */}
           {!error && items.length > 0 && (
             <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
-              {(diagnostics?.shuffled || diagnostics?.windowExhausted) && (
+              {diagnostics?.windowExhausted && (
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  {diagnostics.shuffled
-                    ? 'Renewed picks are shuffled — order is random for this run.'
-                    : "You've reached the end of this window."}
+                  You&apos;ve reached the end of this window.
                 </p>
               )}
               <button
@@ -1095,18 +1121,17 @@ function RecommendationsReal({
                 className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0 disabled:opacity-50"
                 type="button"
                 disabled={busy}
-                title="Start over from the first window with a freshly shuffled set — every Renew re-randomizes"
+                title="Start over from the first window in the fixed ranking order"
                 onClick={() => {
                   resumeRef.current = null
                   window.scrollTo({ top: 0, behavior: 'smooth' })
-                  void generate(filters, count, { fresh: true, shuffle: true })
+                  void generate(filters, count, { fresh: true })
                 }}
               >
                 Renew recommendations
               </button>
             </div>
           )}
-          <span className="hidden">{downloadedTick}</span>
         </main>
       </div>
     </div>

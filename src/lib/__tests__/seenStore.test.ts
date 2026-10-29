@@ -113,4 +113,73 @@ describe('seenStore', () => {
     store.mark(key, 'skipped', 5)
     expect(JSON.parse(storage.getItem(`seen:${key}`) as string)).not.toHaveProperty('served')
   })
+
+  // Shared seen-version signal (2026-10-29): subscribers re-render
+  // whenever an effective mutation lands, so a download in one
+  // Recommendations view refreshes the other view's rows.
+  it('version starts at 0 and bumps on each effective mark', () => {
+    const store = createSeenStore(memoryStorage())
+    const key = seenKey('guest', 'versioned')
+    expect(store.version()).toBe(0)
+    store.mark(key, 'downloaded', 1)
+    expect(store.version()).toBe(1)
+    store.markMany(key, 'skipped', [2, 3])
+    expect(store.version()).toBe(2)
+  })
+
+  it('a mark that changes nothing bumps neither the version nor subscribers', () => {
+    const store = createSeenStore(memoryStorage())
+    const key = seenKey('guest', 'no-op')
+    let calls = 0
+    store.subscribe(() => {
+      calls += 1
+    })
+    store.mark(key, 'downloaded', 1)
+    expect(calls).toBe(1)
+    // Already present: no change, no notify.
+    store.mark(key, 'downloaded', 1)
+    store.markMany(key, 'downloaded', [1])
+    expect(calls).toBe(1)
+    expect(store.version()).toBe(1)
+  })
+
+  it('subscribers are notified on mutation and stop after unsubscribe', () => {
+    const store = createSeenStore(memoryStorage())
+    const key = seenKey('guest', 'sub')
+    let calls = 0
+    const off = store.subscribe(() => {
+      calls += 1
+    })
+    store.mark(key, 'skipped', 9)
+    expect(calls).toBe(1)
+    off()
+    store.mark(key, 'skipped', 10)
+    expect(calls).toBe(1)
+    // The version still advances: unsubscribe only drops the listener.
+    expect(store.version()).toBe(2)
+  })
+
+  it('clearing a present key notifies; clearing an absent key does not', () => {
+    const store = createSeenStore(memoryStorage())
+    const key = seenKey('guest', 'clearable')
+    let calls = 0
+    store.subscribe(() => {
+      calls += 1
+    })
+    store.clear(key)
+    expect(calls).toBe(0)
+    expect(store.version()).toBe(0)
+    store.mark(key, 'downloaded', 1)
+    store.clear(key)
+    expect(calls).toBe(2)
+    expect(store.load(key).downloaded).toEqual([])
+  })
+
+  it('versions are independent per store instance', () => {
+    const a = createSeenStore(memoryStorage())
+    const b = createSeenStore(memoryStorage())
+    a.mark(seenKey('guest', 'x'), 'downloaded', 1)
+    expect(a.version()).toBe(1)
+    expect(b.version()).toBe(0)
+  })
 })

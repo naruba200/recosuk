@@ -301,6 +301,88 @@ export function essentialTags(tags: string[]): string[] {
   return out
 }
 
+/** Default size of the row-chip allowlist (see mostUsedEssentialTags). */
+export const ROW_TAG_ALLOWLIST_LIMIT = 7
+
+/**
+ * The N most-used essential tags across a list of candidates
+ * ("7 most use tags overall", 2026-10-29): each candidate
+ * contributes its essentialTags() output once per tag (the
+ * chips that would actually render, per-row cap + dedupe
+ * already applied), most-used first. Ties break by vocabulary
+ * order, so the result is deterministic for the same list.
+ * The Recommendations screens narrow row chips to this set so
+ * a list shows one shared handful of dominant skillsets
+ * instead of a different scattering per row; Mirror / Welcome
+ * Recs pass no allowlist and keep the full essential tags.
+ */
+export function mostUsedEssentialTags(
+  candidates: ReadonlyArray<Pick<RecCandidate, 'tags'>>,
+  limit: number = ROW_TAG_ALLOWLIST_LIMIT,
+): string[] {
+  if (limit <= 0) return []
+  const counts = new Map<string, number>()
+  for (const c of candidates) {
+    for (const tag of essentialTags(c.tags ?? [])) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+  const vocabOrder = new Map([...SKILLSET_TAG_VOCABULARY].map((tag, i) => [tag, i]))
+  return [...counts.entries()]
+    .sort(
+      (a, b) =>
+        b[1] - a[1] || (vocabOrder.get(a[0]) ?? 0) - (vocabOrder.get(b[0]) ?? 0),
+    )
+    .slice(0, limit)
+    .map(([tag]) => tag)
+}
+
+/**
+ * Narrow a row's essential tags to an allowlist (the list's
+ * most-used tags). An undefined allowlist means no narrowing —
+ * every essential tag shows, as before.
+ */
+export function applyTagAllowlist(
+  tags: readonly string[],
+  allowlist: readonly string[] | undefined,
+): string[] {
+  if (!allowlist) return [...tags]
+  const allowed = new Set(allowlist)
+  return tags.filter((tag) => allowed.has(tag))
+}
+
+/**
+ * Hide downloaded maps from a rendered recommendation list
+ * (2026-10-29): sets in the seen store's `downloaded` list drop
+ * out of the Generated and Endless rows. Exhaustion fallback:
+ * when EVERY item in the current window is downloaded, the
+ * downloaded items show again — with their downloaded state
+ * visible — plus an honest note from the caller. "All" means
+ * all of this rendered window, not the whole pool: a fresh
+ * window or a new refill re-evaluates the rule from its own
+ * items. Mirror / Welcome Recs / Collections never call this;
+ * they keep showing downloaded state. Filtering happens at
+ * list level, never inside BeatmapRow, and the engine's
+ * fetch-time exclusion is untouched.
+ */
+export interface DownloadVisibility<T> {
+  visible: T[]
+  /** True when the fallback is active: every item was downloaded. */
+  showingDownloadedFallback: boolean
+}
+
+export function applyDownloadedVisibility<T extends { beatmapsetId: number }>(
+  items: readonly T[],
+  downloadedIds: readonly number[],
+): DownloadVisibility<T> {
+  const downloaded = new Set(downloadedIds)
+  const visible = items.filter((c) => !downloaded.has(c.beatmapsetId))
+  if (visible.length > 0 || items.length === 0) {
+    return { visible, showingDownloadedFallback: false }
+  }
+  return { visible: [...items], showingDownloadedFallback: true }
+}
+
 export function setToCandidate(
   set: SearchBeatmapset,
   mode: GameMode,
@@ -592,8 +674,8 @@ function normalizeSearchPage(page: unknown): SearchPage {
  * the SR/BPM/length/status/key-count filters, afterSeen = survivors
  * of the seen-set exclusion when it is active (= poolSize when the
  * run ignores seen, as Generated mode always does since batch 6,
- * part 4). `shuffled` marks a Renew run: the ranked list was
- * shuffled, so the order is random for that run.
+ * part 4 — downloaded hiding happens at list level in the UI, not
+ * in this pool).
  */
 export interface GenerationDiagnostics {
   queries: string[]
@@ -604,8 +686,6 @@ export interface GenerationDiagnostics {
   bpmUnknown: boolean
   /** True when every query's cursor is spent — no further window exists. */
   windowExhausted: boolean
-  /** True when this run shuffled the ranked list (Renew only). */
-  shuffled: boolean
 }
 
 export interface GenerateResult {
@@ -637,9 +717,11 @@ export function emptyGenerationResume(): GenerationResume {
  * Plain-language reason for an empty result, naming the stage that
  * emptied the pool. Used by the Generated recommendations screen;
  * never blames user-set filters for a pool the defaults emptied.
- * There is deliberately NO seen-set branch: Generated mode always
- * shows beatmaps, even already-seen ones (batch 6, part 4), so the
- * seen set can never be what emptied the pool there.
+ * There is deliberately NO seen-set branch: Generated mode's
+ * fetch-time exclusion is off (ignoreSeen), so the seen set can
+ * never be what emptied this pool — downloaded hiding happens at
+ * list level in the UI instead, with its own all-downloaded
+ * fallback (see applyDownloadedVisibility).
  */
 export function emptyPoolReason(d: GenerationDiagnostics, filters: RecFilters): string {
   if (d.rawSets === 0) {
@@ -672,23 +754,18 @@ export async function generateRecommendations(
     /** Bypass the search-page cache (explicit Regenerate). */
     fresh?: boolean
     /** Skip the seen-set exclusion for this run. Generated mode
-     * always passes this (batch 6, part 4): it shows beatmaps even
-     * when already seen. The seen store itself is never touched
-     * by this flag — the caller still marks served separately.
-     * The Endless feed does NOT use this: its no-repeat guarantee
-     * is its whole point. */
+     * always passes this (batch 6, part 4): the fetch-time
+     * exclusion never applies here — downloaded maps are hidden
+     * at list level by the UI instead (applyDownloadedVisibility),
+     * so the engine pool is unaffected. The seen store itself is
+     * never touched by this flag — the caller still marks served
+     * separately. The Endless feed does NOT use this: its
+     * no-repeat guarantee is its whole point. */
     ignoreSeen?: boolean
     /** Resume state from the previous window (see GenerationResume).
      * Ignored when `fresh` is set — a fresh run always restarts
      * from page 1. */
     resume?: GenerationResume
-    /** Renew only: Fisher-Yates shuffle the ranked list before
-     * taking `count`, so the run shows a random subset in a random
-     * order. Normal runs keep the PP-anchored fixed ranking. */
-    shuffle?: boolean
-    /** Random source for the shuffle. Defaults to Math.random;
-     * tests inject a fixed-seed source for determinism. */
-    rng?: () => number
     /** M5 learning: per-candidate boost from the mode's own
      * ratings (feedback.ts `boostForCandidate` closure). Guests
      * and feedback-free runs omit it — scoring is unchanged. */
@@ -749,7 +826,6 @@ export async function generateRecommendations(
     afterSeen: poolSize,
     bpmUnknown: !hasKnownBpm(profile),
     windowExhausted,
-    shuffled: opts.shuffle ?? false,
   }
 
   const playedSetIds = new Set(opts.seen?.played ?? [])
@@ -779,19 +855,6 @@ export async function generateRecommendations(
       }),
     )
     ranked = [...enriched, ...ranked.slice(enrichN)]
-  }
-
-  // Renew (part 4): shuffle the RANKED list with the injected rng,
-  // then take `count` — a random subset in a random order. Normal
-  // runs never reach this: their ranking stays PP-anchored.
-  if (opts.shuffle) {
-    const rng = opts.rng ?? Math.random
-    for (let i = ranked.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1))
-      const tmp = ranked[i]
-      ranked[i] = ranked[j]
-      ranked[j] = tmp
-    }
   }
 
   return {

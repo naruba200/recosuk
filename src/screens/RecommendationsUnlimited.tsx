@@ -3,7 +3,7 @@
 // unchanged when nothing is linked. The real variant at the bottom is
 // the endless feed: windowed re-ranking over a cursor-paginated pool,
 // seen-set dedupe, honest end card.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
 import LoadingState from '../components/LoadingState'
@@ -12,12 +12,14 @@ import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profile
 import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import {
+  applyDownloadedVisibility,
   defaultFiltersFor,
   FeedSession,
+  mostUsedEssentialTags,
   type RecCandidate,
   type RecFilters,
 } from '../lib/recommend'
-import { seenKey, seenStore, type SeenState } from '../lib/seenStore'
+import { seenKey, seenStore, useSeenVersion, type SeenState } from '../lib/seenStore'
 import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
 import { useCapabilities } from '../lib/capabilities'
@@ -929,7 +931,6 @@ export function FeedReal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [restarted, setRestarted] = useState(false)
-  const [downloadedTick, setDownloadedTick] = useState(0)
   const sessionRef = useRef<FeedSession | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const loadingRef = useRef(false)
@@ -1061,7 +1062,27 @@ export function FeedReal({
     void startSession(filters, { ...seen, served: [], skipped: [] }, { fresh: true })
   }
 
-  const downloaded = seenStore.load(key).downloaded
+  // Live downloaded state: same shared signal as the Generated
+  // list — a download in either view re-renders this one, so
+  // `downloaded` below is never a stale snapshot.
+  const seenVersion = useSeenVersion()
+  const downloaded = useMemo(
+    () => seenStore.load(key).downloaded,
+    [key, seenVersion],
+  )
+  // Hide downloaded maps from the rendered rows (same rule as
+  // Generated: reappear when everything loaded so far is
+  // downloaded). The engine's fetch-time exclusion is untouched;
+  // this only filters rows already served into `items`, so it
+  // re-evaluates live as downloads land and refills arrive. The
+  // chip allowlist is computed from the VISIBLE rows.
+  const { visible: visibleItems, showingDownloadedFallback } = useMemo(
+    () => applyDownloadedVisibility(items, downloaded),
+    [items, downloaded],
+  )
+  // Row chips: same top-7 narrowing as the Generated list — the
+  // set recomputes as the feed grows.
+  const tagAllowlist = useMemo(() => mostUsedEssentialTags(visibleItems), [visibleItems])
 
   return (
     <div className="flex flex-col w-full">
@@ -1121,14 +1142,19 @@ export function FeedReal({
             </div>
           )}
 
-          {items.map((c) => (
+          {showingDownloadedFallback && (
+            <p className="font-body-sm text-body-sm text-on-surface-variant px-space-xs">
+              Everything loaded so far is already downloaded — showing downloaded maps again.
+            </p>
+          )}
+          {visibleItems.map((c) => (
             <BeatmapRow
               key={c.beatmapsetId}
               candidate={c}
               mode={mode}
               seenKeyValue={key}
+              tagAllowlist={tagAllowlist}
               downloaded={downloaded.includes(c.beatmapsetId)}
-              onDownloaded={() => setDownloadedTick((n) => n + 1)}
               onSkip={() => handleSkip(c)}
               feedback={rowMaps.feedbackById.get(c.beatmapId) ?? null}
               containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
@@ -1136,7 +1162,6 @@ export function FeedReal({
               onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
             />
           ))}
-          <span className="hidden">{downloadedTick}</span>
 
           {loading && (
             <>
