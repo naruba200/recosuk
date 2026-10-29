@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
 import MenuSelect from '../components/MenuSelect'
+import OsuConnectionRow from '../components/OsuConnectionRow'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
 import { useModeStore } from '../lib/modeStore'
@@ -228,6 +229,10 @@ export default function Settings() {
                     </button>
                   </div>
                 </div>
+                {/* Row: osu! account connection (Phase A, batch 15) — real
+                    osu! sign-in for in-page official downloads. Guests see
+                    the row locked; the component handles both states. */}
+                <OsuConnectionRow />
                 {/* Row: Account Tier / Status — live tier */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
                   <div className="flex flex-col">

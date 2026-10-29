@@ -5,15 +5,43 @@
 // token, throttles upstream calls, caches responses, and returns public
 // osu! API v2 data.
 //
+// Phase A (batch 15) adds the osu! USER-OAuth flow on top: sign-in,
+// encrypted per-user token storage, and a header-only download probe.
+// Those actions verify the caller's Supabase JWT first (the function
+// runs --no-verify-jwt for the guest tier) and read/write the
+// osu_user_tokens table through the SERVICE-ROLE client only. Token
+// values are NEVER returned to the browser.
+//
 // Deploy:  supabase functions deploy osu-proxy --no-verify-jwt
 // Secrets: supabase secrets set OSU_CLIENT_ID=... OSU_CLIENT_SECRET=...
+//          (Phase A also needs OSU_TOKEN_ENCRYPTION_KEY — see
+//          docs/OSU-SIGNIN.md; missing it 500s only the auth actions.)
 // (--no-verify-jwt because the guest tier has no Supabase user JWT; the
 // function only ever returns public data, and the anon key is still sent.)
 //
 // Request:  POST JSON { action, mode, ...params }  (GET with query params
 //           works too: ?action=getUser&mode=osu&username=...)
 // Response: 200 { data } on success, or { error, status } with a matching
-//           HTTP status on failure.
+//           HTTP status on failure. Auth actions add a stable `code`
+//           (e.g. osu_auth_expired) the client keys its UI off.
+
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.118.0'
+import {
+  DEFAULT_PROBE_BEATMAPSET_ID,
+  OsuAuthError,
+  buildOsuAuthorizeUrl,
+  encryptToken,
+  exchangeAuthorizationCode,
+  fetchOsuMe,
+  getValidAccessToken,
+  isTokenExpired,
+  isValidOsuRedirectUri,
+  officialDownloadUrl,
+  probeDownloadVariant,
+  type TokenRow,
+  type TokenStore,
+  type UserTokenEnv,
+} from './authHelpers.ts'
 
 // ---------------------------------------------------------------------------
 // Config
@@ -115,9 +143,12 @@ function cacheSet(key: string, body: unknown, ttlMs: number) {
 
 class ProxyError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** Stable machine-readable code, returned alongside `error` when set (auth actions). */
+  code?: string
+  constructor(message: string, status: number, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -128,8 +159,8 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-function errorJson(error: string, status: number): Response {
-  return json({ error, status }, status)
+function errorJson(error: string, status: number, code?: string): Response {
+  return json(code ? { error, status, code } : { error, status }, status)
 }
 
 // ---------------------------------------------------------------------------
@@ -198,8 +229,20 @@ function requireId(params: Params, key: string): string {
   return encodeURIComponent(String(value))
 }
 
-async function runAction(params: Params): Promise<unknown> {
+async function runAction(params: Params, req: Request): Promise<unknown> {
   const action = requireString(params, 'action')
+  // Auth actions (Phase A) are handled before the mode logic: they are
+  // mode-free, JWT-verified, and never touch the public osu! API path.
+  const AUTH_ACTIONS = new Set([
+    'getOsuAuthorizeUrl',
+    'exchangeOsuCode',
+    'osuAuthStatus',
+    'disconnectOsu',
+    'probeOsuDownload',
+  ])
+  if (AUTH_ACTIONS.has(action)) {
+    return runAuthAction(action, params, req)
+  }
   // Mode is required ONLY by the actions whose upstream endpoint is
   // mode-scoped. `getMostPlayed` takes no mode upstream (the osu!
   // most_played endpoint has no mode parameter), the beatmap-pack
@@ -314,6 +357,242 @@ async function runAction(params: Params): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// osu! user-OAuth actions (Phase A, batch 15)
+//
+// These run under --no-verify-jwt (the guest tier has no Supabase JWT),
+// so every action verifies the caller's JWT itself via auth.getUser()
+// before doing anything. Tokens live ONLY in the osu_user_tokens table
+// (encrypted, service-role client) and are NEVER returned to the
+// browser — exchange/status/probe responses carry usernames, expiry,
+// and probe headers only.
+//
+// No PKCE: the code exchange happens server-side with the client
+// secret, and the browser never sees a token. `state` (checked by the
+// callback page against sessionStorage) is the CSRF protection.
+// ---------------------------------------------------------------------------
+
+interface UserAuthEnv extends UserTokenEnv {
+  supabaseUrl: string
+  anonKey: string
+  serviceRoleKey: string
+}
+
+/** Reads every secret the auth actions need; names the missing one in the 500. */
+function requireUserAuthEnv(): UserAuthEnv {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const clientId = Deno.env.get('OSU_CLIENT_ID')
+  const clientSecret = Deno.env.get('OSU_CLIENT_SECRET')
+  const encryptionKeyB64 = Deno.env.get('OSU_TOKEN_ENCRYPTION_KEY')
+  if (!supabaseUrl) throw new ProxyError('osu-proxy is not configured (missing SUPABASE_URL)', 500)
+  if (!anonKey) throw new ProxyError('osu-proxy is not configured (missing SUPABASE_ANON_KEY)', 500)
+  if (!serviceRoleKey) {
+    throw new ProxyError(
+      'osu-proxy is not configured (missing SUPABASE_SERVICE_ROLE_KEY). ' +
+        'Set it with: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=... (see docs/OSU-SIGNIN.md)',
+      500,
+    )
+  }
+  if (!clientId || !clientSecret) {
+    throw new ProxyError('osu-proxy is not configured (missing OSU_CLIENT_ID / OSU_CLIENT_SECRET)', 500)
+  }
+  if (!encryptionKeyB64) {
+    throw new ProxyError(
+      'osu-proxy is not configured (missing OSU_TOKEN_ENCRYPTION_KEY). ' +
+        'Generate one with: openssl rand -base64 32, then set it with: supabase secrets set OSU_TOKEN_ENCRYPTION_KEY=... (see docs/OSU-SIGNIN.md)',
+      500,
+    )
+  }
+  return { supabaseUrl, anonKey, serviceRoleKey, clientId, clientSecret, encryptionKeyB64 }
+}
+
+/**
+ * Verifies the caller's Supabase JWT (Bearer) and returns their user id
+ * plus a service-role client for the token table. No JWT / invalid JWT
+ * = 401, and the action never runs. (An anon key passed as the Bearer
+ * token fails getUser — only a real user session passes.)
+ */
+async function requireUserId(req: Request): Promise<{ userId: string; service: SupabaseClient }> {
+  const token = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  if (!token) {
+    throw new ProxyError('A RecOsuk sign-in is required for this action.', 401, 'osu_auth_required')
+  }
+  const env = requireUserAuthEnv()
+  const authClient = createClient(env.supabaseUrl, env.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data, error } = await authClient.auth.getUser(token)
+  if (error || !data.user) {
+    throw new ProxyError(
+      'A RecOsuk sign-in is required for this action (session invalid or expired).',
+      401,
+      'osu_auth_required',
+    )
+  }
+  const service = createClient(env.supabaseUrl, env.serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  return { userId: data.user.id, service }
+}
+
+/** TokenStore backed by the osu_user_tokens table via the service-role client. */
+function supabaseTokenStore(service: SupabaseClient): TokenStore {
+  return {
+    async get(userId: string): Promise<TokenRow | null> {
+      const { data, error } = await service
+        .from('osu_user_tokens')
+        .select('user_id, access_token_enc, refresh_token_enc, expires_at, osu_user_id, osu_username')
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (error) throw new ProxyError('Could not read the osu! connection.', 500)
+      return (data as TokenRow | null) ?? null
+    },
+    async upsert(row: TokenRow): Promise<void> {
+      const { error } = await service.from('osu_user_tokens').upsert(row, { onConflict: 'user_id' })
+      if (error) throw new ProxyError('Could not save the osu! connection.', 500)
+    },
+    async remove(userId: string): Promise<void> {
+      const { error } = await service.from('osu_user_tokens').delete().eq('user_id', userId)
+      if (error) throw new ProxyError('Could not remove the osu! connection.', 500)
+    },
+  }
+}
+
+async function runAuthAction(action: string, params: Params, req: Request): Promise<unknown> {
+  switch (action) {
+    // Step 1 of the sign-in: the client generated a crypto-random
+    // `state` and sends the origin-derived redirect_uri; the server
+    // validates both and returns the authorize URL to navigate to.
+    // The client_id is public by nature — returning it here keeps the
+    // secret server-side and avoids inventing a VITE_ env contract.
+    case 'getOsuAuthorizeUrl': {
+      await requireUserId(req)
+      const redirectUri = requireString(params, 'redirectUri')
+      if (!isValidOsuRedirectUri(redirectUri)) {
+        throw new ProxyError(
+          'The redirect URI is not a valid RecOsuk callback URL (expected <origin>/auth/osu/callback).',
+          400,
+          'osu_redirect_uri_mismatch',
+        )
+      }
+      const state = requireString(params, 'state')
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(state)) {
+        throw new ProxyError('The sign-in state value is invalid. Try signing in with osu! again.', 400)
+      }
+      const env = requireUserAuthEnv()
+      return {
+        authorizeUrl: buildOsuAuthorizeUrl({ clientId: env.clientId, redirectUri, state }),
+      }
+    }
+    // Step 2: exchange the authorization code for tokens (server-side,
+    // with the client secret). Returns ONLY the username/id/expiry —
+    // never a token value.
+    case 'exchangeOsuCode': {
+      const { userId, service } = await requireUserId(req)
+      if (req.method !== 'POST') {
+        throw new ProxyError('exchangeOsuCode requires a POST request.', 405)
+      }
+      const code = requireString(params, 'code')
+      const redirectUri = requireString(params, 'redirectUri')
+      if (!isValidOsuRedirectUri(redirectUri)) {
+        throw new ProxyError(
+          'The redirect URI does not match the one used to start sign-in — it must be <origin>/auth/osu/callback. ' +
+            'If osu! rejected it, the redirect URI is probably not registered in the osu! OAuth app settings (see docs/OSU-SIGNIN.md).',
+          400,
+          'osu_redirect_uri_mismatch',
+        )
+      }
+      const env = requireUserAuthEnv()
+      const grant = await exchangeAuthorizationCode(
+        { fetchFn: fetch, env },
+        { code, redirectUri },
+      )
+      // One /me call at exchange time; status reads storage only.
+      // If it fails, the connection is still stored with a null name
+      // and the UI shows "connected (name unknown)".
+      const me = await fetchOsuMe(fetch, grant.accessToken)
+      const expiresAt = new Date(Date.now() + grant.expiresIn * 1000).toISOString()
+      await supabaseTokenStore(service).upsert({
+        user_id: userId,
+        access_token_enc: await encryptToken(grant.accessToken, env.encryptionKeyB64),
+        refresh_token_enc: await encryptToken(grant.refreshToken, env.encryptionKeyB64),
+        expires_at: expiresAt,
+        osu_user_id: me?.id ?? null,
+        osu_username: me?.username ?? null,
+      })
+      return { osuUsername: me?.username ?? null, osuUserId: me?.id ?? null, expiresAt }
+    }
+    // Status: storage read only — no osu! call per read. `expired`
+    // means the access token is past its (leeway-adjusted) expiry;
+    // the stored refresh token may still renew it transparently.
+    case 'osuAuthStatus': {
+      const { userId, service } = await requireUserId(req)
+      const row = await supabaseTokenStore(service).get(userId)
+      if (!row) {
+        return { connected: false, osuUsername: null, osuUserId: null, expiresAt: null, expired: false }
+      }
+      return {
+        connected: true,
+        osuUsername: row.osu_username,
+        osuUserId: row.osu_user_id,
+        expiresAt: row.expires_at,
+        expired: isTokenExpired(Date.parse(row.expires_at), Date.now()),
+      }
+    }
+    // Disconnect: delete the stored row. (Revoking in osu!'s own
+    // settings is a separate, user-side step — see docs/OSU-SIGNIN.md.)
+    case 'disconnectOsu': {
+      const { userId, service } = await requireUserId(req)
+      await supabaseTokenStore(service).remove(userId)
+      return { ok: true }
+    }
+    // Header-only probe: does osu! accept this user token for the
+    // official download endpoint? Reads status + headers only and
+    // cancels the body — no bytes are downloaded, no bytes are
+    // streamed to the browser. No retry, no mirror fallback: the
+    // probe answers exactly one question, and Phase B is gated on it.
+    case 'probeOsuDownload': {
+      const { userId, service } = await requireUserId(req)
+      const env = requireUserAuthEnv()
+      const { accessToken } = await getValidAccessToken({
+        store: supabaseTokenStore(service),
+        fetchFn: fetch,
+        env,
+        userId,
+      })
+      const rawId = params.beatmapsetId
+      const beatmapsetId =
+        typeof rawId === 'number' && Number.isInteger(rawId) && rawId > 0
+          ? rawId
+          : DEFAULT_PROBE_BEATMAPSET_ID
+      const full = await probeDownloadVariant({
+        fetchFn: fetch,
+        url: officialDownloadUrl(beatmapsetId, false),
+        accessToken,
+      })
+      const noVideo = await probeDownloadVariant({
+        fetchFn: fetch,
+        url: officialDownloadUrl(beatmapsetId, true),
+        accessToken,
+      })
+      return {
+        ok: true,
+        beatmapsetId,
+        status: full.status,
+        contentType: full.contentType,
+        contentLength: full.contentLength,
+        contentDisposition: full.contentDisposition,
+        pass: full.pass,
+        noVideoVariant: noVideo,
+      }
+    }
+    default:
+      throw new ProxyError(`Unknown auth action: ${action}`, 400)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP entrypoint
 // ---------------------------------------------------------------------------
 
@@ -343,7 +622,7 @@ Deno.serve(async (req: Request) => {
       })
       params = { ...fromQuery, ...params }
       // Numeric coercion for the id/limit params that arrive as strings.
-      for (const key of ['userId', 'beatmapId', 'limit']) {
+      for (const key of ['userId', 'beatmapId', 'beatmapsetId', 'limit']) {
         if (typeof params[key] === 'string' && params[key] !== '') {
           const n = Number(params[key])
           if (!Number.isNaN(n)) params[key] = n
@@ -351,11 +630,14 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const data = await runAction(params)
+    const data = await runAction(params, req)
     return json({ data })
   } catch (err) {
+    if (err instanceof OsuAuthError) {
+      return errorJson(err.message, err.status, err.code)
+    }
     if (err instanceof ProxyError) {
-      return errorJson(err.message, err.status)
+      return errorJson(err.message, err.status, err.code)
     }
     return errorJson('osu-proxy internal error', 500)
   }

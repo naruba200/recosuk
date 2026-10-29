@@ -132,6 +132,27 @@ describe('osu client — response mapping (mocked fetch)', () => {
     expect(result.error?.kind).toBe('upstream')
     expect(fetchFn).not.toHaveBeenCalled()
   })
+
+  it('threads the proxy error code onto the thrown error (auth actions)', async () => {
+    // Phase A: osuAuthStatus / probe failures carry a stable `code`
+    // (e.g. osu_auth_expired) the UI keys its re-sign-in prompt off.
+    const fetchFn: FetchFn = async () =>
+      jsonResponse(401, {
+        error: 'The osu! connection has expired.',
+        status: 401,
+        code: 'osu_auth_expired',
+      })
+    const client = createOsuClient({ ...CONFIG, fetchFn })
+    const err = await client
+      .proxyCall('osuAuthStatus', {})
+      .then(
+        () => null,
+        (e: unknown) => e,
+      )
+    expect(err).toBeInstanceOf(OsuServiceError)
+    expect((err as OsuServiceError).code).toBe('osu_auth_expired')
+    expect((err as OsuServiceError).status).toBe(401)
+  })
 })
 
 describe('validateOsuUsername (module client, env unset)', () => {

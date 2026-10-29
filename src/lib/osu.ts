@@ -80,10 +80,13 @@ export type OsuErrorKind = 'not-configured' | 'not-found' | 'upstream'
 export class OsuServiceError extends Error {
   kind: OsuErrorKind
   status?: number
-  constructor(kind: OsuErrorKind, message: string, status?: number) {
+  /** Stable machine-readable code from the proxy (auth actions), e.g. `osu_auth_expired`. */
+  code?: string
+  constructor(kind: OsuErrorKind, message: string, status?: number, code?: string) {
     super(message)
     this.kind = kind
     this.status = status
+    this.code = code
   }
 }
 
@@ -157,22 +160,24 @@ export function createOsuClient(deps: OsuClientDeps): OsuClient {
       throw new OsuServiceError('upstream', 'Could not reach the osu-proxy function.')
     }
 
-    let payload: { data?: T; error?: string; status?: number } | null = null
+    let payload: { data?: T; error?: string; status?: number; code?: string } | null = null
     try {
-      payload = (await res.json()) as { data?: T; error?: string; status?: number }
+      payload = (await res.json()) as { data?: T; error?: string; status?: number; code?: string }
     } catch {
       payload = null
     }
 
     if (!res.ok) {
       const status = payload?.status ?? res.status
+      const code = typeof payload?.code === 'string' ? payload.code : undefined
       if (status === 404 || res.status === 404) {
-        throw new OsuServiceError('not-found', payload?.error ?? 'Not found on osu!', status)
+        throw new OsuServiceError('not-found', payload?.error ?? 'Not found on osu!', status, code)
       }
       throw new OsuServiceError(
         'upstream',
         payload?.error ?? `osu-proxy request failed (${res.status})`,
         status,
+        code,
       )
     }
     // A 200 with no `data` must fail HERE as an upstream error. The

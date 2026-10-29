@@ -20,6 +20,7 @@ import History from './screens/History'
 import Auth from './screens/Auth'
 import Settings from './screens/Settings'
 import Download from './screens/Download'
+import OsuCallback from './screens/OsuCallback'
 
 /**
  * Entry choice: `/` is a first-visit gate, and it always REDIRECTS —
@@ -181,6 +182,11 @@ export default function App() {
         <Route path="/lists" element={<RequireSession><Lists /></RequireSession>} />
         <Route path="/history" element={<RequireSession><History /></RequireSession>} />
         <Route path="/auth" element={<Auth />} />
+        {/* osu! OAuth callback (Phase A): deliberately NOT wrapped in
+            RequireSession — it must render its own error states even
+            when the RecOsuk session is gone; the code exchange verifies
+            the JWT server-side and 401s honestly in that case. */}
+        <Route path="/auth/osu/callback" element={<OsuCallback />} />
         <Route path="/download" element={<Download />} />
         <Route path="/settings" element={<RequireSession><Settings /></RequireSession>} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -32,10 +32,13 @@ You need: a GitHub/Google/email account for Supabase, and your osu! account.
 
 1. Go to [osu.ppy.sh/home/account/edit#oauth](https://osu.ppy.sh/home/account/edit#oauth)
    (sign in to osu! first).
-2. **New OAuth Application**: name it `RecOsuk`. No callback URL is needed —
-   RecOsuk uses the *client credentials* grant, which only reads public
-   data, so leave the callback field blank / remove it if the form insists
-   on a placeholder you can delete afterwards.
+2. **New OAuth Application**: name it `RecOsuk`. **Callback URLs:** for the
+   plain profile/stats flow (client-credentials grant) none is needed —
+   but **osu! sign-in (Phase A, in-page official downloads) DOES need
+   them**: register both redirect URIs (your Vercel origin and your
+   localhost origin, each ending in `/auth/osu/callback`). The app shows
+   the exact URI to register in Settings → osu! account connection, and
+   `docs/OSU-SIGNIN.md` lists the full setup.
 3. Save, then note the **Client ID** (a number) and **Client Secret**
    (a long string). Treat the secret like a password — it only ever goes
    into Supabase (step 4), never into this repo or any `.env` in the app.
@@ -49,6 +52,13 @@ Project → **Edge Functions** → **Secrets** (or Settings → Edge Functions):
 add two secrets —
 - `OSU_CLIENT_ID` = your client ID from step 3
 - `OSU_CLIENT_SECRET` = your client secret from step 3
+
+**For osu! sign-in (Phase A, optional — in-page official downloads):**
+also run migration `supabase/migrations/002_osu_tokens.sql` in the SQL
+Editor and add a third secret, `OSU_TOKEN_ENCRYPTION_KEY` (generate it
+with `openssl rand -base64 32`), then redeploy. Full steps:
+`docs/OSU-SIGNIN.md`. Without these, sign-in is unavailable but
+everything else — including mirror downloads — keeps working.
 
 (Supabase's own `SUPABASE_URL` / `SUPABASE_ANON_KEY` / service-role secrets
 already exist in every function automatically — don't touch those.)
@@ -113,6 +123,23 @@ supabase functions deploy osu-proxy --no-verify-jwt
    osu-proxy → Logs** should show 200s, with no secrets anywhere.
 
 ---
+
+## Optional: osu! sign-in (in-page official downloads)
+
+RecOsuk can sign you in with your real osu! account so official
+beatmap downloads happen inside the app instead of a new osu.ppy.sh tab.
+This is **optional**: mirrors keep working without it, and guests can't
+use it (it needs a RecOsuk account). Setup is 4 steps, in order —
+see `docs/OSU-SIGNIN.md`:
+
+1. Run migration `002_osu_tokens.sql` in the Supabase SQL Editor.
+2. Set the `OSU_TOKEN_ENCRYPTION_KEY` secret (`openssl rand -base64 32`).
+3. Register both redirect URIs in the osu! OAuth app settings.
+4. Redeploy: `supabase functions deploy osu-proxy --no-verify-jwt`.
+
+Then open Settings → **osu! account connection** → **Sign in with osu!**,
+and use **Test official download** to prove the connection works before
+any in-page download feature is built on it.
 
 ## What does NOT work until this setup is done
 
