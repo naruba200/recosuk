@@ -26,6 +26,8 @@ import {
 } from '../lib/recommend'
 import { FeedReal } from './RecommendationsUnlimited'
 import { seenKey, seenStore } from '../lib/seenStore'
+import { supabase } from '../lib/supabase'
+import { loadModeBoostFor } from '../lib/feedback'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
@@ -816,7 +818,7 @@ function RecommendationsReal({
   resumeRef: { current: { sig: string; resume: GenerationResume } | null }
 }) {
   const mode = useModeStore((s) => s.mode)
-  const { tier } = useAuth()
+  const { tier, user } = useAuth()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
   const [count, setCount] = useState(30)
@@ -837,7 +839,7 @@ function RecommendationsReal({
     async (
       nextFilters: RecFilters,
       nextCount: number,
-      opts: { fresh?: boolean; includeSeen?: boolean } = {},
+      opts: { fresh?: boolean; shuffle?: boolean } = {},
     ) => {
       const run = ++runRef.current
       setBusy(true)
@@ -854,16 +856,23 @@ function RecommendationsReal({
       }
       try {
         const seen = seenStore.load(key)
+        // M5 learning: the mode's own ratings re-weight this run.
+        // Best-effort — a failed load just means no boost.
+        const boostFor = await loadModeBoostFor(supabase, user?.id ?? null, mode)
         const result = await generateRecommendations(profile, mode, {
           count: nextCount,
           filters: nextFilters,
           seen,
           fresh: opts.fresh,
           resume: resumeRef.current.resume,
-          // "Generate anyway": this run only — the seen store is
-          // never wiped, so the next normal generation excludes
-          // seen maps again.
-          ignoreSeen: opts.includeSeen,
+          boostFor,
+          // Part 4: Generated mode ALWAYS shows beatmaps, even
+          // already-seen ones — the seen exclusion never applies
+          // here. The run still marks served below (the Endless
+          // feed reads it), which is harmless now that this path
+          // ignores it. `shuffle` is Renew-only.
+          ignoreSeen: true,
+          shuffle: opts.shuffle,
         })
         if (runRef.current !== run) return
         resumeRef.current = { sig, resume: result.nextResume }
@@ -882,7 +891,7 @@ function RecommendationsReal({
         if (runRef.current === run) setBusy(false)
       }
     },
-    [key, mode, profile],
+    [key, mode, profile, user?.id],
   )
 
   // (Re)generate when the profile/mode lands or changes. The old
@@ -948,7 +957,14 @@ function RecommendationsReal({
             id="regenerate-btn"
             type="button"
             disabled={busy}
-            onClick={() => void generate(filters, count, { fresh: true })}
+            // Batch 6, defect 1: NO fresh flag — Regenerate advances
+            // to the next window via the resume ref. `fresh` made
+            // generateRecommendations ignore the resume and re-fetch
+            // page 1, so pressing Regenerate twice returned the same
+            // window. The restart path is "Renew recommendations"
+            // (part 4 footer), which resets the resume ref and
+            // passes fresh + shuffle.
+            onClick={() => void generate(filters, count)}
           >
             <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
             <span>{busy ? 'Generating…' : 'Regenerate'}</span>
@@ -987,7 +1003,11 @@ function RecommendationsReal({
             <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
               <p className="font-body-sm text-body-sm text-error">{error}</p>
               <div className="flex items-center gap-space-sm flex-shrink-0">
-                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count, { fresh: true })}>Retry</button>
+                {/* Batch 6, defect 1: no fresh — a failed run never
+                    advanced the resume, so fresh only restarted the
+                    same window. Plain generate() retries the window
+                    the resume points at. */}
+                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count)}>Retry</button>
                 <button className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={onBrowseSamples}>Browse sample picks</button>
               </div>
             </div>
@@ -1035,30 +1055,11 @@ function RecommendationsReal({
                     )}
                   </>
                 )}
-                {diagnostics && diagnostics.afterSeen === 0 && diagnostics.afterFilters > 0 && (
-                  <button
-                    className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
-                    type="button"
-                    title="Generate once more including maps you have already seen, downloaded, or skipped — the seen history itself is kept"
-                    onClick={() => void generate(filters, count, { fresh: true, includeSeen: true })}
-                  >
-                    Generate anyway (include seen maps)
-                  </button>
-                )}
-                {diagnostics?.windowExhausted && (
-                  <button
-                    className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
-                    type="button"
-                    title="You have paged through every window these filters return — start again from the first window"
-                    onClick={() => {
-                      resumeRef.current = null
-                      void generate(filters, count, { fresh: true })
-                    }}
-                  >
-                    Start over from the beginning
-                  </button>
-                )}
-                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count, { fresh: true })}>Retry</button>
+                {/* Batch 6, defect 1: same as the error-panel Retry —
+                    no fresh, so Retry advances to the next window via
+                    the resume instead of re-fetching window 1 and
+                    landing on the same empty state. */}
+                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count)}>Retry</button>
                 <button className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={onBrowseSamples}>Browse sample picks</button>
               </div>
             </div>
@@ -1073,6 +1074,34 @@ function RecommendationsReal({
               onDownloaded={() => setDownloadedTick((n) => n + 1)}
             />
           ))}
+          {/* Part 4 — Renew: shown ONLY at the end of the list, once
+              the windows are exhausted AND items were returned. Every
+              press restarts from page 1 with a fresh shuffle, so
+              consecutive Renews show different orders/selections.
+              Normal Generate/Regenerate keep the PP-anchored fixed
+              ranking — only Renew shuffles, and the label says so. */}
+          {!error && items.length > 0 && diagnostics?.windowExhausted && (
+            <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                {diagnostics.shuffled
+                  ? 'Renewed picks are shuffled — order is random for this run.'
+                  : "You've reached the end of this window."}
+              </p>
+              <button
+                id="renew-btn"
+                className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0 disabled:opacity-50"
+                type="button"
+                disabled={busy}
+                title="Start over from the first window with a freshly shuffled set — every Renew re-randomizes"
+                onClick={() => {
+                  resumeRef.current = null
+                  void generate(filters, count, { fresh: true, shuffle: true })
+                }}
+              >
+                Renew recommendations
+              </button>
+            </div>
+          )}
           <span className="hidden">{downloadedTick}</span>
         </main>
       </div>

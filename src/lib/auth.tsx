@@ -41,6 +41,21 @@ interface AuthContextValue {
   configured: boolean
   signUp: (email: string, password: string) => Promise<AuthResult>
   signIn: (email: string, password: string) => Promise<AuthResult>
+  /**
+   * GitHub OAuth (M5). Redirects the browser to GitHub; Supabase
+   * returns to the app origin and the client picks the session up
+   * from the callback URL (detectSessionInUrl — the default in
+   * createClient — plus the onAuthStateChange subscription above),
+   * so no extra callback handling is needed here. A null error
+   * means the redirect started, not that a session exists yet.
+   * When the provider is not configured in Supabase, the returned
+   * error is surfaced honestly by the caller — never a fake
+   * success. The Tauri `recosuk://auth/callback` deep link is
+   * M7-gated (no Tauri shell exists yet): desktop OAuth lands in
+   * M7, and this web redirect must not be presented as the desktop
+   * flow.
+   */
+  signInWithGitHub: () => Promise<AuthResult>
   signOut: () => Promise<void>
 }
 
@@ -131,6 +146,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const signInWithGitHub = useCallback(async (): Promise<AuthResult> => {
+    if (!supabase) return { error: NOT_CONFIGURED }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'github',
+      options: { redirectTo: window.location.origin },
+    })
+    return { error: error ? error.message : null }
+  }, [])
+
   // Log out means log out of everything: the Supabase session AND the
   // local guest link (plus any pending link), so a signed-out user is
   // never still half-linked. Guest-only sign-out works with no client.
@@ -157,9 +181,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured: isSupabaseConfigured,
       signUp,
       signIn,
+      signInWithGitHub,
       signOut,
     }),
-    [user, session, loading, tier, guestSession, signUp, signIn, signOut],
+    [user, session, loading, tier, guestSession, signUp, signIn, signInWithGitHub, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

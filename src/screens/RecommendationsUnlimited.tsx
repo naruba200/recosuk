@@ -18,6 +18,8 @@ import {
   type RecFilters,
 } from '../lib/recommend'
 import { seenKey, seenStore, type SeenState } from '../lib/seenStore'
+import { supabase } from '../lib/supabase'
+import { loadModeBoostFor } from '../lib/feedback'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
@@ -906,7 +908,7 @@ export function FeedReal({
   onDraftChange: (next: RecFilters) => void
 }) {
   const mode = useModeStore((s) => s.mode)
-  const { tier } = useAuth()
+  const { tier, user } = useAuth()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
   const [items, setItems] = useState<RecCandidate[]>([])
@@ -933,9 +935,12 @@ export function FeedReal({
       opts: { fresh?: boolean } = {},
     ) => {
       const seen = seenOverride ?? seenStore.load(key)
+      // M5 learning: the mode's own ratings re-weight this feed
+      // session. Best-effort — a failed load means no boost.
+      const boostFor = await loadModeBoostFor(supabase, user?.id ?? null, mode)
       const session = new FeedSession(profile, mode, nextFilters, seen, key, (k, ids) =>
         seenStore.markMany(k, 'served', ids),
-      { fresh: opts.fresh },
+      { fresh: opts.fresh, boostFor },
       )
       sessionRef.current = session
       setItems([])
@@ -956,7 +961,7 @@ export function FeedReal({
         setLoading(false)
       }
     },
-    [key, mode, profile],
+    [key, mode, profile, user?.id],
   )
 
   // New session whenever profile/mode changes (§13.2.3). On first

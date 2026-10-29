@@ -125,3 +125,55 @@ describe('preview player (batch 4, item C)', () => {
     expect(player.track).toBeNull()
   })
 })
+
+describe('preview player stop/close lifecycle (batch 6, part 6)', () => {
+  it('pause keeps the track when the pause event arrives asynchronously (real browsers)', () => {
+    const { audio, player } = makePlayer()
+    player.toggle(42, { title: 'T', artist: 'A' })
+    // Real browsers fire `pause` asynchronously, after pause()
+    // returns — simulate that by deferring the event. The intent
+    // flag must survive until the event, or the handler drops
+    // the track (the bug the synchronous reset caused).
+    audio.pause = vi.fn(() => {
+      audio.paused = true
+    })
+    player.pause()
+    expect(player.paused).toBe(true)
+    expect(player.track?.beatmapsetId).toBe(42)
+    audio.fire('pause')
+    expect(player.paused).toBe(true)
+    expect(player.track?.beatmapsetId).toBe(42)
+    expect(player.isPlaying(42)).toBe(false)
+  })
+
+  it('a stale pause event arriving after a replay does not clear the new track (no orphaned audio)', () => {
+    const { audio, player } = makePlayer()
+    player.toggle(1, { title: 'One', artist: 'A' })
+    player.stop()
+    player.toggle(2, { title: 'Two', artist: 'B' })
+    // The pause event queued by stop()'s audio.pause() arrives
+    // late, while the new track is playing: it belongs to the
+    // previous track and must be ignored.
+    expect(audio.paused).toBe(false)
+    audio.fire('pause')
+    expect(player.track?.beatmapsetId).toBe(2)
+    expect(player.isPlaying(2)).toBe(true)
+    expect(audio.src).toBe('https://b.ppy.sh/preview/2.mp3')
+  })
+
+  it('stop pauses the element, unloads the source, and clears the track (close dismisses + silences)', () => {
+    const { audio, player } = makePlayer()
+    player.toggle(42, { title: 'T', artist: 'A' })
+    player.stop()
+    expect(audio.pause).toHaveBeenCalled()
+    expect(audio.src).toBe('')
+    expect(player.playingId).toBeNull()
+    expect(player.track).toBeNull()
+    expect(player.paused).toBe(false)
+    // No late event can resurrect state: the queued pause event
+    // arrives after the clear and must stay a no-op.
+    audio.fire('pause')
+    expect(player.track).toBeNull()
+    expect(player.paused).toBe(false)
+  })
+})

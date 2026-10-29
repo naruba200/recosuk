@@ -197,14 +197,16 @@ async function runAction(params: Params): Promise<unknown> {
   // Mode is required ONLY by the actions whose upstream endpoint is
   // mode-scoped. `getMostPlayed` takes no mode upstream (the osu!
   // most_played endpoint has no mode parameter), the beatmap-pack
-  // endpoints are mode-agnostic, and `getBeatmap` is a single-map
-  // lookup — requiring mode for them 400'd every client call that
-  // (correctly) omitted it, which is how most-played silently stayed
-  // empty in every profile generation. The client still sends mode
-  // for getMostPlayed; the function simply stops demanding it.
+  // endpoints are mode-agnostic, and `getBeatmap`/`getBeatmapset`
+  // are single-map/set lookups — requiring mode for them 400'd
+  // every client call that (correctly) omitted it, which is how
+  // most-played silently stayed empty in every profile generation.
+  // The client still sends mode for getMostPlayed; the function
+  // simply stops demanding it.
   const MODE_FREE_ACTIONS = new Set([
     'getMostPlayed',
     'getBeatmap',
+    'getBeatmapset',
     'getBeatmapPacks',
     'getBeatmapPack',
   ])
@@ -252,6 +254,14 @@ async function runAction(params: Params): Promise<unknown> {
     case 'getBeatmap': {
       const beatmapId = requireId(params, 'beatmapId')
       return osuFetch(`/beatmaps/${beatmapId}`)
+    }
+    // Single beatmapset lookup (M5): list detail, Tried & Rated
+    // rows, and rating enrichment need titles/covers/tags/SR
+    // ranges the list/feedback tables do not store. Mode-free: a
+    // set spans modes; the client filters difficulties itself.
+    case 'getBeatmapset': {
+      const beatmapsetId = requireId(params, 'beatmapsetId')
+      return osuFetch(`/beatmapsets/${beatmapsetId}`)
     }
     case 'getDifficultyAttributes': {
       const beatmapId = requireId(params, 'beatmapId')

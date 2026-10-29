@@ -6,11 +6,24 @@ import type { AuthTier } from './capabilities'
  * Unlimited feed (and Generated regeneration) must never repeat them.
  *
  * v1 scope: localStorage for ALL tiers, keyed by tier+username
- * (`recosuk-seen:{tier}:{username}`). Server-side persistence for
- * accounts (cross-device resume) arrives with M5. Played ids are fed
- * in by the profile/recommendation layers from most-played + recent
- * plays; downloads are recorded by the row/mirror download actions;
- * skips by the feed's Skip button.
+ * (`recosuk-seen:{tier}:{username}`). Played ids are fed in by the
+ * profile/recommendation layers from most-played + recent plays;
+ * downloads are recorded by the row/mirror download actions; skips
+ * by the feed's Skip button.
+ *
+ * `served` is SESSION-SCOPED (batch 6, defect 2): it is only the
+ * in-session no-repeat guarantee — the plan's durable dedupe set is
+ * played/downloaded/skipped. Persisting `served` forever saturated
+ * the pool (every generation appends 20–50 ids, so after heavy
+ * testing the first search windows were entirely hard-seen and the
+ * first entry to Recommendations opened on the all-seen empty
+ * state). `load()` therefore always starts `served` as [] and
+ * `save()` strips it before writing, so legacy saturated storage
+ * self-cleans on the next save. Played/downloaded/skipped
+ * persistence is unchanged, and `isHardSeen` is unchanged (served
+ * still excludes within the session). M5's server-side persistence
+ * must NOT sync `served` either — only played/downloaded/skipped
+ * and rated feedback.
  */
 
 export interface SeenState {
@@ -60,11 +73,16 @@ export function createSeenStore(storage: StorageLike | null): SeenStore {
         const raw = storage.getItem(`seen:${key}`)
         if (raw) {
           const parsed = JSON.parse(raw) as Partial<SeenState>
+          // `served` is session-scoped: any persisted value (written
+          // by older builds, which persisted it unboundedly) is
+          // deliberately ignored — a fresh session re-serves sets
+          // that were only ever served, while played/downloaded/
+          // skipped keep excluding.
           const state: SeenState = {
             played: parsed.played ?? [],
             downloaded: parsed.downloaded ?? [],
             skipped: parsed.skipped ?? [],
-            served: parsed.served ?? [],
+            served: [],
           }
           memory.set(key, state)
           return state
@@ -79,10 +97,19 @@ export function createSeenStore(storage: StorageLike | null): SeenStore {
   }
 
   function save(key: string, state: SeenState): void {
+    // The in-memory copy keeps `served` for this session; storage
+    // never sees it (session-scoped — see the module doc). Stripping
+    // it here also self-cleans legacy storage that still holds a
+    // saturated `served` array from older builds.
     memory.set(key, state)
     if (storage) {
       try {
-        storage.setItem(`seen:${key}`, JSON.stringify(state))
+        const persisted = {
+          played: state.played,
+          downloaded: state.downloaded,
+          skipped: state.skipped,
+        }
+        storage.setItem(`seen:${key}`, JSON.stringify(persisted))
       } catch {
         /* quota/private mode — in-memory copy still works */
       }

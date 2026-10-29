@@ -270,7 +270,7 @@ describe('empty-pool diagnostics (item A, WHY reporting)', () => {
     expect(emptyPoolReason(result.diagnostics, filters)).toContain('filtered out')
   })
 
-  it('names the seen-set stage when only seen maps remain', async () => {
+  it('seen exclusion is still reported in diagnostics, but the reason no longer blames the seen set (part 4)', async () => {
     mockSearch([testSet({ id: 7 })])
     const profile = bpmLessProfile()
     const seen: SeenState = { ...EMPTY_SEEN, served: [7] }
@@ -279,16 +279,22 @@ describe('empty-pool diagnostics (item A, WHY reporting)', () => {
       filters: defaultFiltersFor(profile),
       seen,
     })
+    // Engine default still excludes seen (the mechanism stays for
+    // callers that want it), so the pool is empty and afterSeen
+    // reports 0 — but Generated mode always passes ignoreSeen, so
+    // the all-seen message is gone: the reason falls through to
+    // the generic fallback instead of blaming served/downloaded/
+    // skipped maps.
     expect(result.items).toEqual([])
     expect(result.diagnostics.afterFilters).toBe(1)
     expect(result.diagnostics.afterSeen).toBe(0)
-    expect(emptyPoolReason(result.diagnostics, defaultFiltersFor(profile))).toContain(
-      'already served',
-    )
+    const reason = emptyPoolReason(result.diagnostics, defaultFiltersFor(profile))
+    expect(reason).not.toContain('already served')
+    expect(reason).toContain('No maps matched these filters')
   })
 })
 
-describe('all-seen pool: "Generate anyway" (item E2)', () => {
+describe('ignoreSeen engine mechanism (part 4: Generated always passes it)', () => {
   it('regenerates with seen-filtering disabled for that run only', async () => {
     mockSearch([testSet({ id: 7 })])
     const profile = bpmLessProfile()
@@ -300,7 +306,7 @@ describe('all-seen pool: "Generate anyway" (item E2)', () => {
     expect(normal.items).toEqual([])
     expect(normal.diagnostics.afterSeen).toBe(0)
 
-    // The "Generate anyway" run: same seen state passed in, but the
+    // The ignoreSeen run: same seen state passed in, but the
     // exclusion is skipped — candidates come back.
     const anyway = await generateRecommendations(profile, 'mania', {
       count: 20,
@@ -315,7 +321,7 @@ describe('all-seen pool: "Generate anyway" (item E2)', () => {
     expect(seen.served).toEqual([7])
   })
 
-  it('still excludes seen maps on normal generations (no leakage from the anyway run)', async () => {
+  it('still excludes seen maps on normal generations (no leakage from the ignoreSeen run)', async () => {
     mockSearch([testSet({ id: 7 }), testSet({ id: 8 })])
     const profile = bpmLessProfile()
     const seen: SeenState = { ...EMPTY_SEEN, served: [7] }

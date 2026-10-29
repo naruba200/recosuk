@@ -453,8 +453,14 @@ function modeFit(c: RecCandidate, profile: SkillProfile): number {
 
 export interface ScoreContext {
   playedSetIds: ReadonlySet<number>
-  /** Account learning signal; 0 for guests and for everyone until M5. */
+  /** Legacy scalar learning signal; generation no longer passes it
+   * (M5 wires per-candidate learning through `boostFor` instead).
+   * Kept so older callers/tests keep compiling; boostFor wins. */
   ratingBoost?: number
+  /** M5 learning (feedback.ts): per-candidate boost computed from
+   * the mode's own ratings only. Absent for guests and when no
+   * feedback exists — scoring is then exactly the pre-M5 score. */
+  boostFor?: (c: RecCandidate) => number
 }
 
 export function scoreCandidate(
@@ -484,7 +490,7 @@ export function scoreCandidate(
     25 * ppRelevance +
     15 * tagMatch +
     15 * modeFit(c, profile) +
-    (ctx.ratingBoost ?? 0)
+    (ctx.boostFor?.(c) ?? ctx.ratingBoost ?? 0)
   if (ctx.playedSetIds.has(c.beatmapsetId)) score *= 0.35 // played penalty (§3)
 
   let reason = gapReason(profile, c.sr, c.bpm)
@@ -567,7 +573,10 @@ function normalizeSearchPage(page: unknown): SearchPage {
  * rawSets = unique sets returned by osu! search, afterPick = sets
  * with a playable in-mode difficulty, afterFilters = survivors of
  * the SR/BPM/length/status/key-count filters, afterSeen = survivors
- * of the seen-set exclusion (= poolSize).
+ * of the seen-set exclusion when it is active (= poolSize when the
+ * run ignores seen, as Generated mode always does since batch 6,
+ * part 4). `shuffled` marks a Renew run: the ranked list was
+ * shuffled, so the order is random for that run.
  */
 export interface GenerationDiagnostics {
   queries: string[]
@@ -578,6 +587,8 @@ export interface GenerationDiagnostics {
   bpmUnknown: boolean
   /** True when every query's cursor is spent — no further window exists. */
   windowExhausted: boolean
+  /** True when this run shuffled the ranked list (Renew only). */
+  shuffled: boolean
 }
 
 export interface GenerateResult {
@@ -607,8 +618,11 @@ export function emptyGenerationResume(): GenerationResume {
 
 /**
  * Plain-language reason for an empty result, naming the stage that
- * emptied the pool. Used by both recommendation screens; never
- * blames user-set filters for a pool the defaults emptied.
+ * emptied the pool. Used by the Generated recommendations screen;
+ * never blames user-set filters for a pool the defaults emptied.
+ * There is deliberately NO seen-set branch: Generated mode always
+ * shows beatmaps, even already-seen ones (batch 6, part 4), so the
+ * seen set can never be what emptied the pool there.
  */
 export function emptyPoolReason(d: GenerationDiagnostics, filters: RecFilters): string {
   if (d.rawSets === 0) {
@@ -627,9 +641,6 @@ export function emptyPoolReason(d: GenerationDiagnostics, filters: RecFilters): 
   if (d.afterFilters === 0) {
     return `${d.afterPick} ${d.afterPick === 1 ? 'set' : 'sets'} came back, but every one was filtered out by the SR/BPM/length/status${filters.keyCount !== null ? '/key-count' : ''} filters. Loosen the ranges or clear the tag.`
   }
-  if (d.afterSeen === 0) {
-    return 'The remaining maps were all already served, downloaded, or skipped. Start over to see seen maps again, or loosen the filters for fresh ones.'
-  }
   return 'No maps matched these filters. Loosen the SR/BPM ranges or clear the tag and apply again.'
 }
 
@@ -643,14 +654,28 @@ export async function generateRecommendations(
     enrichTop?: number
     /** Bypass the search-page cache (explicit Regenerate). */
     fresh?: boolean
-    /** Regenerate once with the seen-set exclusion disabled (the
-     * "Generate anyway" action on the all-seen empty state). The
-     * seen store itself is never touched — this run only. */
+    /** Skip the seen-set exclusion for this run. Generated mode
+     * always passes this (batch 6, part 4): it shows beatmaps even
+     * when already seen. The seen store itself is never touched
+     * by this flag — the caller still marks served separately.
+     * The Endless feed does NOT use this: its no-repeat guarantee
+     * is its whole point. */
     ignoreSeen?: boolean
     /** Resume state from the previous window (see GenerationResume).
      * Ignored when `fresh` is set — a fresh run always restarts
      * from page 1. */
     resume?: GenerationResume
+    /** Renew only: Fisher-Yates shuffle the ranked list before
+     * taking `count`, so the run shows a random subset in a random
+     * order. Normal runs keep the PP-anchored fixed ranking. */
+    shuffle?: boolean
+    /** Random source for the shuffle. Defaults to Math.random;
+     * tests inject a fixed-seed source for determinism. */
+    rng?: () => number
+    /** M5 learning: per-candidate boost from the mode's own
+     * ratings (feedback.ts `boostForCandidate` closure). Guests
+     * and feedback-free runs omit it — scoring is unchanged. */
+    boostFor?: (c: RecCandidate) => number
   },
 ): Promise<GenerateResult> {
   const queries = buildCandidateQueries(profile, mode, opts.filters)
@@ -707,10 +732,11 @@ export async function generateRecommendations(
     afterSeen: poolSize,
     bpmUnknown: !hasKnownBpm(profile),
     windowExhausted,
+    shuffled: opts.shuffle ?? false,
   }
 
   const playedSetIds = new Set(opts.seen?.played ?? [])
-  let ranked = scoreAndSort(candidates, profile, { playedSetIds, ratingBoost: 0 })
+  let ranked = scoreAndSort(candidates, profile, { playedSetIds, boostFor: opts.boostFor })
 
   // Difficulty-attribute enrichment for the top slice only (§3: cheap
   // for ~30). Attributes give the authoritative SR for the exact
@@ -736,6 +762,19 @@ export async function generateRecommendations(
       }),
     )
     ranked = [...enriched, ...ranked.slice(enrichN)]
+  }
+
+  // Renew (part 4): shuffle the RANKED list with the injected rng,
+  // then take `count` — a random subset in a random order. Normal
+  // runs never reach this: their ranking stays PP-anchored.
+  if (opts.shuffle) {
+    const rng = opts.rng ?? Math.random
+    for (let i = ranked.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1))
+      const tmp = ranked[i]
+      ranked[i] = ranked[j]
+      ranked[j] = tmp
+    }
   }
 
   return {
@@ -781,6 +820,7 @@ export class FeedSession {
   private seenKeyValue: string
   private markServed: (key: string, ids: number[]) => void
   private fresh: boolean
+  private boostFor?: (c: RecCandidate) => number
 
   constructor(
     profile: SkillProfile,
@@ -789,7 +829,7 @@ export class FeedSession {
     seen: SeenState,
     seenKeyValue: string,
     markServed: (key: string, ids: number[]) => void,
-    opts: { fresh?: boolean } = {},
+    opts: { fresh?: boolean; boostFor?: (c: RecCandidate) => number } = {},
   ) {
     this.profile = profile
     this.mode = mode
@@ -798,6 +838,7 @@ export class FeedSession {
     this.seenKeyValue = seenKeyValue
     this.markServed = markServed
     this.fresh = opts.fresh ?? false
+    this.boostFor = opts.boostFor
     this.queries = buildCandidateQueries(profile, mode, filters)
   }
 
@@ -849,11 +890,11 @@ export class FeedSession {
         const filtered = applyFilters(fresh, this.filters, this.mode)
         this.producedCandidates += filtered.length
         const playedSetIds = new Set(this.seen.played)
-        const scored = scoreAndSort(filtered, this.profile, { playedSetIds, ratingBoost: 0 })
+        const scored = scoreAndSort(filtered, this.profile, { playedSetIds, boostFor: this.boostFor })
         this.pool = scoreAndSort(
           [...this.pool, ...scored],
           this.profile,
-          { playedSetIds, ratingBoost: 0 },
+          { playedSetIds, boostFor: this.boostFor },
         )
       } else if (this.queryIndex >= this.queries.length) {
         this.exhausted = true

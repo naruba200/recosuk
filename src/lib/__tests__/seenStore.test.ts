@@ -68,4 +68,49 @@ describe('seenStore', () => {
     store.mark(key, 'served', 5)
     expect(store.load(key).served).toEqual([5])
   })
+
+  // Batch 6, defect 2: `served` is session-scoped — it must never
+  // survive a fresh store (new session) over the same storage, while
+  // played/downloaded/skipped persist unchanged.
+  it('served does not survive a fresh store; played/downloaded/skipped do', () => {
+    const storage = memoryStorage()
+    const key = seenKey('guest', 'session-scoped')
+    const first = createSeenStore(storage)
+    first.mark(key, 'played', 1)
+    first.mark(key, 'downloaded', 2)
+    first.mark(key, 'skipped', 3)
+    first.mark(key, 'served', 4)
+    expect(first.load(key).served).toEqual([4])
+
+    const reloaded = createSeenStore(storage).load(key)
+    expect(reloaded).toEqual({ played: [1], downloaded: [2], skipped: [3], served: [] })
+  })
+
+  it('markMany served updates the in-memory copy only, never storage', () => {
+    const storage = memoryStorage()
+    const key = seenKey('guest', 'memory-only')
+    const store = createSeenStore(storage)
+    store.markMany(key, 'served', [7, 8, 9])
+    // Same session: served still excludes.
+    expect(store.load(key).served).toEqual([7, 8, 9])
+    expect(isHardSeen(store.load(key), 7)).toBe(true)
+    // Storage never saw the served ids.
+    const raw = storage.getItem(`seen:${key}`)
+    expect(raw).not.toBeNull()
+    expect(JSON.parse(raw as string)).not.toHaveProperty('served')
+  })
+
+  it('legacy storage holding a saturated served array is ignored and self-cleans on save', () => {
+    const storage = memoryStorage()
+    const key = seenKey('guest', 'legacy')
+    storage.setItem(
+      `seen:${key}`,
+      JSON.stringify({ played: [1], downloaded: [2], skipped: [], served: [10, 11, 12, 13] }),
+    )
+    const store = createSeenStore(storage)
+    expect(store.load(key)).toEqual({ played: [1], downloaded: [2], skipped: [], served: [] })
+    // The next save (any mark) rewrites storage without served.
+    store.mark(key, 'skipped', 5)
+    expect(JSON.parse(storage.getItem(`seen:${key}`) as string)).not.toHaveProperty('served')
+  })
 })
