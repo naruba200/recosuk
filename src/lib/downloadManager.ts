@@ -16,17 +16,17 @@ import { MIRRORS, recordDownload, type MirrorSource } from './mirrors'
  * fake a percentage).
  *
  * Honest limits (do not soften these in UI copy):
- * - The OFFICIAL osu! source uses this same iframe handoff when
- *   explicitly requested (batch 13): navigating a hidden iframe
- *   to the official download URL saves the file without leaving
- *   the page, PROVIDED the user is signed into osu! in that
- *   browser — the browser's osu! session does the auth, and the
- *   page never sees session cookies. If they are not signed in,
- *   the iframe fails SILENTLY (cross-origin, undetectable from
- *   the page): the row keeps reading "Downloading" and nothing
- *   visibly happens. The escape hatch is the dock Retry, which
- *   opens the official page in a new tab (see retryTarget in
- *   downloadQueue.ts) — the tab is never used on a first attempt.
+ * - The OFFICIAL osu! source NEVER uses the iframe handoff
+ *   (batch 14, reverting batch 13): the browser withholds the
+ *   osu! session cookie on cross-site iframe navigations
+ *   (SameSite), so osu! sees the frame as logged out, redirects
+ *   it to the homepage, and the homepage refuses framing
+ *   (X-Frame-Options: sameorigin). Live-verified 2026-10-29
+ *   with a signed-in user: no download, console X-Frame-Options
+ *   error. Official downloads open in a NEW TAB via the download
+ *   queue's `openOfficial` seam (a top-level navigation sends
+ *   the cookie). startDownload below REFUSES 'official' outright
+ *   so the iframe path can never be used for it by mistake.
  *   Official downloads are not available via the API, and the
  *   official origin is never fetched from the page.
  * - No fallback chain is possible with native downloads: the page
@@ -54,8 +54,8 @@ export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan'
  * change the Auto default in startDownload below (native order):
  * the pack loop and bulk downloads rely on Auto staying
  * native-only, and official is only handed off when explicitly
- * requested (the queue's first attempt uses the iframe handoff;
- * only a Retry opens a tab — see downloadQueue.ts). The two
+ * requested — via the download queue's new-tab opener (batch
+ * 14), never through this manager's iframe handoff. The two
  * orders are deliberately separate constants.
  */
 export const DISPLAY_MIRROR_ORDER = ['official', ...NATIVE_MIRROR_ORDER] as const
@@ -79,9 +79,9 @@ export interface DownloadResult {
   /** The mirror the download was handed to. */
   mirrorId: string
   /** True only when the handed-to mirror actually serves a no-video
-   *  file (today: catboy, and official with `?noVideo=1` — verified
-   *  from osu!'s own game client source). Never claim a no-video
-   *  copy otherwise. */
+   *  file (today: catboy only — official never routes through here;
+   *  its `?noVideo=1` is applied to the tab URL by the queue).
+   *  Never claim a no-video copy otherwise. */
   noVideoApplied: boolean
 }
 
@@ -125,8 +125,17 @@ export function createDownloadManager(deps: DownloadManagerDeps = {}) {
     const mirror = request.mirrorId
       ? mirrorByIdOrThrow(request.mirrorId)
       : mirrorByIdOrThrow(order[0])
-    const noVideoApplied =
-      request.noVideo === true && (mirror.id === 'catboy' || mirror.id === 'official')
+    if (mirror.id === 'official') {
+      // The iframe handoff cannot carry the osu! session
+      // (X-Frame-Options + SameSite — live-verified failure
+      // 2026-10-29). Official downloads open in a new tab via
+      // the download queue's openOfficial seam; never route one
+      // through here, explicitly or via Auto.
+      throw new Error(
+        'Official downloads must open in a new tab via the download queue (openOfficial) — the hidden-iframe handoff cannot carry the osu! session.',
+      )
+    }
+    const noVideoApplied = request.noVideo === true && mirror.id === 'catboy'
     startBrowserDownload(mirror.url(request.beatmapsetId, { noVideo: request.noVideo }))
     // Recorded on click: native downloads report no completion.
     void record(request.seenKeyValue, request.beatmapsetId, mirror.id)

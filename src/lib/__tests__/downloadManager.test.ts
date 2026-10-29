@@ -91,29 +91,24 @@ describe('downloadManager (native browser downloads)', () => {
     }
   })
 
-  it('an explicit official pick hands the official URL to the browser via the iframe handoff', () => {
+  it('an explicit official pick throws instead of using the iframe handoff (batch 14: tab-only)', () => {
     const startBrowserDownload = vi.fn()
     const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
 
-    const result = manager.startDownload({ ...REQ, mirrorId: 'official' })
-
-    expect(result).toEqual({ status: 'started', mirrorId: 'official', noVideoApplied: false })
-    expect(startBrowserDownload).toHaveBeenCalledTimes(1)
-    expect(startBrowserDownload).toHaveBeenCalledWith(
-      'https://osu.ppy.sh/beatmapsets/42/download',
+    expect(() => manager.startDownload({ ...REQ, mirrorId: 'official' })).toThrow(
+      'must open in a new tab',
     )
+    expect(startBrowserDownload).not.toHaveBeenCalled()
   })
 
-  it('an explicit official pick with noVideo uses ?noVideo=1 and reports noVideoApplied', () => {
+  it('an explicit official pick with noVideo also throws (the ?noVideo=1 URL is built by mirrors.ts, opened by the queue)', () => {
     const startBrowserDownload = vi.fn()
     const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
 
-    const result = manager.startDownload({ ...REQ, mirrorId: 'official', noVideo: true })
-
-    expect(result).toEqual({ status: 'started', mirrorId: 'official', noVideoApplied: true })
-    expect(startBrowserDownload).toHaveBeenCalledWith(
-      'https://osu.ppy.sh/beatmapsets/42/download?noVideo=1',
-    )
+    expect(() =>
+      manager.startDownload({ ...REQ, mirrorId: 'official', noVideo: true }),
+    ).toThrow('must open in a new tab')
+    expect(startBrowserDownload).not.toHaveBeenCalled()
   })
 
   it('throws for an unknown mirror id instead of downloading the wrong file', () => {

@@ -1,6 +1,6 @@
 import {
   mirrorNameFor,
-  retryTarget,
+  nextRetryMirrorId,
   useDownloadQueue,
   type DownloadQueueItem,
 } from '../lib/downloadQueue'
@@ -52,12 +52,8 @@ function QueueRow({ item }: { item: DownloadQueueItem }) {
   // Batch 8: Retry advances to the next mirror, so its tooltip
   // names the mirror the next click will try — the label updates
   // after each click as the next mirror advances. Visible text
-  // stays "Retry" (batch 7 one-word rule for rows). Batch 13:
-  // retryTarget (not nextRetryMirrorId alone) — a Retry while
-  // the row is still on official re-attempts official in a new
-  // tab, and the tooltip must name official, not the next native
-  // mirror.
-  const nextMirrorName = mirrorNameFor(retryTarget(item).mirrorId)
+  // stays "Retry" (batch 7 one-word rule for rows).
+  const nextMirrorName = mirrorNameFor(nextRetryMirrorId(item))
   return (
     <div className="flex flex-col gap-1 px-3 py-2 rounded-lg bg-surface-container">
       <div className="flex items-center gap-2 min-w-0">

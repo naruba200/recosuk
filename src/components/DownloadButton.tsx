@@ -26,13 +26,12 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * not the download (see lib/downloadQueue.ts).
  *
  * - Main button: osu! OFFICIAL first (batch 12, part 9) — the
- *   download goes through the hidden-iframe handoff like the
- *   native mirrors (batch 13: no redirect, no new tab; the
- *   browser's osu! session does the auth) and registers the
- *   attempt in the dock, so Retry cycles on from official to
- *   the native mirrors — except a Retry while the row is still
- *   on official, which opens the official page in a new tab as
- *   the visible fallback for a signed-out user.
+ *   official download opens in a NEW TAB (batch 14, reverting
+ *   batch 13: the hidden-iframe handoff cannot carry the osu!
+ *   session — X-Frame-Options + SameSite, live-verified failure
+ *   2026-10-29 — while a top-level tab navigation sends the
+ *   cookie) and registers the attempt in the dock, so Retry
+ *   cycles on from official to the native mirrors.
  * - Expand menu: official first, then Auto (native order), then
  *   each native mirror. The official entry is a register action,
  *   not a bare link, so its attempt is tracked like any other.
@@ -87,12 +86,11 @@ export default function DownloadButton({
     onDownloaded?.()
   }
 
-  // Primary action (batch 12, part 9; batch 13): osu! official
-  // first. The register hands the official URL to the browser
-  // via the hidden-iframe handoff (no redirect, no new tab) and
+  // Primary action (batch 12, part 9; batch 14): osu! official
+  // first. The register opens the official URL in a new tab
+  // (the iframe handoff cannot carry the osu! session) and
   // tracks the attempt, so the dock Retry cycle starts from
-  // official — with the tab fallback on a Retry while the row
-  // is still on official.
+  // official.
   const startOfficial = () => start('official')
 
   const isDone = suppressDownloadedState

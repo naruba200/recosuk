@@ -42,12 +42,19 @@ import {
  * off via the NEXT mirror in the same order (wrapping to the
  * start after the last), so re-firing the identical URL — a
  * no-op against a mirror that failed server-side — never happens.
- * Attempts are tracked per row in `triedMirrorIds`. Exception
- * (batch 13): a Retry while the row's current step is official
- * re-attempts official in a NEW TAB (see retryTarget) — the
- * visible fallback for the official iframe's silent failure
- * when the user is signed out of osu!. The tab is never used on
- * a first attempt.
+ * Attempts are tracked per row in `triedMirrorIds`. Retry
+ * advances to the NEXT mirror in the display order (official
+ * first, then the natives), one entry per attempt.
+ *
+ * Official steps ALWAYS open in a new tab (batch 14, reverting
+ * batch 13): the hidden-iframe handoff cannot carry the osu!
+ * session — the browser withholds the session cookie on
+ * cross-site iframe navigations (SameSite), osu! redirects the
+ * frame to its homepage, and the homepage refuses framing
+ * (X-Frame-Options: sameorigin). Live-verified 2026-10-29 with
+ * a signed-in user: no download, console X-Frame-Options error.
+ * A top-level tab navigation DOES send the cookie, so the tab
+ * open is the only working official path.
  */
 
 export type DownloadQueueStatus = 'browser' | 'failed'
@@ -80,11 +87,11 @@ export interface RegisterRequest {
   seenKeyValue: string
   /** Explicit mirror pick from the menu, or 'official' for the
    * primary (official-first) action. Omitted = Auto native order.
-   * 'official' is preserved: the first attempt hands the official
-   * URL to the browser via the SAME hidden-iframe handoff as the
-   * native mirrors (no new tab, no redirect) — the browser's osu!
-   * session does the auth. Only a later Retry on that row opens
-   * the official page in a new tab (see retryTarget). */
+   * 'official' opens the official download URL in a NEW TAB
+   * (batch 14): the hidden-iframe handoff cannot carry the osu!
+   * session (X-Frame-Options + SameSite — live-verified failure
+   * 2026-10-29), while a top-level tab navigation sends the
+   * cookie. See handOffAndCopy. */
   mirrorId?: string
   noVideo?: boolean
 }
@@ -96,9 +103,9 @@ export interface DownloadQueueDeps extends DownloadManagerDeps {
   now?: () => number
   /** Opens the official osu! download in a new tab. Defaults to
    * `window.open` (guarded: no-ops without a window, e.g. tests).
-   * Injected in tests. Used ONLY for the Retry tab fallback (see
-   * retryTarget): the first attempt for official uses the iframe
-   * handoff like every other mirror, never a tab. */
+   * Injected in tests. Used for EVERY official attempt (batch 14):
+   * the iframe handoff cannot carry the osu! session, so the tab
+   * open is the official path on first attempts and Retries alike. */
   openOfficial?: (url: string) => void
 }
 
@@ -128,10 +135,8 @@ export function mirrorOrderFor(noVideo: boolean): readonly string[] {
  * The display order a row's Retry cycles through (batch 12, part
  * 9): osu! official FIRST, then the native mirrors in their usual
  * order, wrapping to official after the last native mirror. Every
- * step uses the iframe handoff — including official, on the
- * first attempt of that step (batch 13); only a Retry while the
- * row's current step is official re-attempts official in a new
- * tab (see retryTarget).
+ * step opens the official URL in a new tab (batch 14); native
+ * steps use the iframe handoff.
  */
 export function displayOrderFor(noVideo: boolean): readonly string[] {
   return noVideo ? DISPLAY_MIRROR_ORDER_NO_VIDEO : DISPLAY_MIRROR_ORDER
@@ -145,10 +150,6 @@ export function displayOrderFor(noVideo: boolean): readonly string[] {
  * counts as the first attempt, so a retry after it advances to
  * the next mirror in the same order. A last attempt outside the
  * order (or none yet) restarts at the first mirror (official).
- * NOTE (batch 13): this is the cycle order only — the actual
- * Retry target comes from retryTarget, which re-attempts
- * official in a new tab instead of advancing when the row's
- * current step is official and its tab fallback is unused.
  */
 export function nextRetryMirrorId(
   item: Pick<DownloadQueueItem, 'noVideo' | 'triedMirrorIds' | 'mirrorIdUsed' | 'mirrorId'>,
@@ -158,47 +159,6 @@ export function nextRetryMirrorId(
   const last = tried.length > 0 ? tried[tried.length - 1] : (item.mirrorIdUsed ?? item.mirrorId)
   const idx = last ? order.indexOf(last) : -1
   return order[(idx + 1) % order.length]
-}
-
-/**
- * What a Retry click on this row would actually do (batch 13):
- * the mirror it hands off to, and whether that handoff opens a
- * new tab instead of the iframe.
- *
- * The official step is first attempted via the hidden-iframe
- * handoff like every other mirror — no redirect, no new tab —
- * using the browser's osu! session. If the user is NOT signed
- * into osu! in that browser, the iframe fails SILENTLY: the
- * download is cross-origin, so the page cannot observe the
- * failure (no error, no status change — the row still reads
- * "Downloading"). The visible escape hatch is Retry: while the
- * row's current step is official and its tab fallback has not
- * been used yet, Retry re-attempts official in a NEW TAB, where
- * the user can sign in and the download starts.
- *
- * The tab fallback is tracked WITHOUT new state: a tab attempt
- * is recorded in `triedMirrorIds` as a second consecutive
- * 'official' entry (it IS an official attempt — first the
- * iframe, then the tab). Two consecutive 'official' entries
- * therefore mean the tab fallback was already used for this
- * official step, so the next Retry advances to the native
- * mirrors in display order. The display order holds 'official'
- * exactly once, so consecutive duplicates can only come from
- * this fallback — never from normal cycling. A later
- * wrap-around to official starts a fresh step (iframe first,
- * tab fallback available again).
- */
-export function retryTarget(
-  item: Pick<DownloadQueueItem, 'noVideo' | 'triedMirrorIds' | 'mirrorIdUsed' | 'mirrorId'>,
-): { mirrorId: string; viaTab: boolean } {
-  const tried = item.triedMirrorIds ?? []
-  const last =
-    tried.length > 0 ? tried[tried.length - 1] : (item.mirrorIdUsed ?? item.mirrorId)
-  if (last === 'official') {
-    const prev = tried.length >= 2 ? tried[tried.length - 2] : undefined
-    if (prev !== 'official') return { mirrorId: 'official', viaTab: true }
-  }
-  return { mirrorId: nextRetryMirrorId(item), viaTab: false }
 }
 
 interface DownloadQueueState {
@@ -242,12 +202,10 @@ export const useDownloadQueue = create<DownloadQueueState>()((set, get) => ({
   retry: (id) => {
     const item = get().items.find((i) => i.id === id)
     if (!item) return
-    // The target comes from retryTarget, not nextRetryMirrorId
-    // alone: a Retry while the row's current step is official
-    // re-attempts official in a new tab (the visible fallback
-    // for a silent iframe failure); every other Retry advances
-    // to the next mirror in display order.
-    const target = retryTarget(item)
+    // Retry advances to the next mirror in display order
+    // (official first, then natives, wrapping). An official step
+    // opens in a new tab via handOffAndCopy, like a first attempt.
+    const target = nextRetryMirrorId(item)
     set((s) => ({
       items: s.items.map((i) =>
         i.id === id
@@ -258,8 +216,7 @@ export const useDownloadQueue = create<DownloadQueueState>()((set, get) => ({
     }))
     handOffAndCopy(
       { ...item, status: 'browser', mirrorIdUsed: null, copied: null, note: null },
-      target.mirrorId,
-      target.viaTab,
+      target,
     )
   },
 
@@ -297,30 +254,24 @@ function defaultOpenOfficialTab(url: string): void {
  * the row with its outcome. The copy's fetch is the copy itself —
  * plain single-stream via attemptSongsCopy, never the chunked path.
  *
- * Official (batch 13): the FIRST attempt for 'official' uses the
- * SAME hidden-iframe handoff as the native mirrors — navigating
- * a hidden iframe to the official download URL makes the browser
- * save the file without leaving the page, PROVIDED the user is
- * signed into osu! in that browser (the browser's osu! session
- * does the auth; the page never sees session cookies and must
- * not ask for them). If they are not signed in, the iframe
- * fails SILENTLY: the download is cross-origin, so the page
- * cannot observe the failure — the row keeps reading
- * "Downloading" and nothing visibly happens. The escape hatch
- * is Retry (see retryTarget): a Retry while the row's current
- * step is official opens the official page in a NEW TAB
- * (`viaTab`), where the user can sign in and the download
- * starts. The tab is NEVER used on a first attempt.
+ * Official (batch 14, reverting batch 13): EVERY official attempt
+ * opens the official download URL in a NEW TAB via the injectable
+ * `openOfficial` seam. The hidden-iframe handoff CANNOT work for
+ * official: the browser withholds the osu! session cookie on
+ * cross-site iframe navigations (SameSite), so osu! sees the
+ * frame as logged out, redirects it to the homepage, and the
+ * homepage refuses framing (X-Frame-Options: sameorigin) —
+ * live-verified 2026-10-29 with a signed-in user (no download,
+ * console X-Frame-Options error). A top-level tab navigation
+ * DOES send the cookie, so the tab open is the only working
+ * official path. The page never sees session cookies and must
+ * not ask for them.
  * Either way, NO Songs-folder copy fetch runs for official:
  * the authed osu! origin is not fetchable from the page. The
  * row still records the attempt, so Retry can cycle on from
  * official to the native mirrors.
  */
-function handOffAndCopy(
-  item: DownloadQueueItem,
-  mirrorOverride?: string,
-  viaTab = false,
-): void {
+function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void {
   const manager = createDownloadManager({
     startBrowserDownload: deps.startBrowserDownload,
     record: deps.record,
@@ -328,7 +279,10 @@ function handOffAndCopy(
   // A Retry passes the next mirror explicitly; the first attempt
   // uses the explicit pick (or Auto order[0]) as before.
   const effectiveMirrorId = mirrorOverride ?? item.mirrorId
-  if (effectiveMirrorId === 'official' && viaTab) {
+  // Official always opens in a new tab (batch 14): the iframe
+  // handoff cannot carry the osu! session (see the comment above
+  // handOffAndCopy). The tab opener is injectable for tests.
+  if (effectiveMirrorId === 'official') {
     const openOfficial = deps.openOfficial ?? defaultOpenOfficialTab
     const url = mirrorById('official').url(item.beatmapsetId, {
       noVideo: item.noVideo,
@@ -349,32 +303,6 @@ function handOffAndCopy(
       mirrorIdUsed: 'official',
       triedMirrorIds: [...(item.triedMirrorIds ?? []), 'official'],
     })
-    return
-  }
-  if (effectiveMirrorId === 'official') {
-    // First attempt: the hidden-iframe handoff, same mechanism
-    // as the native mirrors (see downloadManager.startDownload).
-    // Silent-failure caveat: see the comment above — if the user
-    // is signed out of osu!, nothing visibly happens, and Retry
-    // is the escape hatch (tab fallback via retryTarget).
-    try {
-      const result = manager.startDownload({
-        beatmapsetId: item.beatmapsetId,
-        mirrorId: 'official',
-        seenKeyValue: item.seenKeyValue,
-        noVideo: item.noVideo,
-      })
-      patchItem(item.id, {
-        status: 'browser',
-        mirrorIdUsed: result.mirrorId,
-        triedMirrorIds: [...(item.triedMirrorIds ?? []), result.mirrorId],
-      })
-    } catch (err) {
-      patchItem(item.id, {
-        status: 'failed',
-        note: err instanceof Error ? err.message : String(err),
-      })
-    }
     return
   }
   try {
