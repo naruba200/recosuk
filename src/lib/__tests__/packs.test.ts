@@ -10,15 +10,19 @@ vi.mock('../osu', () => ({
 
 import {
   fetchBeatmapPacks,
-  groupPacks,
+  fetchBeatmapPacksPage,
   normalizePack,
   normalizePackList,
+  normalizePackListPage,
+  packDateLabel,
   packDownloadKind,
   packDownloadLabel,
-  packPeriod,
+  packModeFromRuleset,
+  packVisibleForMode,
+  paginatePackList,
+  parsePackTag,
   PACKS_EMPTY_TTL_MS,
   PACKS_PAGE_SIZE,
-  paginatePackList,
   type BeatmapPack,
 } from '../packs'
 import { dataCache } from '../dataCache'
@@ -39,6 +43,8 @@ describe('normalizePack', () => {
       url: 'https://example.test/packs/P1234',
       date: '2026-10-01',
       beatmapsetIds: [1, 2],
+      rulesetId: null,
+      packType: 'tournament',
     })
   })
 
@@ -83,10 +89,77 @@ describe('normalizePack', () => {
     expect(pack?.url).toBe('https://osu.ppy.sh/beatmaps/packs/S1234')
     expect(pack?.date).toBe('2025-01-01T00:00:00+00:00')
     expect(pack?.beatmapsetIds).toEqual([1, 2])
+    expect(pack?.rulesetId).toBe(0)
+    expect(pack?.packType).toBe('standard')
     expect(pack?.setMeta).toEqual([
       { id: 1, artist: 'Artist One', title: 'Title One' },
       { id: 2, artist: 'Artist Two', title: 'Title Two' },
     ])
+  })
+
+  it('keeps ruleset_id verbatim when it is an integer (including out-of-range), null otherwise', () => {
+    expect(normalizePack({ tag: 'S1', name: 'P', ruleset_id: 3 })?.rulesetId).toBe(3)
+    expect(normalizePack({ tag: 'S1', name: 'P', ruleset_id: 5 })?.rulesetId).toBe(5)
+    expect(normalizePack({ tag: 'S1', name: 'P', ruleset_id: 'x' })?.rulesetId).toBeNull()
+    expect(normalizePack({ tag: 'S1', name: 'P', ruleset_id: 1.5 })?.rulesetId).toBeNull()
+    expect(normalizePack({ tag: 'S1', name: 'P' })?.rulesetId).toBeNull()
+  })
+
+  it('keeps the tag verbatim, including two-letter observed forms', () => {
+    expect(normalizePack({ tag: 'ST445', name: 'Pack' })?.tag).toBe('ST445')
+    expect(normalizePack({ tag: 'SM385', name: 'Pack' })?.tag).toBe('SM385')
+    expect(normalizePack({ tag: 'SC172', name: 'Pack' })?.tag).toBe('SC172')
+  })
+})
+
+describe('parsePackTag', () => {
+  it('maps all seven documented type letters', () => {
+    expect(parsePackTag('S1').type).toBe('standard')
+    expect(parsePackTag('F1').type).toBe('featured')
+    expect(parsePackTag('P1').type).toBe('tournament')
+    expect(parsePackTag('L1').type).toBe('loved')
+    expect(parsePackTag('R1').type).toBe('chart')
+    expect(parsePackTag('T1').type).toBe('theme')
+    expect(parsePackTag('A1').type).toBe('artist')
+  })
+
+  it('parses the observed two-letter standard forms, recording the mode letter only', () => {
+    expect(parsePackTag('ST445')).toEqual({ type: 'standard', number: 445, modeLetter: 'T' })
+    expect(parsePackTag('SM385')).toEqual({ type: 'standard', number: 385, modeLetter: 'M' })
+    expect(parsePackTag('SC172')).toEqual({ type: 'standard', number: 172, modeLetter: 'C' })
+    expect(parsePackTag('S1888')).toEqual({ type: 'standard', number: 1888, modeLetter: null })
+  })
+
+  it('is case-insensitive on the letters', () => {
+    expect(parsePackTag('st445')).toEqual({ type: 'standard', number: 445, modeLetter: 'T' })
+  })
+
+  it('returns unknown, never throws, for garbage/empty/non-string input', () => {
+    expect(parsePackTag('')).toEqual({ type: 'unknown', number: null, modeLetter: null })
+    expect(parsePackTag('weekly-example')).toEqual({ type: 'unknown', number: null, modeLetter: null })
+    expect(parsePackTag('S')).toEqual({ type: 'unknown', number: null, modeLetter: null })
+    expect(parsePackTag('S12x')).toEqual({ type: 'unknown', number: null, modeLetter: null })
+    expect(parsePackTag('X123')).toEqual({ type: 'unknown', number: null, modeLetter: null })
+    expect(parsePackTag(null)).toEqual({ type: 'unknown', number: null, modeLetter: null })
+    expect(parsePackTag(42)).toEqual({ type: 'unknown', number: null, modeLetter: null })
+  })
+})
+
+describe('packModeFromRuleset', () => {
+  it('maps the documented ruleset ids', () => {
+    expect(packModeFromRuleset(0)).toBe('osu')
+    expect(packModeFromRuleset(1)).toBe('taiko')
+    expect(packModeFromRuleset(2)).toBe('fruits')
+    expect(packModeFromRuleset(3)).toBe('mania')
+  })
+
+  it('returns null for absent, non-integer, and out-of-range ids', () => {
+    expect(packModeFromRuleset(null)).toBeNull()
+    expect(packModeFromRuleset(undefined)).toBeNull()
+    expect(packModeFromRuleset(5)).toBeNull()
+    expect(packModeFromRuleset(-1)).toBeNull()
+    expect(packModeFromRuleset(1.5)).toBeNull()
+    expect(packModeFromRuleset('0')).toBeNull()
   })
 })
 
@@ -123,6 +196,8 @@ describe('normalizePackList', () => {
       name: 'Beatmap Pack #1234',
       url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
       date: '2025-01-01T00:00:00+00:00',
+      rulesetId: null,
+      packType: 'standard',
     })
   })
 
@@ -138,6 +213,60 @@ describe('normalizePackList', () => {
     expect(
       normalizePackList({ beatmap_packs: [], packs: [{ tag: 'X', name: 'X' }] }),
     ).toEqual([])
+  })
+})
+
+describe('normalizePackListPage (cursor preservation)', () => {
+  it('preserves a top-level cursor_string', () => {
+    const page = normalizePackListPage({
+      beatmap_packs: [{ tag: 'S1', name: 'Pack 1' }],
+      cursor_string: 'next-page-token',
+    })
+    expect(page.packs.map((p) => p.tag)).toEqual(['S1'])
+    expect(page.cursor).toBe('next-page-token')
+  })
+
+  it('reports no cursor when the payload carries none, an empty one, or a bare array', () => {
+    expect(normalizePackListPage({ beatmap_packs: [] }).cursor).toBeNull()
+    expect(
+      normalizePackListPage({ beatmap_packs: [], cursor_string: '' }).cursor,
+    ).toBeNull()
+    expect(normalizePackListPage([{ tag: 'S1', name: 'Pack 1' }]).cursor).toBeNull()
+    expect(normalizePackListPage(null).cursor).toBeNull()
+  })
+})
+
+describe('packDateLabel', () => {
+  it('shows just the date part of an ISO timestamp', () => {
+    expect(packDateLabel('2025-01-01T00:00:00+00:00')).toBe('2025-01-01')
+    expect(packDateLabel('2026-10-01')).toBe('2026-10-01')
+  })
+
+  it('shows non-ISO strings as-is, never invented', () => {
+    expect(packDateLabel('Spring 2025')).toBe('Spring 2025')
+  })
+})
+
+describe('packVisibleForMode', () => {
+  function pack(rulesetId: number | null, tag = 'S1'): BeatmapPack {
+    return { tag, name: 'Pack', beatmapsetIds: [], rulesetId, packType: 'standard' }
+  }
+
+  it('shows exact-mode matches and hides other modes', () => {
+    expect(packVisibleForMode(pack(3), 'mania')).toBe(true)
+    expect(packVisibleForMode(pack(3), 'osu')).toBe(false)
+    expect(packVisibleForMode(pack(2), 'fruits')).toBe(true)
+    expect(packVisibleForMode(pack(0), 'taiko')).toBe(false)
+  })
+
+  it('always shows packs with an unknown mode, whatever the filter', () => {
+    expect(packVisibleForMode(pack(null), 'mania')).toBe(true)
+    expect(packVisibleForMode(pack(5), 'osu')).toBe(true)
+  })
+
+  it('shows everything for the all-modes filter', () => {
+    expect(packVisibleForMode(pack(0), 'all')).toBe(true)
+    expect(packVisibleForMode(pack(null), 'all')).toBe(true)
   })
 })
 
@@ -171,7 +300,7 @@ describe('fetchBeatmapPacks caching (item E1)', () => {
     // page recovers instead of sitting on the stale empty list.
     vi.setSystemTime(new Date('2026-10-29T00:01:01Z'))
     expect(await fetchBeatmapPacks()).toEqual([
-      { tag: 'P1', name: 'Pack One', beatmapsetIds: [] },
+      { tag: 'P1', name: 'Pack One', beatmapsetIds: [], rulesetId: null, packType: 'tournament' },
     ])
     expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
   })
@@ -215,77 +344,104 @@ describe('fetchBeatmapPacks caching (item E1)', () => {
         url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
         date: '2025-01-01T00:00:00+00:00',
         beatmapsetIds: [],
+        rulesetId: null,
+        packType: 'standard',
       },
     ])
   })
 })
 
-describe('packPeriod grouping', () => {
-  function pack(name: string, tag = ''): BeatmapPack {
-    return { tag, name, beatmapsetIds: [] }
-  }
-
-  it('groups weekly/monthly/yearly by name text, year included', () => {
-    expect(packPeriod(pack('Weekly Beatmap Pack'))).toBe('weekly')
-    expect(packPeriod(pack('Beatmap Pack — Week 42'))).toBe('weekly')
-    expect(packPeriod(pack('Monthly Pack'))).toBe('monthly')
-    expect(packPeriod(pack('Yearly Pack 2025'))).toBe('yearly')
-    expect(packPeriod(pack('Beatmap Pack #1234', '2025-pack'))).toBe('yearly')
+describe('fetchBeatmapPacksPage (type + cursor pagination)', () => {
+  beforeEach(() => {
+    dataCache.clear()
+    mocks.proxyCall.mockReset()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-29T00:00:00Z'))
   })
 
-  it('puts unlabelled packs in Curated', () => {
-    expect(packPeriod(pack('Beatmap Pack #1234', 'P1234'))).toBe('curated')
-    expect(packPeriod(pack('Community Picks'))).toBe('curated')
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('groups packs into ordered buckets, empty buckets included', () => {
-    const grouped = groupPacks([
-      pack('Weekly A'),
-      pack('Monthly B'),
-      pack('Yearly C'),
-      pack('Random D'),
-      pack('Weekly E'),
-    ])
-    expect(grouped.weekly.map((p) => p.name)).toEqual(['Weekly A', 'Weekly E'])
-    expect(grouped.monthly.map((p) => p.name)).toEqual(['Monthly B'])
-    expect(grouped.yearly.map((p) => p.name)).toEqual(['Yearly C'])
-    expect(grouped.curated.map((p) => p.name)).toEqual(['Random D'])
+  it('sends the type param, defaulting to standard', async () => {
+    mocks.proxyCall.mockResolvedValue({ beatmap_packs: [] })
+    await fetchBeatmapPacksPage()
+    expect(mocks.proxyCall).toHaveBeenCalledWith('getBeatmapPacks', { type: 'standard' })
+    await fetchBeatmapPacksPage({ type: 'featured', fresh: true })
+    expect(mocks.proxyCall).toHaveBeenCalledWith('getBeatmapPacks', { type: 'featured' })
+  })
+
+  it('caches per type: switching categories refetches, switching back is cached', async () => {
+    mocks.proxyCall.mockResolvedValue({ beatmap_packs: [{ tag: 'S1', name: 'One' }] })
+    await fetchBeatmapPacksPage({ type: 'standard' })
+    await fetchBeatmapPacksPage({ type: 'featured' })
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
+    await fetchBeatmapPacksPage({ type: 'standard' })
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
+  })
+
+  it('merges cursor pages, dedupes by tag, and stops when the cursor is gone', async () => {
+    mocks.proxyCall
+      .mockResolvedValueOnce({
+        beatmap_packs: [
+          { tag: 'S1', name: 'One' },
+          { tag: 'S2', name: 'Two' },
+        ],
+        cursor_string: 'page-2',
+      })
+      .mockResolvedValueOnce({
+        beatmap_packs: [
+          { tag: 'S2', name: 'Two' },
+          { tag: 'S3', name: 'Three' },
+        ],
+        cursor_string: null,
+      })
+    const first = await fetchBeatmapPacksPage({ type: 'standard' })
+    expect(first.packs.map((p) => p.tag)).toEqual(['S1', 'S2'])
+    expect(first.cursor).toBe('page-2')
+    expect(mocks.proxyCall).toHaveBeenLastCalledWith('getBeatmapPacks', { type: 'standard' })
+
+    const merged = await fetchBeatmapPacksPage({ type: 'standard', cursor: 'page-2' })
+    expect(merged.packs.map((p) => p.tag)).toEqual(['S1', 'S2', 'S3'])
+    expect(merged.cursor).toBeNull()
+    expect(mocks.proxyCall).toHaveBeenLastCalledWith('getBeatmapPacks', {
+      type: 'standard',
+      cursor_string: 'page-2',
+    })
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
+  })
+
+  it('fresh replaces the buffered list instead of appending', async () => {
+    mocks.proxyCall
+      .mockResolvedValueOnce({
+        beatmap_packs: [{ tag: 'S1', name: 'One' }],
+        cursor_string: 'page-2',
+      })
+      .mockResolvedValueOnce({ beatmap_packs: [{ tag: 'S9', name: 'Nine' }] })
+    await fetchBeatmapPacksPage({ type: 'standard' })
+    const fresh = await fetchBeatmapPacksPage({ type: 'standard', fresh: true })
+    expect(fresh.packs.map((p) => p.tag)).toEqual(['S9'])
+    expect(fresh.cursor).toBeNull()
   })
 })
 
-describe('paginatePackList (batch 12, part 10)', () => {
+describe('paginatePackList (batch 12, part 10; fetch order, no period grouping)', () => {
   function pack(name: string, tag = ''): BeatmapPack {
-    return { tag, name, beatmapsetIds: [] }
+    return { tag, name, beatmapsetIds: [], rulesetId: null, packType: 'standard' }
   }
 
   function many(count: number): BeatmapPack[] {
-    return Array.from({ length: count }, (_, i) => {
-      const period = ['Weekly', 'Monthly', 'Yearly', 'Random'][i % 4]
-      return pack(`${period} Pack ${i + 1}`, `P${i + 1}`)
-    })
+    return Array.from({ length: count }, (_, i) => pack(`Pack ${i + 1}`, `P${i + 1}`))
   }
 
-  it('caps the first chunk at PACKS_PAGE_SIZE in period order', () => {
+  it('caps the first chunk at PACKS_PAGE_SIZE in fetch order', () => {
     const { visible, remaining } = paginatePackList(many(30), PACKS_PAGE_SIZE)
     expect(PACKS_PAGE_SIZE).toBe(12)
     expect(visible).toHaveLength(12)
     expect(remaining).toBe(18)
-    // Period order wins over fetch order: weeklies first.
-    expect(visible[0].name).toBe('Weekly Pack 1')
-    expect(visible.map((p) => p.name)).toEqual([
-      'Weekly Pack 1',
-      'Weekly Pack 5',
-      'Weekly Pack 9',
-      'Weekly Pack 13',
-      'Weekly Pack 17',
-      'Weekly Pack 21',
-      'Weekly Pack 25',
-      'Weekly Pack 29',
-      'Monthly Pack 2',
-      'Monthly Pack 6',
-      'Monthly Pack 10',
-      'Monthly Pack 14',
-    ])
+    expect(visible.map((p) => p.name)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `Pack ${i + 1}`),
+    )
   })
 
   it('reveals the next chunk and reports exhaustion', () => {
@@ -293,35 +449,12 @@ describe('paginatePackList (batch 12, part 10)', () => {
     const second = paginatePackList(all, PACKS_PAGE_SIZE * 2)
     expect(second.visible).toHaveLength(24)
     expect(second.remaining).toBe(6)
-    expect(second.visible.slice(12).map((p) => p.name)).toEqual([
-      'Monthly Pack 18',
-      'Monthly Pack 22',
-      'Monthly Pack 26',
-      'Monthly Pack 30',
-      'Yearly Pack 3',
-      'Yearly Pack 7',
-      'Yearly Pack 11',
-      'Yearly Pack 15',
-      'Yearly Pack 19',
-      'Yearly Pack 23',
-      'Yearly Pack 27',
-      'Random Pack 4',
-    ])
     const exhausted = paginatePackList(all, 30)
     expect(exhausted.visible).toHaveLength(30)
     expect(exhausted.remaining).toBe(0)
     const over = paginatePackList(all, 999)
     expect(over.visible).toHaveLength(30)
     expect(over.remaining).toBe(0)
-  })
-
-  it('keeps group headers intact: grouping the visible slice preserves periods', () => {
-    const { visible } = paginatePackList(many(30), PACKS_PAGE_SIZE)
-    const grouped = groupPacks(visible)
-    expect(grouped.weekly).toHaveLength(8)
-    expect(grouped.monthly).toHaveLength(4)
-    expect(grouped.yearly).toHaveLength(0)
-    expect(grouped.curated).toHaveLength(0)
   })
 
   it('handles empty and non-positive counts', () => {
@@ -338,23 +471,31 @@ describe('packDownloadKind / packDownloadLabel (batch 12, part 10)', () => {
       name: 'Pack',
       url: 'https://osu.ppy.sh/beatmaps/packs/S1/download',
       beatmapsetIds: [1, 2, 3],
+      rulesetId: null,
+      packType: 'standard',
     }
     expect(packDownloadKind(pack)).toBe('archive')
     expect(packDownloadLabel(pack)).toBe('Download pack')
   })
 
   it('all-maps kind with the count once contents are known', () => {
-    const pack: BeatmapPack = { tag: 'S1', name: 'Pack', beatmapsetIds: [1, 2, 3] }
+    const pack: BeatmapPack = {
+      tag: 'S1',
+      name: 'Pack',
+      beatmapsetIds: [1, 2, 3],
+      rulesetId: null,
+      packType: 'standard',
+    }
     expect(packDownloadKind(pack)).toBe('all-maps')
     expect(packDownloadLabel(pack)).toBe('Download all (3 maps)')
   })
 
   it('all-maps kind with a count-less label before contents load, and empty url counts as absent', () => {
-    expect(packDownloadLabel({ tag: 'S1', name: 'Pack', beatmapsetIds: [] })).toBe(
-      'Download all maps',
-    )
     expect(
-      packDownloadKind({ tag: 'S1', name: 'Pack', url: '', beatmapsetIds: [] }),
+      packDownloadLabel({ tag: 'S1', name: 'Pack', beatmapsetIds: [], rulesetId: null, packType: 'standard' }),
+    ).toBe('Download all maps')
+    expect(
+      packDownloadKind({ tag: 'S1', name: 'Pack', url: '', beatmapsetIds: [], rulesetId: null, packType: 'standard' }),
     ).toBe('all-maps')
   })
 })

@@ -30,30 +30,33 @@ import {
   type RankedWindowId,
 } from '../lib/rankedLists'
 import {
-  fetchBeatmapPack,
-  fetchBeatmapPacks,
-  groupPacks,
-  PACK_PERIOD_LABELS,
-  PACK_PERIOD_ORDER,
+  PACK_CATEGORIES,
+  PACK_CATEGORY_LABELS,
   PACKS_PAGE_SIZE,
+  fetchBeatmapPack,
+  fetchBeatmapPacksPage,
+  packDateLabel,
   packDownloadLabel,
+  packModeFromRuleset,
+  packVisibleForMode,
   paginatePackList,
   type BeatmapPack,
-  type PackPeriod,
+  type PackCategory,
+  type PackModeFilter,
 } from '../lib/packs'
 
 /**
- * Collections (QA batch 2, item 6): beatmap PACKS grouped Weekly /
- * Monthly / Yearly, BeatConnect-style. The packs themselves come
- * from osu!'s public beatmap-packs API via the proxy (see lib/packs.ts
- * for the source-honesty notes) — never fabricated. "View pack"
- * expands a pack in place to list its contents (never a download);
- * "Download" opens the pack's archive URL when the API provides one
- * (the `url` field IS the pack download URL), and otherwise hands
- * every set to the browser one at a time through the same native
- * browser-download path as Mirror. No pack-level bulk-download
- * buttons: the Ranked section's Download All is the only bulk
- * action on this page.
+ * Collections: beatmap PACKS in osu!'s seven categories (Standard,
+ * Featured, Tournament, Loved, Chart, Theme, Artist), with a mode
+ * filter. The packs themselves come from osu!'s public
+ * beatmap-packs API via the proxy (see lib/packs.ts for the
+ * researched facts) — never fabricated. "View pack" expands a pack
+ * in place to list its contents (never a download); "Download"
+ * opens the pack's archive URL when the API provides one (the `url`
+ * field IS the pack download URL), and otherwise hands every set to
+ * the browser one at a time through the same native browser-download
+ * path as Mirror. No pack-level bulk-download buttons: the Ranked
+ * section's Download All is the only bulk action on this page.
  *
  * The Song-folder copy step (item 8) plugs in through the optional
  * `copySet` seam on the download loop: when the user has auto-copy
@@ -61,10 +64,10 @@ import {
  * Without it, downloads are browser-only, exactly like Mirror.
  */
 
-const SAMPLE_PACKS: { name: string; tag: string; period: PackPeriod; sets: number }[] = [
-  { name: 'Weekly Beatmap Pack (example)', tag: 'weekly-example', period: 'weekly', sets: 42 },
-  { name: 'Monthly Beatmap Pack (example)', tag: 'monthly-example', period: 'monthly', sets: 187 },
-  { name: 'Yearly Beatmap Pack (example)', tag: 'yearly-example', period: 'yearly', sets: 1240 },
+const SAMPLE_PACKS: { name: string; tag: string; sets: number }[] = [
+  { name: 'Standard Beatmap Pack (example)', tag: 'standard-example', sets: 42 },
+  { name: 'Featured Beatmap Pack (example)', tag: 'featured-example', sets: 187 },
+  { name: 'Tournament Beatmap Pack (example)', tag: 'tournament-example', sets: 1240 },
 ]
 
 function SamplePacks() {
@@ -79,7 +82,7 @@ function SamplePacks() {
             <div className="flex flex-col min-w-0">
               <span className="font-headline-sm text-headline-sm text-on-surface truncate">{pack.name}</span>
               <span className="font-body-sm text-body-sm text-on-surface-variant">
-                {PACK_PERIOD_LABELS[pack.period]} · {pack.sets} beatmapsets
+                Example pack · {pack.sets} beatmapsets
               </span>
             </div>
             <button
@@ -130,17 +133,28 @@ function PackCard({
 }) {
   const meta = new Map((pack.setMeta ?? []).map((m) => [m.id, m]))
   const shownIds = pack.beatmapsetIds.slice(0, EXPANDED_SET_LIMIT)
+  const packMode = packModeFromRuleset(pack.rulesetId)
   return (
     <article className="flex flex-col gap-space-md p-space-md bg-surface-container-low hover:bg-surface-container transition-all rounded-lg shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-headline-sm text-headline-sm text-on-surface truncate">{pack.name}</span>
-            {pack.date && (
-              <span className="font-label-sm text-label-sm text-on-surface-variant">{pack.date}</span>
+            {packMode && (
+              <span className="px-2 py-0.5 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm">
+                {modeLabel(packMode)}
+              </span>
+            )}
+            {pack.packType !== 'unknown' && (
+              <span className="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm">
+                {PACK_CATEGORY_LABELS[pack.packType]}
+              </span>
             )}
           </div>
           <span className="font-body-sm text-body-sm text-on-surface-variant">
+            {pack.tag}
+            {pack.date ? ` · ${packDateLabel(pack.date)}` : ''}
+            {` · `}
             {pack.beatmapsetIds.length > 0
               ? `${pack.beatmapsetIds.length} beatmapsets`
               : 'Contents load when you view the pack'}
@@ -492,6 +506,7 @@ function CollectionsReal() {
   const { tier } = useAuth()
   const guestSession = useGuestStore((s) => s.session)
   const noVideo = useDownloadSettings((s) => s.noVideo)
+  const globalMode = useModeStore((s) => s.mode)
   const [packs, setPacks] = useState<BeatmapPack[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -500,20 +515,32 @@ function CollectionsReal() {
   const [visibleCount, setVisibleCount] = useState(PACKS_PAGE_SIZE)
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [detailLoadingTag, setDetailLoadingTag] = useState<string | null>(null)
+  const [packType, setPackType] = useState<PackCategory>('standard')
+  // Mode filter defaults to the global mode and follows global-mode
+  // changes, like the Ranked section below; the user can override it
+  // with the chips. Packs with an unknown mode are always shown.
+  const [modeFilter, setModeFilter] = useState<PackModeFilter>(globalMode)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const cancelRef = useRef(false)
   const runRef = useRef(0)
 
   const username = guestSession?.osuUsername ?? null
   const key = seenKey(tier, username ?? 'collections')
 
-  const load = useCallback(async (fresh: boolean) => {
+  useEffect(() => {
+    setModeFilter(globalMode)
+  }, [globalMode])
+
+  const load = useCallback(async (fresh: boolean, type: PackCategory) => {
     const run = ++runRef.current
     setLoading(true)
     setError(null)
     try {
-      const list = await fetchBeatmapPacks({ fresh })
+      const { packs: list, cursor } = await fetchBeatmapPacksPage({ type, fresh })
       if (runRef.current !== run) return
       setPacks(list)
+      setNextCursor(cursor)
       setVisibleCount(PACKS_PAGE_SIZE)
       setExpandedTag(null)
       setDetailLoadingTag(null)
@@ -536,8 +563,35 @@ function CollectionsReal() {
   }, [])
 
   useEffect(() => {
-    void load(false)
-  }, [load])
+    void load(false, packType)
+  }, [load, packType])
+
+  /** "Show more": when the last fetch returned a cursor, load the
+   * next cursor page (it extends the buffer); otherwise reveal the
+   * next 12 buffered items. Never a fake "more". */
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return
+    if (!nextCursor) {
+      setVisibleCount((c) => c + PACKS_PAGE_SIZE)
+      return
+    }
+    const run = ++runRef.current
+    setLoadingMore(true)
+    try {
+      const { packs: merged, cursor } = await fetchBeatmapPacksPage({
+        type: packType,
+        cursor: nextCursor,
+      })
+      if (runRef.current !== run) return
+      setPacks(merged)
+      setNextCursor(cursor)
+    } catch {
+      if (runRef.current !== run) return
+      setError('Could not load more packs just now — try again in a moment.')
+    } finally {
+      if (runRef.current === run) setLoadingMore(false)
+    }
+  }, [loadingMore, nextCursor, packType])
 
   /** Fill a pack's beatmapset ids via the detail endpoint when the list didn't carry them. */
   const ensurePackDetail = useCallback(async (pack: BeatmapPack): Promise<BeatmapPack> => {
@@ -671,16 +725,18 @@ function CollectionsReal() {
     [downloadSets, ensurePackDetail, progress],
   )
 
-  // Packs render in chunks (batch 12, part 10): the fetched list is
-  // never rendered whole. Group headers are computed over the
-  // visible slice only. The API carries no next-page cursor in its
-  // response (docs list only `beatmap_packs`), so pagination is
-  // client-side over the fetched array.
+  // Packs render in chunks (batch 12, part 10): the buffered list is
+  // never rendered whole. The mode filter applies client-side over
+  // the buffered packs (the list endpoint has no mode param; each
+  // pack's mode comes from its `ruleset_id`, unknown modes always
+  // shown). "Show more" loads the next cursor page while one exists,
+  // else reveals the next buffered chunk.
+  const filteredPacks = packs.filter((pack) => packVisibleForMode(pack, modeFilter))
   const { visible: visiblePacks, remaining: remainingPacks } = paginatePackList(
-    packs,
+    filteredPacks,
     visibleCount,
   )
-  const visibleGrouped = groupPacks(visiblePacks)
+  const canShowMore = nextCursor !== null || remainingPacks > 0
   const busy = progress?.active ?? false
 
   return (
@@ -694,12 +750,63 @@ function CollectionsReal() {
           <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Collections</h1>
         </div>
         <p className="font-body-sm text-body-sm text-on-surface-variant -mt-1">
-          Whole beatmap packs — weekly, monthly and yearly — from osu!&apos;s public pack listing.
+          Whole beatmap packs from osu!&apos;s public pack listing, in seven categories.
           View a pack to see its contents; Download opens the pack&apos;s archive, or downloads
           every map in it when no archive link is provided.
           The &quot;Download without video&quot; setting in Settings applies to per-map downloads here too.
         </p>
       </section>
+
+      <div className="flex flex-wrap items-center gap-space-md">
+        <div
+          className="inline-flex flex-wrap items-center gap-1 p-1 rounded-full bg-surface-container-low"
+          role="tablist"
+          aria-label="Pack category"
+        >
+          {PACK_CATEGORIES.map((category) => (
+            <button
+              key={category}
+              role="tab"
+              aria-selected={category === packType}
+              className={`px-space-md py-1.5 rounded-full font-label-md text-label-md transition-all ${
+                category === packType
+                  ? 'bg-primary text-on-primary shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+              type="button"
+              onClick={() => setPackType(category)}
+            >
+              {PACK_CATEGORY_LABELS[category]}
+            </button>
+          ))}
+        </div>
+        <div
+          className="inline-flex flex-wrap items-center gap-1 p-1 rounded-full bg-surface-container-low"
+          role="group"
+          aria-label="Pack mode filter"
+        >
+          {(['all', 'osu', 'taiko', 'fruits', 'mania'] as const).map((filter) => (
+            <button
+              key={filter}
+              aria-pressed={filter === modeFilter}
+              className={`px-space-md py-1.5 rounded-full font-label-md text-label-md transition-all ${
+                filter === modeFilter
+                  ? 'bg-primary text-on-primary shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+              type="button"
+              onClick={() => setModeFilter(filter)}
+            >
+              {filter === 'all' ? 'All modes' : modeLabel(filter)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="font-body-sm text-body-sm text-on-surface-variant -mt-1">
+        Showing {PACK_CATEGORY_LABELS[packType]} packs
+        {modeFilter === 'all' ? '' : ` for ${modeLabel(modeFilter)}`}. Packs with an
+        unknown mode are always shown.
+      </p>
 
       {progress && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md p-space-md rounded-lg bg-surface-container-low shadow-sm">
@@ -729,7 +836,7 @@ function CollectionsReal() {
           <button
             className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
             type="button"
-            onClick={() => void load(true)}
+            onClick={() => void load(true, packType)}
           >
             Retry
           </button>
@@ -743,50 +850,57 @@ function CollectionsReal() {
           <button
             className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
             type="button"
-            onClick={() => void load(true)}
+            onClick={() => void load(true, packType)}
           >
             Retry
           </button>
         </div>
       )}
 
-      {!loading &&
-        PACK_PERIOD_ORDER.map((period) => {
-          const list = visibleGrouped[period]
-          if (list.length === 0) return null
-          return (
-            <section key={period} className="flex flex-col gap-space-md">
-              <h2 className="font-headline-sm text-headline-sm text-on-surface">
-                {PACK_PERIOD_LABELS[period]}
-              </h2>
-              <div className="flex flex-col gap-3">
-                {list.map((pack) => (
-                  <PackCard
-                    key={pack.tag}
-                    pack={pack}
-                    onDownload={(p) => void downloadPack(p)}
-                    onToggleView={(p) => void toggleView(p)}
-                    onDownloadSet={(p, item) => void downloadSet(p, item)}
-                    expanded={expandedTag === pack.tag}
-                    detailLoading={detailLoadingTag === pack.tag}
-                    downloading={busy}
-                    error={packErrors[pack.tag] ?? null}
-                  />
-                ))}
-              </div>
-            </section>
-          )
-        })}
+      {!loading && visiblePacks.length > 0 && (
+        <div className="flex flex-col gap-3">
+          {visiblePacks.map((pack) => (
+            <PackCard
+              key={pack.tag}
+              pack={pack}
+              onDownload={(p) => void downloadPack(p)}
+              onToggleView={(p) => void toggleView(p)}
+              onDownloadSet={(p, item) => void downloadSet(p, item)}
+              expanded={expandedTag === pack.tag}
+              detailLoading={detailLoadingTag === pack.tag}
+              downloading={busy}
+              error={packErrors[pack.tag] ?? null}
+            />
+          ))}
+        </div>
+      )}
 
-      {!loading && !error && remainingPacks > 0 && (
+      {!loading && !error && packs.length > 0 && visiblePacks.length === 0 && (
+        <div className="p-space-md rounded-lg bg-surface-container-low">
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            No {modeLabel(modeFilter)} packs in the loaded {PACK_CATEGORY_LABELS[packType]} packs.
+            Packs with an unknown mode are always shown, so this means every loaded pack
+            belongs to another mode — try All modes.
+          </p>
+        </div>
+      )}
+
+      {!loading && !error && canShowMore && (
         <div className="flex items-center justify-center">
           <button
-            className="flex items-center gap-1.5 px-space-md py-2.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all"
+            className="flex items-center gap-1.5 px-space-md py-2.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
             type="button"
-            onClick={() => setVisibleCount((c) => c + PACKS_PAGE_SIZE)}
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
           >
             <span className="material-symbols-outlined text-[18px]">expand_more</span>
-            <span>Show more packs ({remainingPacks} more)</span>
+            <span>
+              {loadingMore
+                ? 'Loading…'
+                : nextCursor
+                  ? 'Show more packs'
+                  : `Show more packs (${remainingPacks} more)`}
+            </span>
           </button>
         </div>
       )}

@@ -42,6 +42,12 @@ import {
   type TokenStore,
   type UserTokenEnv,
 } from './authHelpers.ts'
+import {
+  PackListError,
+  buildBeatmapPackDetailPath,
+  buildBeatmapPacksPath,
+  resolvePackListType,
+} from './packHelpers.ts'
 
 // ---------------------------------------------------------------------------
 // Config
@@ -326,13 +332,34 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
     // Beatmap packs (Collections page): osu!'s public pack listing.
     // BeatConnect's own pack API needs a supporter key, so RecOsuk
     // lists the public osu! packs instead and never fabricates pack
-    // metadata. Mode-free: packs span all modes.
+    // metadata. Mode-free: packs span all modes (mode comes from
+    // each pack's `ruleset_id`, read client-side).
+    //
+    // `type` is a BeatmapPackType NAME (standard, featured,
+    // tournament, loved, chart, theme, artist) and defaults to
+    // `standard` upstream when omitted — the client always sends it.
+    // `cursor_string` passes through for pagination; the upstream
+    // body is returned verbatim, so a response cursor reaches the
+    // client untouched.
     case 'getBeatmapPacks': {
-      return osuFetch('/beatmaps/packs')
+      let path: string
+      try {
+        path = buildBeatmapPacksPath(
+          resolvePackListType(params.type),
+          params.cursor_string,
+        )
+      } catch (err) {
+        if (err instanceof PackListError) throw new ProxyError(err.message, 400)
+        throw err
+      }
+      return osuFetch(path)
     }
     case 'getBeatmapPack': {
-      const pack = encodeURIComponent(requireString(params, 'pack'))
-      return osuFetch(`/beatmaps/packs/${pack}`)
+      // The tag reaches osu! VERBATIM: encodeURIComponent only
+      // escapes reserved characters, so `ST445` stays `ST445`.
+      // Never normalize, lowercase, or split the tag here.
+      const pack = requireString(params, 'pack')
+      return osuFetch(buildBeatmapPackDetailPath(pack))
     }
     // User-tag vocabulary (batch 11, part 4): lazer's fixed,
     // player-voted tag vocabulary, `GET /tags` with the app
