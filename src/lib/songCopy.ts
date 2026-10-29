@@ -100,6 +100,14 @@ async function writeToFolder(
  * Fetch the .osz from the mirrors in order and write it into the
  * folder handle. Returns 'failed' (never throws) when every mirror
  * fails or the write fails.
+ *
+ * Fallthrough order (batch 3, item D): for EACH mirror, the no-video
+ * URL is tried first when the setting is on, then THAT SAME mirror's
+ * full-file URL — any non-2xx (a 425 Too Early from catboy's `{id}n`
+ * endpoint included) or fetch throw (CORS/network) moves to the
+ * next attempt. Only after a mirror's variants are exhausted does
+ * the loop move to the next mirror. Mirrors with no no-video variant
+ * build identical URLs for both attempts and are fetched once.
  */
 export async function copySetToSongsFolder(
   request: SongCopyRequest,
@@ -109,22 +117,28 @@ export async function copySetToSongsFolder(
   const fetchFn = deps.fetchFn ?? globalThis.fetch
   const order = request.noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
   const filename = songsFolderFilename(request)
-  const opts: MirrorUrlOptions = { noVideo: request.noVideo }
   let lastError = 'all mirrors failed'
   for (const mirrorId of order) {
     const mirror = MIRRORS.find((m) => m.id === mirrorId)
     if (!mirror) continue
-    try {
-      const response = await fetchFn(mirror.url(request.beatmapsetId, opts))
-      if (!response.ok) {
-        lastError = `${mirrorId} answered ${response.status}`
-        continue
+    const urls = [...new Set([
+      mirror.url(request.beatmapsetId, { noVideo: request.noVideo } satisfies MirrorUrlOptions),
+      mirror.url(request.beatmapsetId, {}),
+    ])]
+    for (const url of urls) {
+      try {
+        const response = await fetchFn(url)
+        if (!response.ok) {
+          lastError = `${mirrorId} answered ${response.status}`
+          continue
+        }
+        await writeToFolder(handle, filename, response)
+        return { status: 'copied', mirrorId, filename }
+      } catch (err) {
+        // CORS blocks and network failures land here: try the next
+        // attempt (same mirror's full file, then the next mirror).
+        lastError = err instanceof Error ? err.message : String(err)
       }
-      await writeToFolder(handle, filename, response)
-      return { status: 'copied', mirrorId, filename }
-    } catch (err) {
-      // CORS blocks and network failures land here: try the next mirror.
-      lastError = err instanceof Error ? err.message : String(err)
     }
   }
   return { status: 'failed', reason: lastError }

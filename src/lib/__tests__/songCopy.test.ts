@@ -105,6 +105,64 @@ describe('copySetToSongsFolder (mocked fetch + handle)', () => {
     expect(writable.write).not.toHaveBeenCalled()
   })
 
+  // Batch 3, item D: a no-video URL that fails (HTTP 425 from
+  // catboy's `{id}n` endpoint, or a CORS/network throw) must fall
+  // through to the SAME mirror's full-file URL before the next
+  // mirror is tried — never straight to the next mirror, and never
+  // reported as copied when only the no-video attempt failed.
+  it('falls back to the same mirror full file when the no-video URL answers 425', async () => {
+    const { handle, written } = mockHandle()
+    const calls: string[] = []
+    const fetchFn = vi.fn(async (url: string) => {
+      calls.push(url)
+      if (url === 'https://catboy.best/d/42n') return { ok: false, status: 425 } as Response
+      return okResponse(BYTES)
+    })
+    const outcome = await copySetToSongsFolder(
+      { beatmapsetId: 42, artist: 'A', title: 'T', noVideo: true },
+      handle,
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+    expect(outcome.status).toBe('copied')
+    expect(outcome).toMatchObject({ mirrorId: 'catboy' })
+    expect(calls).toEqual(['https://catboy.best/d/42n', 'https://catboy.best/d/42'])
+    expect(written).toEqual([BYTES])
+  })
+
+  it('falls back to the same mirror full file when the no-video fetch throws', async () => {
+    const { handle } = mockHandle()
+    const calls: string[] = []
+    const fetchFn = vi.fn(async (url: string) => {
+      calls.push(url)
+      if (url.endsWith('42n')) throw new TypeError('Failed to fetch')
+      return okResponse(BYTES)
+    })
+    const outcome = await copySetToSongsFolder(
+      { beatmapsetId: 42, artist: 'A', title: 'T', noVideo: true },
+      handle,
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+    expect(outcome.status).toBe('copied')
+    expect(calls).toEqual(['https://catboy.best/d/42n', 'https://catboy.best/d/42'])
+  })
+
+  it('with noVideo, tries each mirror at most twice and reports failure honestly when all fail', async () => {
+    const { handle } = mockHandle()
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.includes('catboy')) return { ok: false, status: 425 } as Response
+      return { ok: false, status: 500 } as Response
+    })
+    const outcome = await copySetToSongsFolder(
+      { beatmapsetId: 42, artist: 'A', title: 'T', noVideo: true },
+      handle,
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+    expect(outcome.status).toBe('failed')
+    // catboy: n + full (2). The other three mirrors have no no-video
+    // variant, so their identical URLs dedupe to 1 call each.
+    expect(fetchFn).toHaveBeenCalledTimes(5)
+  })
+
   it('streams the response body when one is present', async () => {
     const { handle, writable } = mockHandle()
     const pipeTo = vi.fn(async () => {})

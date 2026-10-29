@@ -76,14 +76,15 @@ export default function DownloadButton({
     [],
   )
 
-  const start = (mirrorId?: string) => {
+  const start = (mirrorId?: string, opts: { noVideo?: boolean } = {}) => {
     setMenuOpen(false)
     if (timerRef.current) clearTimeout(timerRef.current)
+    const effectiveNoVideo = opts.noVideo ?? noVideo
     const result = downloadManager.startDownload({
       beatmapsetId,
       mirrorId,
       seenKeyValue,
-      noVideo,
+      noVideo: effectiveNoVideo,
     })
     const copyRun = ++copyRunRef.current
     setState({
@@ -97,7 +98,7 @@ export default function DownloadButton({
     // the browser download above. A stale resolution (user clicked
     // another download meanwhile) must not rewrite the new state.
     if (autoCopy) {
-      void attemptSongsCopy({ beatmapsetId, artist, title, noVideo }).then((outcome) => {
+      void attemptSongsCopy({ beatmapsetId, artist, title, noVideo: effectiveNoVideo }).then((outcome) => {
         if (copyRunRef.current !== copyRun) return
         const copy: CopyState = outcome.status === 'copied' ? 'copied' : outcome.status === 'failed' ? 'failed' : 'idle'
         setState((prev) =>
@@ -107,14 +108,26 @@ export default function DownloadButton({
     }
     // Native downloads give the page no completion signal; resolve to
     // "done" shortly after the handoff instead of faking progress.
+    // EXCEPTION (batch 3, item D): a no-video download is never
+    // marked done on the iframe handoff alone — catboy's no-video
+    // endpoint has answered 425 (Too Early) in the wild, which the
+    // page cannot detect. It stays in the "handed off" state with
+    // the full-file retry below until the user picks otherwise.
     timerRef.current = setTimeout(() => {
       setState((prev) =>
-        prev.kind === 'downloading'
+        prev.kind === 'downloading' && !prev.noVideoApplied
           ? { kind: 'done', mirrorId: prev.mirrorId, noVideoApplied: prev.noVideoApplied, copy: prev.copy }
           : prev,
       )
     }, 2500)
   }
+
+  // Full-file retry for a no-video attempt (batch 3, item D): normal
+  // mirror order, no-video off. One click from working when the
+  // no-video endpoint refuses the request.
+  const retryFullFile = () => start(undefined, { noVideo: false })
+  const showFullFileRetry =
+    noVideo && state.kind !== 'idle' && state.noVideoApplied
 
   const openOfficial = () => {
     void recordDownload(seenKeyValue, beatmapsetId, 'official')
@@ -215,6 +228,16 @@ export default function DownloadButton({
       </div>
       {statusNote && (
         <span className="font-label-sm text-[10px] text-on-surface-variant text-right max-w-48">{statusNote}</span>
+      )}
+      {showFullFileRetry && (
+        <button
+          className="font-label-sm text-[11px] text-primary hover:underline text-right"
+          type="button"
+          title="The no-video file may have been refused by the mirror — download the full file instead"
+          onClick={retryFullFile}
+        >
+          No video not downloading? Get the full file
+        </button>
       )}
     </div>
   )

@@ -14,7 +14,9 @@ import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import {
   defaultFiltersFor,
+  emptyPoolReason,
   generateRecommendations,
+  type GenerationDiagnostics,
   type RecCandidate,
   type RecFilters,
 } from '../lib/recommend'
@@ -805,6 +807,7 @@ function RecommendationsReal({
   const [draft, setDraft] = useState<RecFilters>(filters)
   const [items, setItems] = useState<RecCandidate[]>([])
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
+  const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [downloadedTick, setDownloadedTick] = useState(0)
@@ -831,6 +834,7 @@ function RecommendationsReal({
         if (runRef.current !== run) return
         setItems(result.items)
         setTotalMatched(result.totalMatched)
+        setDiagnostics(result.diagnostics)
         seenStore.markMany(
           key,
           'served',
@@ -947,9 +951,17 @@ function RecommendationsReal({
             <LoadingState label="Searching osu! and scoring your window…" />
           )}
           {!busy && !error && items.length === 0 && (
-            <p className="font-body-md text-body-md text-on-surface-variant px-space-xs">
-              No maps in the fetched window match these filters. Loosen the SR/BPM ranges or clear the tag and apply again.
-            </p>
+            <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                {diagnostics
+                  ? emptyPoolReason(diagnostics, filters)
+                  : 'No maps in the fetched window match these filters. Loosen the SR/BPM ranges or clear the tag and apply again.'}
+              </p>
+              <div className="flex items-center gap-space-sm flex-shrink-0">
+                <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count, { fresh: true })}>Retry</button>
+                <button className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={onBrowseSamples}>Browse sample picks</button>
+              </div>
+            </div>
           )}
           {items.map((c) => (
             <BeatmapRow

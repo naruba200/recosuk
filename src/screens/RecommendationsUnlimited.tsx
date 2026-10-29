@@ -898,6 +898,7 @@ function FeedReal({
   const [draft, setDraft] = useState<RecFilters>(filters)
   const [items, setItems] = useState<RecCandidate[]>([])
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
+  const [feedStats, setFeedStats] = useState({ examined: 0, produced: 0 })
   const [ended, setEnded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -933,6 +934,7 @@ function FeedReal({
         const first = await session.take(PAGE_TAKE)
         setItems(first)
         setTotalMatched(session.totalMatched)
+        setFeedStats({ examined: session.examinedSets, produced: session.producedCandidates })
         setEnded(session.exhausted && session.bufferedCount === 0)
       } catch {
         setError('The feed could not load just now — osu! or the proxy may be busy.')
@@ -963,6 +965,7 @@ function FeedReal({
       const more = await session.take(10)
       if (more.length > 0) setItems((prev) => [...prev, ...more])
       setTotalMatched(session.totalMatched)
+      setFeedStats({ examined: session.examinedSets, produced: session.producedCandidates })
       setEnded(session.exhausted && session.bufferedCount === 0)
     } catch {
       setError('A feed refill failed — scroll again to retry.')
@@ -1115,7 +1118,13 @@ function FeedReal({
               <span className="material-symbols-outlined text-primary text-[28px]">flag</span>
               <p className="font-headline-sm text-headline-sm text-on-surface">That's everything matching these filters</p>
               <p className="font-body-sm text-body-sm text-on-surface-variant max-w-md">
-                The endless feed is honest: the pool ran out. Loosen the filters for more maps, or start over and see the ones you skipped again.
+                {items.length === 0
+                  ? feedStats.examined === 0
+                    ? 'osu! search returned no beatmapsets for this SR/BPM window at all — the pool was empty upstream, not filtered out here. Retry, or loosen the SR range.'
+                    : feedStats.produced === 0
+                      ? `${feedStats.examined} ${feedStats.examined === 1 ? 'set' : 'sets'} came back from osu! search, but none survived the SR/BPM/length/status/key-count filters. Loosen the filters for more maps.`
+                      : 'The maps that matched were all already served, downloaded, or skipped. Start over to see seen maps again, or loosen the filters for fresh ones.'
+                  : 'The endless feed is honest: the pool ran out. Loosen the filters for more maps, or start over and see the ones you skipped again.'}
               </p>
               <div className="flex items-center gap-space-sm">
                 <button className="px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={loosenFilters}>Loosen filters</button>

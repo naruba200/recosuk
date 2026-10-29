@@ -807,7 +807,7 @@ function MirrorReal() {
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [sort, setSort] = useState<MirrorSort>(DEFAULT_MIRROR_SORT)
   const [filters, setFilters] = useState<MirrorFilters>(() => defaultMirrorFilters())
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [results, setResults] = useState<MirrorResult[]>([])
   const [total, setTotal] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1017,6 +1017,27 @@ function MirrorReal() {
       (r) => r.min !== null || r.max !== null,
     )
 
+  // Badge count for the filter icon: one per active filter group.
+  const activeFilterCount =
+    (filters.status !== 'any' ? 1 : 0) +
+    (filters.genre !== 0 ? 1 : 0) +
+    (filters.language !== 0 ? 1 : 0) +
+    (filters.creator.trim() !== '' ? 1 : 0) +
+    [filters.sr, filters.bpm, filters.lengthSec, filters.ar, filters.od, filters.hp, filters.cs].filter(
+      (r) => r.min !== null || r.max !== null,
+    ).length
+
+  // Escape closes the filter drawer; closing never touches the
+  // chosen filters (they live in `filters`, not in drawer state).
+  useEffect(() => {
+    if (!drawerOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawerOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawerOpen])
+
   const downloaded = seenStore.load(key).downloaded
   const sessionDownloads = results.filter((r) => downloaded.includes(r.candidate.beatmapsetId))
 
@@ -1084,7 +1105,9 @@ function MirrorReal() {
               </button>
             </div>
           </div>
-          {/* Sort + quick filters rail */}
+          {/* Toolbar: sort + one filter icon (drawer) + refresh.
+              All advanced controls live in the drawer; the toolbar
+              stays visible and uncluttered. */}
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
               <span className="text-on-surface-variant">Sort:</span>
@@ -1099,53 +1122,20 @@ function MirrorReal() {
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
-              <span className="text-on-surface-variant">Status:</span>
-              <select
-                aria-label="Beatmap status"
-                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
-                value={filters.status}
-                onChange={(e) => updateFilters({ status: e.target.value as MirrorFilters['status'] })}
-              >
-                {MIRROR_STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
-              <span className="text-on-surface-variant">Genre:</span>
-              <select
-                aria-label="Genre"
-                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
-                value={filters.genre}
-                onChange={(e) => updateFilters({ genre: Number(e.target.value) })}
-              >
-                {MIRROR_GENRES.map((g) => (
-                  <option key={g.value} value={g.value}>{g.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
-              <span className="text-on-surface-variant">Language:</span>
-              <select
-                aria-label="Language"
-                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
-                value={filters.language}
-                onChange={(e) => updateFilters({ language: Number(e.target.value) })}
-              >
-                {MIRROR_LANGUAGES.map((l) => (
-                  <option key={l.value} value={l.value}>{l.label}</option>
-                ))}
-              </select>
-            </label>
             <button
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full font-label-sm text-label-sm transition-colors ${showAdvanced || filtersActive ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant hover:text-on-surface'}`}
+              className={`relative flex items-center justify-center w-9 h-9 rounded-full transition-colors ${drawerOpen || filtersActive ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant hover:text-on-surface'}`}
               type="button"
-              aria-expanded={showAdvanced}
-              onClick={() => setShowAdvanced((v) => !v)}
+              aria-label={`Advanced filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+              aria-expanded={drawerOpen}
+              title="Advanced filters"
+              onClick={() => setDrawerOpen(true)}
             >
-              <span className="material-symbols-outlined text-[14px]">filter_list</span>
-              <span>More filters{filtersActive ? ' •' : ''}</span>
+              <span className="material-symbols-outlined text-[20px]">tune</span>
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-primary text-on-primary font-label-sm text-[10px] font-bold flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
             </button>
             <button
               className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors"
@@ -1156,20 +1146,82 @@ function MirrorReal() {
               <span className="material-symbols-outlined text-[14px]">refresh</span>
               <span>Refresh</span>
             </button>
-            {filtersActive && (
-              <button
-                className="px-3 py-1 rounded-full bg-surface-container text-error font-label-sm text-label-sm hover:bg-error-container/30 transition-colors"
-                type="button"
-                onClick={clearFilters}
-              >
-                Clear filters
-              </button>
-            )}
           </div>
-          {/* Advanced filters panel */}
-          {showAdvanced && (
-            <div className="flex flex-col gap-space-md p-space-md rounded-lg bg-surface-container-low shadow-sm">
-              <div className="flex flex-col gap-1.5 max-w-md">
+        </div>
+      </section>
+
+      {/* Advanced-filters drawer: slides in from the right. Filter
+          state lives in `filters` (same as before), so choosing
+          here resets the list + cursors exactly like the old panel
+          did, and closing the drawer loses nothing. */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-black/60"
+            aria-hidden="true"
+            onClick={() => setDrawerOpen(false)}
+          ></div>
+          <aside
+            className="absolute right-0 top-0 h-full w-[340px] max-w-[88vw] bg-surface-container-low shadow-xl overflow-y-auto flex flex-col gap-space-md p-space-md"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Advanced filters"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-primary text-[20px]">tune</span>
+                <h2 className="font-headline-sm text-headline-sm text-on-surface">Advanced filters</h2>
+              </div>
+              <button
+                className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface flex items-center justify-center transition-colors"
+                type="button"
+                aria-label="Close advanced filters"
+                onClick={() => setDrawerOpen(false)}
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+            <div className="flex flex-col gap-space-sm">
+              <label className="flex flex-col gap-1.5">
+                <span className="font-label-md text-label-md text-on-surface font-semibold">Status</span>
+                <select
+                  aria-label="Beatmap status"
+                  className="h-10 px-3 rounded-full bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  value={filters.status}
+                  onChange={(e) => updateFilters({ status: e.target.value as MirrorFilters['status'] })}
+                >
+                  {MIRROR_STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="font-label-md text-label-md text-on-surface font-semibold">Genre</span>
+                <select
+                  aria-label="Genre"
+                  className="h-10 px-3 rounded-full bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  value={filters.genre}
+                  onChange={(e) => updateFilters({ genre: Number(e.target.value) })}
+                >
+                  {MIRROR_GENRES.map((g) => (
+                    <option key={g.value} value={g.value}>{g.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="font-label-md text-label-md text-on-surface font-semibold">Language</span>
+                <select
+                  aria-label="Language"
+                  className="h-10 px-3 rounded-full bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  value={filters.language}
+                  onChange={(e) => updateFilters({ language: Number(e.target.value) })}
+                >
+                  {MIRROR_LANGUAGES.map((l) => (
+                    <option key={l.value} value={l.value}>{l.label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex flex-col gap-1.5">
                 <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="mirror-creator">Mapper / creator</label>
                 <input
                   id="mirror-creator"
@@ -1180,22 +1232,40 @@ function MirrorReal() {
                   onChange={(e) => updateFilters({ creator: e.target.value })}
                 />
               </div>
-              <div className="flex flex-wrap gap-x-space-lg gap-y-space-md">
-                <RangePair label="Star rating" range={filters.sr} step={0.1} onChange={(r) => updateRange('sr', r)} />
-                <RangePair label="BPM" range={filters.bpm} step={1} onChange={(r) => updateRange('bpm', r)} />
-                <LengthRangePair range={filters.lengthSec} onChange={(r) => updateRange('lengthSec', r)} />
-                <RangePair label="AR" range={filters.ar} step={0.1} onChange={(r) => updateRange('ar', r)} />
-                <RangePair label="OD" range={filters.od} step={0.1} onChange={(r) => updateRange('od', r)} />
-                <RangePair label="HP" range={filters.hp} step={0.1} onChange={(r) => updateRange('hp', r)} />
-                <RangePair label="CS / keys" range={filters.cs} step={1} onChange={(r) => updateRange('cs', r)} />
-              </div>
-              <p className="font-label-sm text-label-sm text-on-surface-variant">
-                Stat ranges narrow the search on osu! and are re-checked on every result. Genre, language and HP are applied by osu! only.
-              </p>
             </div>
-          )}
+            <div className="flex flex-col gap-space-md">
+              <RangePair label="Star rating" range={filters.sr} step={0.1} onChange={(r) => updateRange('sr', r)} />
+              <RangePair label="BPM" range={filters.bpm} step={1} onChange={(r) => updateRange('bpm', r)} />
+              <LengthRangePair range={filters.lengthSec} onChange={(r) => updateRange('lengthSec', r)} />
+              <RangePair label="AR" range={filters.ar} step={0.1} onChange={(r) => updateRange('ar', r)} />
+              <RangePair label="OD" range={filters.od} step={0.1} onChange={(r) => updateRange('od', r)} />
+              <RangePair label="HP" range={filters.hp} step={0.1} onChange={(r) => updateRange('hp', r)} />
+              <RangePair label="CS / keys" range={filters.cs} step={1} onChange={(r) => updateRange('cs', r)} />
+            </div>
+            <p className="font-label-sm text-label-sm text-on-surface-variant">
+              Stat ranges narrow the search on osu! and are re-checked on every result. Genre, language and HP are applied by osu! only.
+            </p>
+            <div className="flex flex-col gap-2 pt-space-xs mt-auto">
+              <button
+                className="w-full py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold hover:opacity-95 transition-opacity"
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+              >
+                Show results{filtersActive ? ` (${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'})` : ''}
+              </button>
+              {filtersActive && (
+                <button
+                  className="w-full py-2 rounded-full text-error hover:bg-error-container/30 font-label-sm text-label-sm transition-colors"
+                  type="button"
+                  onClick={clearFilters}
+                >
+                  Clear all filters
+                </button>
+              )}
+            </div>
+          </aside>
         </div>
-      </section>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-space-xl">
         <section className="xl:col-span-8 flex flex-col gap-space-md min-w-0">

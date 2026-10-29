@@ -20,6 +20,20 @@ import { seenStore } from './seenStore'
  *     catboy's no-video form: the hinai mirror FAQ
  *     (mirror.hinamizawa.ai) documents the ecosystem's no-video
  *     conventions and names the `{id}n` suffix "catboy style".
+ *     Re-checked 2026-10-29 (batch 3): the FAQ still names the
+ *     `{id}n` suffix as catboy style; no contradicting source was
+ *     readable, so the form is unchanged.
+ *   KNOWN UNVERIFIED BEHAVIOUR (batch 3, item D): on the user's
+ *     local setup, every `{id}n` request failed with HTTP 425 (Too
+ *     Early) while plain URLs were not reported failing. From this
+ *     VM catboy returns 403 for BOTH forms (geo/bot blocking), so
+ *     the 425 could not be reproduced and its cause is UNVERIFIED
+ *     — whether catboy's no-video endpoint itself returns 425 or
+ *     the user's browser/network triggers it is unknown. Do not
+ *     claim a root cause. Mitigations live in songCopy.ts
+ *     (same-mirror full-file fallthrough) and DownloadButton.tsx
+ *     (visible full-file retry; no-video downloads are never
+ *     marked done on the iframe handoff alone).
  *   beatconnect / Nerinyan / Sayobot: no no-video URL shape could be
  *     verified from a public doc actually read, so they FALL BACK to
  *     the full file even when the no-video setting is on. The

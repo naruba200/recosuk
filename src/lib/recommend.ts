@@ -102,12 +102,41 @@ export interface RecFilters {
   tagText: string
 }
 
+/**
+ * Whether the profile carries a usable BPM sweet spot. A profile
+ * whose top plays reported no BPM at all calibrates bpmSweetMin/Max
+ * to 0 — "unknown", never a real bound. Treating 0 as a bound used
+ * to build the inverted window bpm>=60 bpm<=30, which matches
+ * nothing upstream and filters out every candidate with a BPM:
+ * silent empty recommendations in every mode, with no error.
+ */
+export function hasKnownBpm(profile: SkillProfile): boolean {
+  return (
+    Number.isFinite(profile.bpmSweetMin) &&
+    Number.isFinite(profile.bpmSweetMax) &&
+    profile.bpmSweetMin > 0 &&
+    profile.bpmSweetMax >= profile.bpmSweetMin
+  )
+}
+
 export function defaultFiltersFor(profile: SkillProfile): RecFilters {
+  // SR guards: a profile with no usable star ratings falls back to
+  // the starter band values instead of emitting NaN/0 bounds.
+  const comfortMin =
+    Number.isFinite(profile.comfortSrMin) && profile.comfortSrMin > 0
+      ? profile.comfortSrMin
+      : 3.0
+  const ceiling =
+    Number.isFinite(profile.srCeiling) && profile.srCeiling > comfortMin
+      ? profile.srCeiling
+      : comfortMin + 1.5
   return {
-    srMin: Math.max(0, Math.round((profile.comfortSrMin - 0.5) * 10) / 10),
-    srMax: Math.round((profile.srCeiling + 0.8) * 10) / 10,
-    bpmMin: Math.max(60, profile.bpmSweetMin - 30),
-    bpmMax: profile.bpmSweetMax + 30,
+    srMin: Math.max(0, Math.round((comfortMin - 0.5) * 10) / 10),
+    srMax: Math.round((ceiling + 0.8) * 10) / 10,
+    // Unknown BPM (no top play reported one) gets the wide window,
+    // never the inverted 60..30 one.
+    bpmMin: hasKnownBpm(profile) ? Math.max(60, profile.bpmSweetMin - 30) : 60,
+    bpmMax: hasKnownBpm(profile) ? profile.bpmSweetMax + 30 : 300,
     lenMinSec: 60,
     lenMaxSec: 600,
     rankedLovedOnly: true,
@@ -234,7 +263,11 @@ export function applyFilters(
     if (c.lengthSec > 0 && (c.lengthSec < filters.lenMinSec || c.lengthSec > filters.lenMaxSec))
       return false
     if (filters.rankedLovedOnly && c.status !== 'ranked' && c.status !== 'loved') return false
-    if (mode === 'mania' && filters.keyCount !== null && Math.round(c.cs) !== filters.keyCount)
+    // Key count only applies when the candidate actually carries a
+    // CS value: search payloads without one (cs 0 = unknown) must
+    // pass, matching Mirror's "unknown values pass" rule. Dropping
+    // them emptied every mania run whose payloads lacked CS.
+    if (mode === 'mania' && filters.keyCount !== null && c.cs > 0 && Math.round(c.cs) !== filters.keyCount)
       return false
     if (tag) {
       const haystack = `${c.tags.join(' ')} ${c.title} ${c.artist}`.toLowerCase()
@@ -420,10 +453,56 @@ function normalizeSearchPage(page: unknown): SearchPage {
   return page as SearchPage
 }
 
+/**
+ * Where the pool emptied, so the UI can say WHY instead of showing a
+ * silent empty list. Counts are cumulative over the queries run:
+ * rawSets = unique sets returned by osu! search, afterPick = sets
+ * with a playable in-mode difficulty, afterFilters = survivors of
+ * the SR/BPM/length/status/key-count filters, afterSeen = survivors
+ * of the seen-set exclusion (= poolSize).
+ */
+export interface GenerationDiagnostics {
+  queries: string[]
+  rawSets: number
+  afterPick: number
+  afterFilters: number
+  afterSeen: number
+  bpmUnknown: boolean
+}
+
 export interface GenerateResult {
   items: RecCandidate[]
   totalMatched: number | null
   poolSize: number
+  diagnostics: GenerationDiagnostics
+}
+
+/**
+ * Plain-language reason for an empty result, naming the stage that
+ * emptied the pool. Used by both recommendation screens; never
+ * blames user-set filters for a pool the defaults emptied.
+ */
+export function emptyPoolReason(d: GenerationDiagnostics, filters: RecFilters): string {
+  if (d.rawSets === 0) {
+    return (
+      `osu! search returned no beatmapsets for this SR/BPM window ` +
+      `(${d.queries.length} ${d.queries.length === 1 ? 'query' : 'queries'} tried). ` +
+      (d.bpmUnknown
+        ? 'Your top plays reported no BPM, so a wide 60–300 BPM window was used — the empty result is upstream, not your filters. '
+        : '') +
+      'Retry — the proxy or osu! may have been busy — or loosen the SR range.'
+    )
+  }
+  if (d.afterPick === 0) {
+    return `${d.rawSets} ${d.rawSets === 1 ? 'set' : 'sets'} came back from osu! search, but none had a playable difficulty in this mode. Retry or loosen the SR range.`
+  }
+  if (d.afterFilters === 0) {
+    return `${d.afterPick} ${d.afterPick === 1 ? 'set' : 'sets'} came back, but every one was filtered out by the SR/BPM/length/status${filters.keyCount !== null ? '/key-count' : ''} filters. Loosen the ranges or clear the tag.`
+  }
+  if (d.afterSeen === 0) {
+    return 'The remaining maps were all already served, downloaded, or skipped. Start over to see seen maps again, or loosen the filters for fresh ones.'
+  }
+  return 'No maps matched these filters. Loosen the SR/BPM ranges or clear the tag and apply again.'
 }
 
 export async function generateRecommendations(
@@ -459,15 +538,26 @@ export async function generateRecommendations(
     }
   }
 
+  const rawSets = bySet.size
   let candidates = [...bySet.values()]
     .map((set) => setToCandidate(set, mode, profile))
     .filter((c): c is RecCandidate => c !== null)
+  const afterPick = candidates.length
   candidates = applyFilters(candidates, opts.filters, mode)
+  const afterFilters = candidates.length
   if (opts.seen) {
     const seen = opts.seen
     candidates = candidates.filter((c) => !isHardSeen(seen, c.beatmapsetId))
   }
   const poolSize = candidates.length
+  const diagnostics: GenerationDiagnostics = {
+    queries,
+    rawSets,
+    afterPick,
+    afterFilters,
+    afterSeen: poolSize,
+    bpmUnknown: !hasKnownBpm(profile),
+  }
 
   const playedSetIds = new Set(opts.seen?.played ?? [])
   let ranked = scoreAndSort(candidates, profile, { playedSetIds, ratingBoost: 0 })
@@ -498,7 +588,7 @@ export async function generateRecommendations(
     ranked = [...enriched, ...ranked.slice(enrichN)]
   }
 
-  return { items: ranked.slice(0, opts.count), totalMatched, poolSize }
+  return { items: ranked.slice(0, opts.count), totalMatched, poolSize, diagnostics }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,10 +608,15 @@ export class FeedSession {
   private queries: string[]
   private pool: RecCandidate[] = []
   private servedIds = new Set<number>()
+  private examinedIds = new Set<number>()
   exhausted = false
   totalMatched: number | null = null
   /** Set when a refill is in flight, so the UI can show skeletons. */
   loading = false
+  /** Unique sets examined across refills (diagnostics for the WHY line). */
+  examinedSets = 0
+  /** Candidates that survived pick + filters and entered the pool. */
+  producedCandidates = 0
 
   private profile: SkillProfile
   private mode: GameMode
@@ -574,6 +669,10 @@ export class FeedSession {
         }
         for (const set of result.beatmapsets ?? []) {
           if (!set || typeof set.id !== 'number') continue
+          if (!this.examinedIds.has(set.id)) {
+            this.examinedIds.add(set.id)
+            this.examinedSets = this.examinedIds.size
+          }
           if (this.servedIds.has(set.id)) continue
           if (isHardSeen(this.seen, set.id) && !this.seen.served.includes(set.id)) continue
           if (this.seen.served.includes(set.id)) continue
@@ -592,6 +691,7 @@ export class FeedSession {
       }
       if (fresh.length > 0) {
         const filtered = applyFilters(fresh, this.filters, this.mode)
+        this.producedCandidates += filtered.length
         const playedSetIds = new Set(this.seen.played)
         const scored = scoreAndSort(filtered, this.profile, { playedSetIds, ratingBoost: 0 })
         this.pool = scoreAndSort(

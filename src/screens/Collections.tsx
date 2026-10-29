@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
 import LoadingState from '../components/LoadingState'
-import { isProxyConfigured } from '../lib/osu'
+import { isProxyConfigured, OsuServiceError } from '../lib/osu'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
 import { useDownloadSettings } from '../lib/downloadSettings'
@@ -153,9 +153,19 @@ function CollectionsReal() {
       const list = await fetchBeatmapPacks({ fresh })
       if (runRef.current !== run) return
       setPacks(list)
-    } catch {
+    } catch (err) {
       if (runRef.current !== run) return
-      setError('Could not load beatmap packs just now — osu! or the proxy may be busy.')
+      // A 400 here is the OLD deployed Edge Function: it does not know
+      // the pack actions yet (it demands `mode` for every action).
+      // Name the one command that fixes it; anything else keeps the
+      // generic busy message instead of blaming the deploy.
+      const isOldFunction =
+        err instanceof OsuServiceError && err.status === 400
+      setError(
+        isOldFunction
+          ? 'Live packs need the Edge Function redeployed: supabase functions deploy osu-proxy --no-verify-jwt'
+          : 'Could not load beatmap packs just now — osu! or the proxy may be busy.',
+      )
     } finally {
       if (runRef.current === run) setLoading(false)
     }
