@@ -1,10 +1,8 @@
 import { create } from 'zustand'
 import {
   createDownloadManager,
-  DISPLAY_MIRROR_ORDER,
-  DISPLAY_MIRROR_ORDER_NO_VIDEO,
-  NATIVE_MIRROR_ORDER,
-  NATIVE_MIRROR_ORDER_NO_VIDEO,
+  resolveDisplayMirrorOrder,
+  resolveNativeMirrorOrder,
   type DownloadManagerDeps,
 } from './downloadManager'
 import { getNoVideo } from './downloadSettings'
@@ -124,22 +122,23 @@ export function resetDownloadQueue(): void {
   useDownloadQueue.setState({ items: [], dockOpen: false })
 }
 
-/** The mirror order a row cycles through: catboy first when
- * no-video is on (only its no-video URL form is verified), the
- * default order otherwise — exactly as startDownload picks. */
+/** The mirror order a row cycles through: the resolved native
+ * order (the user's Mirror Route Priority from Settings, or the
+ * built-in default — catboy first when no-video is on, exactly
+ * as startDownload picks). */
 export function mirrorOrderFor(noVideo: boolean): readonly string[] {
-  return noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
+  return resolveNativeMirrorOrder(noVideo)
 }
 
 /**
  * The display order a row's Retry cycles through (batch 12, part
- * 9): osu! official FIRST, then the native mirrors in their usual
- * order, wrapping to official after the last native mirror. Every
- * step opens the official URL in a new tab (batch 14); native
- * steps use the iframe handoff.
+ * 9): osu! official FIRST, then the native mirrors in the
+ * resolved order, wrapping to official after the last native
+ * mirror. Every step opens the official URL in a new tab (batch
+ * 14); native steps use the iframe handoff.
  */
 export function displayOrderFor(noVideo: boolean): readonly string[] {
-  return noVideo ? DISPLAY_MIRROR_ORDER_NO_VIDEO : DISPLAY_MIRROR_ORDER
+  return resolveDisplayMirrorOrder(noVideo)
 }
 
 /**

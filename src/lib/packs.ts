@@ -27,8 +27,9 @@ import type { GameMode } from './mode'
  *   forms `ST445`, `SM385`, `SC172` alongside `S1888` (observed on
  *   osu.ppy.sh/beatmaps/packs/, 2026-10-29). The second letter is
  *   the mode signal in the wild (T=taiko, M=mania, C=catch, bare
- *   S=osu!/default). It is recorded as OBSERVED, never as the mode
- *   source of truth: `ruleset_id` wins on any conflict.
+ *   S=osu!/default). It is recorded as OBSERVED, and is the
+ *   FALLBACK mode signal when `ruleset_id` is absent (see
+ *   `packEffectiveMode`): `ruleset_id` wins on any conflict.
  * - BeatmapPackType letters (docs, authoritative): standard=S,
  *   featured=F, tournament=P, loved=L, chart=R, theme=T, artist=A.
  * - The old Weekly/Monthly/Yearly grouping was an INVENTED
@@ -99,8 +100,9 @@ export interface ParsedPackTag {
   /** The integer after the letter(s), when present. */
   number: number | null
   /** The OBSERVED second letter (T/M/C) in two-letter standard tags
-   * such as ST445/SM385/SC172 — corroboration/display only, NEVER
-   * the mode source of truth (`ruleset_id` wins on any conflict). */
+   * such as ST445/SM385/SC172 — the fallback mode signal when
+   * `ruleset_id` is absent (see `packEffectiveMode`); `ruleset_id`
+   * wins on any conflict. */
   modeLetter: 'T' | 'M' | 'C' | null
 }
 
@@ -129,8 +131,8 @@ export function parsePackTag(tag: unknown): ParsedPackTag {
  * Mode from the documented `ruleset_id` integer: 0→osu, 1→taiko,
  * 2→fruits (Catch), 3→mania — the same ids the app already uses.
  * Anything else (absent, non-integer, out of range) is unknown.
- * This is the ONLY mode source of truth for packs; the tag's
- * second letter is corroboration only.
+ * This is the PRIMARY mode source for packs; `packEffectiveMode`
+ * falls back to the tag's mode letter only when this returns null.
  */
 export function packModeFromRuleset(rulesetId: unknown): GameMode | null {
   if (typeof rulesetId !== 'number' || !Number.isInteger(rulesetId)) return null
@@ -143,6 +145,40 @@ export function packModeFromRuleset(rulesetId: unknown): GameMode | null {
       return 'fruits'
     case 3:
       return 'mania'
+    default:
+      return null
+  }
+}
+
+/**
+ * Effective mode for display (badge) and filtering. `ruleset_id`
+ * wins whenever it resolves to a mode; only when it is absent or
+ * out of range do we fall back to the tag's mode letter — and only
+ * for `standard` packs: ST→taiko, SM→mania, SC→fruits (Catch),
+ * bare S→osu.
+ *
+ * LIVE EVIDENCE (2026-10-29): bare-S packs arrive with no usable
+ * `ruleset_id`, so ruleset-only filtering classified them
+ * "unknown" and showed them under every mode filter. The tag letter
+ * is the mode signal the user found on osu.ppy.sh/beatmaps/packs/;
+ * it is used ONLY as this fallback, never to override
+ * `ruleset_id`. Non-standard types with no usable `ruleset_id`
+ * stay unknown — no mode is inferred from their tags.
+ */
+export function packEffectiveMode(pack: BeatmapPack): GameMode | null {
+  const fromRuleset = packModeFromRuleset(pack.rulesetId)
+  if (fromRuleset !== null) return fromRuleset
+  const parsed = parsePackTag(pack.tag)
+  if (parsed.type !== 'standard') return null
+  switch (parsed.modeLetter) {
+    case 'T':
+      return 'taiko'
+    case 'M':
+      return 'mania'
+    case 'C':
+      return 'fruits'
+    case null:
+      return 'osu'
     default:
       return null
   }
@@ -286,13 +322,14 @@ export function packDateLabel(date: string): string {
 
 /** Mode filter for the packs list. `all` shows everything; a
  * specific mode shows its packs PLUS packs whose mode is unknown
- * (absent/out-of-range `ruleset_id`) — an unknown mode is never
- * hidden by the filter. */
+ * (no usable `ruleset_id` and no tag fallback — see
+ * `packEffectiveMode`) — an unknown mode is never hidden by the
+ * filter. */
 export type PackModeFilter = GameMode | 'all'
 
 export function packVisibleForMode(pack: BeatmapPack, filter: PackModeFilter): boolean {
   if (filter === 'all') return true
-  const mode = packModeFromRuleset(pack.rulesetId)
+  const mode = packEffectiveMode(pack)
   return mode === null || mode === filter
 }
 

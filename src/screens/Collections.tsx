@@ -37,7 +37,7 @@ import {
   fetchBeatmapPacksPage,
   packDateLabel,
   packDownloadLabel,
-  packModeFromRuleset,
+  packEffectiveMode,
   packVisibleForMode,
   paginatePackList,
   type BeatmapPack,
@@ -133,7 +133,7 @@ function PackCard({
 }) {
   const meta = new Map((pack.setMeta ?? []).map((m) => [m.id, m]))
   const shownIds = pack.beatmapsetIds.slice(0, EXPANDED_SET_LIMIT)
-  const packMode = packModeFromRuleset(pack.rulesetId)
+  const packMode = packEffectiveMode(pack)
   return (
     <article className="flex flex-col gap-space-md p-space-md bg-surface-container-low hover:bg-surface-container transition-all rounded-lg shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { MIRRORS } from '../lib/mirrors'
+import { mirrorById } from '../lib/mirrors'
 import { useDownloadSettings } from '../lib/downloadSettings'
-import { useDownloadQueue } from '../lib/downloadQueue'
+import { displayOrderFor, mirrorNameFor, useDownloadQueue } from '../lib/downloadQueue'
 import { modeLabel, type GameMode } from '../lib/mode'
 
 /**
@@ -65,6 +65,10 @@ export default function DownloadButton({
 }: DownloadButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const noVideo = useDownloadSettings((s) => s.noVideo)
+  // Subscribing to the stored priority re-renders the menu when
+  // the user changes it in Settings — the order below is read
+  // fresh from the store on every render.
+  useDownloadSettings((s) => s.mirrorPriority)
   const register = useDownloadQueue((s) => s.register)
   // Latest register entry for THIS set drives the button icon; the
   // dock window owns the detailed mirror/copy reporting.
@@ -92,6 +96,12 @@ export default function DownloadButton({
   // tracks the attempt, so the dock Retry cycle starts from
   // official.
   const startOfficial = () => start('official')
+
+  // Picker order: official pinned first (the entry above),
+  // then the native mirrors in the resolved order — the user's
+  // Mirror Route Priority from Settings, or the built-in default.
+  const nativeOrder = displayOrderFor(noVideo).filter((id) => id !== 'official')
+  const autoFirstName = mirrorNameFor(nativeOrder[0] ?? null)
 
   const isDone = suppressDownloadedState
     ? false
@@ -142,19 +152,22 @@ export default function DownloadButton({
               type="button"
               onClick={() => start()}
             >
-              {noVideo ? 'Auto — catboy first (no video)' : 'Auto — Beatconnect first'}
+              {`Auto — ${autoFirstName} first${noVideo ? ' (no video)' : ''}`}
             </button>
-            {MIRRORS.filter((m) => m.id !== 'official').map((mirror) => (
-              <button
-                key={mirror.id}
-                className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
-                type="button"
-                onClick={() => start(mirror.id)}
-              >
-                {mirror.name}
-                {noVideo && mirror.id === 'catboy' ? ' (no video)' : ''}
-              </button>
-            ))}
+            {nativeOrder.map((mirrorId) => {
+              const mirror = mirrorById(mirrorId)
+              return (
+                <button
+                  key={mirror.id}
+                  className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
+                  type="button"
+                  onClick={() => start(mirror.id)}
+                >
+                  {mirror.name}
+                  {noVideo && mirror.id === 'catboy' ? ' (no video)' : ''}
+                </button>
+              )
+            })}
             <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">Full .osz set · {modeLabel(mode)} difficulty shown</span>
             {noVideo && (
               <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">No-video: catboy serves its no-video file and osu! official uses ?noVideo=1; other mirrors serve the full file.</span>

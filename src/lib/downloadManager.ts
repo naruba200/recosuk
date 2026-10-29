@@ -1,4 +1,5 @@
 import { MIRRORS, recordDownload, type MirrorSource } from './mirrors'
+import { getMirrorPriority, MIRROR_PRIORITY_DEFAULT } from './downloadSettings'
 
 /**
  * Beatmap downloads, the fast way (QA fix): the previous implementation
@@ -48,21 +49,52 @@ export const NATIVE_MIRROR_ORDER = ['beatconnect', 'catboy', 'nerinyan', 'sayobo
 export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan', 'sayobot'] as const
 
 /**
- * Display/default order (batch 12, part 9): osu! official FIRST,
- * then the native mirrors in their usual order. This order drives
- * the DownloadButton menu and the dock Retry cycle. It does NOT
- * change the Auto default in startDownload below (native order):
- * the pack loop and bulk downloads rely on Auto staying
- * native-only, and official is only handed off when explicitly
- * requested — via the download queue's new-tab opener (batch
- * 14), never through this manager's iframe handoff. The two
- * orders are deliberately separate constants.
+ * The native mirror order actually used for a download, resolved
+ * from the user's stored Mirror Route Priority (Settings) — the
+ * SINGLE source of truth. Every consumer (startDownload below,
+ * the download queue's Retry cycle, the Songs-folder copy fetch
+ * order, the picker menu) reads through this function, so no
+ * second order constant can drift apart from it.
+ *
+ * No-video interplay (simplest coherent rule): the stored
+ * priority defines the order. When the user has set NO custom
+ * priority ('balanced', missing, or an unknown/stale value), the
+ * built-in defaults apply — catboy first when no-video is on
+ * (it is the only mirror whose no-video URL form is verified),
+ * beatconnect first otherwise. When a custom priority IS set
+ * (a native mirror id), it wins as the base order in BOTH cases:
+ * the chosen mirror goes first and the rest keep their default
+ * relative order. Per-mirror no-video URL shaping is unchanged
+ * (see mirrors.ts): catboy still serves its `{id}n` file wherever
+ * it sits in the order, and the other mirrors still fall back
+ * to the full file.
+ *
+ * Official is NEVER in this order: it stays pinned first in
+ * display only, and opens in a new tab via the download queue.
  */
-export const DISPLAY_MIRROR_ORDER = ['official', ...NATIVE_MIRROR_ORDER] as const
-export const DISPLAY_MIRROR_ORDER_NO_VIDEO = [
-  'official',
-  ...NATIVE_MIRROR_ORDER_NO_VIDEO,
-] as const
+export function resolveNativeMirrorOrder(noVideo: boolean): readonly string[] {
+  const priority = getMirrorPriority()
+  if (
+    priority !== MIRROR_PRIORITY_DEFAULT &&
+    (NATIVE_MIRROR_ORDER as readonly string[]).includes(priority)
+  ) {
+    return [priority, ...NATIVE_MIRROR_ORDER.filter((m) => m !== priority)]
+  }
+  return noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
+}
+
+/**
+ * Display order: osu! official FIRST, then the resolved native
+ * order. Drives the DownloadButton menu and the dock Retry
+ * cycle. Official is only ever handed off when explicitly
+ * requested — via the download queue's new-tab opener (batch
+ * 14), never through this manager's iframe handoff. The Auto
+ * default in startDownload below stays native-only: the pack
+ * loop and bulk downloads rely on Auto staying native-only.
+ */
+export function resolveDisplayMirrorOrder(noVideo: boolean): readonly string[] {
+  return ['official', ...resolveNativeMirrorOrder(noVideo)]
+}
 
 export interface DownloadRequest {
   beatmapsetId: number
@@ -121,7 +153,7 @@ export function createDownloadManager(deps: DownloadManagerDeps = {}) {
   const record = deps.record ?? recordDownload
 
   function startDownload(request: DownloadRequest): DownloadResult {
-    const order = request.noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
+    const order = resolveNativeMirrorOrder(request.noVideo === true)
     const mirror = request.mirrorId
       ? mirrorByIdOrThrow(request.mirrorId)
       : mirrorByIdOrThrow(order[0])

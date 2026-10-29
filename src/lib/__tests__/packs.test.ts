@@ -17,6 +17,7 @@ import {
   packDateLabel,
   packDownloadKind,
   packDownloadLabel,
+  packEffectiveMode,
   packModeFromRuleset,
   packVisibleForMode,
   paginatePackList,
@@ -163,6 +164,41 @@ describe('packModeFromRuleset', () => {
   })
 })
 
+describe('packEffectiveMode', () => {
+  function pack(rulesetId: number | null, tag: string): BeatmapPack {
+    return { tag, name: 'Pack', beatmapsetIds: [], rulesetId, packType: 'standard' }
+  }
+
+  it('falls back to the tag mode letter when ruleset_id is absent', () => {
+    expect(packEffectiveMode(pack(null, 'ST445'))).toBe('taiko')
+    expect(packEffectiveMode(pack(null, 'SM385'))).toBe('mania')
+    expect(packEffectiveMode(pack(null, 'SC172'))).toBe('fruits')
+    expect(packEffectiveMode(pack(null, 'S1888'))).toBe('osu')
+  })
+
+  it('falls back to the tag when ruleset_id is out of range', () => {
+    expect(packEffectiveMode(pack(5, 'ST445'))).toBe('taiko')
+    expect(packEffectiveMode(pack(-1, 'S1888'))).toBe('osu')
+  })
+
+  it('stays unknown for non-standard types with no usable ruleset_id', () => {
+    expect(packEffectiveMode(pack(null, 'F2'))).toBeNull()
+    expect(packEffectiveMode(pack(null, 'P15'))).toBeNull()
+    expect(packEffectiveMode(pack(null, 'T7'))).toBeNull()
+  })
+
+  it('ruleset_id wins on any conflict with the tag letter', () => {
+    expect(packEffectiveMode(pack(3, 'ST445'))).toBe('mania')
+    expect(packEffectiveMode(pack(0, 'SM385'))).toBe('osu')
+    expect(packEffectiveMode(pack(1, 'S1888'))).toBe('taiko')
+  })
+
+  it('stays unknown for garbage tags with no usable ruleset_id', () => {
+    expect(packEffectiveMode(pack(null, 'garbage'))).toBeNull()
+    expect(packEffectiveMode(pack(null, ''))).toBeNull()
+  })
+})
+
 describe('normalizePackList', () => {
   it('accepts a bare array and a { packs } envelope, skipping bad entries', () => {
     const raw = [{ tag: 'A', name: 'A' }, null, { tag: 'B', name: 'B' }]
@@ -260,8 +296,22 @@ describe('packVisibleForMode', () => {
   })
 
   it('always shows packs with an unknown mode, whatever the filter', () => {
-    expect(packVisibleForMode(pack(null), 'mania')).toBe(true)
-    expect(packVisibleForMode(pack(5), 'osu')).toBe(true)
+    // F2 is a non-standard type: with no usable ruleset_id there is
+    // no tag fallback, so the mode stays unknown and the pack is
+    // never hidden by the filter.
+    expect(packVisibleForMode(pack(null, 'F2'), 'mania')).toBe(true)
+    expect(packVisibleForMode(pack(5, 'F2'), 'osu')).toBe(true)
+  })
+
+  it('hides bare-S packs under other modes once the tag fallback applies', () => {
+    // Regression (live 2026-10-29): bare-S packs arrived with no
+    // usable ruleset_id and were classified unknown, so the Taiko
+    // filter showed S-packs alongside ST-packs.
+    expect(packVisibleForMode(pack(null, 'S1888'), 'taiko')).toBe(false)
+    expect(packVisibleForMode(pack(null, 'ST445'), 'taiko')).toBe(true)
+    expect(packVisibleForMode(pack(null, 'S1888'), 'osu')).toBe(true)
+    expect(packVisibleForMode(pack(null, 'SM385'), 'taiko')).toBe(false)
+    expect(packVisibleForMode(pack(null, 'F2'), 'taiko')).toBe(true)
   })
 
   it('shows everything for the all-modes filter', () => {

@@ -1,8 +1,5 @@
 import { MIRRORS, type MirrorUrlOptions } from './mirrors'
-import {
-  NATIVE_MIRROR_ORDER,
-  NATIVE_MIRROR_ORDER_NO_VIDEO,
-} from './downloadManager'
+import { resolveNativeMirrorOrder } from './downloadManager'
 import {
   ensureFolderPermission,
   isFileSystemAccessSupported,
@@ -77,7 +74,10 @@ export interface SongCopyDeps {
  * URLs for both attempts and appear once. Used by the Songs-folder
  * copy's fetch (fetchSetResponse). */
 export function mirrorAttemptUrls(request: SongCopyRequest): { mirrorId: string; url: string }[] {
-  const fullOrder = request.noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
+  // The copy tries the mirrors in the resolved order (the user's
+  // Mirror Route Priority, or the built-in default) — the same
+  // order the download itself uses.
+  const fullOrder = resolveNativeMirrorOrder(request.noVideo === true)
   const order = request.mirrorId ? fullOrder.filter((m) => m === request.mirrorId) : fullOrder
   const attempts: { mirrorId: string; url: string }[] = []
   for (const mirrorId of order) {

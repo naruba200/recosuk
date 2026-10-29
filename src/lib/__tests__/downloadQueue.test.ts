@@ -7,12 +7,10 @@ import {
   useDownloadQueue,
 } from '../downloadQueue'
 import {
-  DISPLAY_MIRROR_ORDER,
-  DISPLAY_MIRROR_ORDER_NO_VIDEO,
   NATIVE_MIRROR_ORDER,
   NATIVE_MIRROR_ORDER_NO_VIDEO,
 } from '../downloadManager'
-import { useDownloadSettings } from '../downloadSettings'
+import { MIRROR_PRIORITY_DEFAULT, useDownloadSettings } from '../downloadSettings'
 
 /**
  * Regression tests for batch 6, part 1: downloads are native
@@ -71,12 +69,20 @@ const REQ = { beatmapsetId: 42, artist: 'Camellia', title: 'Exit This Earth', se
 
 beforeEach(() => {
   resetDownloadQueue()
-  useDownloadSettings.setState({ autoCopy: false, noVideo: false })
+  useDownloadSettings.setState({
+    autoCopy: false,
+    noVideo: false,
+    mirrorPriority: MIRROR_PRIORITY_DEFAULT,
+  })
 })
 
 afterEach(() => {
   resetDownloadQueue()
-  useDownloadSettings.setState({ autoCopy: false, noVideo: false })
+  useDownloadSettings.setState({
+    autoCopy: false,
+    noVideo: false,
+    mirrorPriority: MIRROR_PRIORITY_DEFAULT,
+  })
   vi.unstubAllGlobals()
 })
 
@@ -239,14 +245,14 @@ describe('download register (batch 6, part 1)', () => {
   })
 
   it('display order puts official first; native orders are unchanged', () => {
-    expect([...DISPLAY_MIRROR_ORDER]).toEqual([
+    expect([...displayOrderFor(false)]).toEqual([
       'official',
       'beatconnect',
       'catboy',
       'nerinyan',
       'sayobot',
     ])
-    expect([...DISPLAY_MIRROR_ORDER_NO_VIDEO]).toEqual([
+    expect([...displayOrderFor(true)]).toEqual([
       'official',
       'catboy',
       'beatconnect',
@@ -260,8 +266,23 @@ describe('download register (batch 6, part 1)', () => {
       'nerinyan',
       'sayobot',
     ])
-    expect(displayOrderFor(false)).toBe(DISPLAY_MIRROR_ORDER)
-    expect(displayOrderFor(true)).toBe(DISPLAY_MIRROR_ORDER_NO_VIDEO)
+  })
+
+  it('display order follows a custom Mirror Route Priority, official still pinned first', () => {
+    useDownloadSettings.setState({ mirrorPriority: 'nerinyan' })
+    expect([...displayOrderFor(false)]).toEqual([
+      'official',
+      'nerinyan',
+      'beatconnect',
+      'catboy',
+      'sayobot',
+    ])
+    expect(nextRetryMirrorId({
+      noVideo: false,
+      mirrorIdUsed: null,
+      mirrorId: undefined,
+      triedMirrorIds: ['official'],
+    })).toBe('nerinyan')
   })
 
   it("register with mirrorId 'official' opens the official URL in a new tab, records, and never iframes or fetches", () => {

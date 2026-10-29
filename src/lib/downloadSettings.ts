@@ -18,6 +18,15 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
  *     happens too. Default OFF — never auto-enabled.
  *   songsFolderName — display name of the picked folder (the handle
  *     itself lives in IndexedDB; the name is display-only).
+ *   mirrorPriority — "Mirror Route Priority" (Settings): which
+ *     native mirror is tried first. 'balanced' is the default
+ *     (beatconnect first, or catboy first when no-video is on);
+ *     any other value is a native mirror id put first, with the
+ *     remaining mirrors keeping their default relative order
+ *     (see resolveNativeMirrorOrder in downloadManager.ts).
+ *     Unknown/stale values fall back to the default order.
+ *     Default 'balanced'. Official is never part of this order:
+ *     it stays pinned first in display and opens in a new tab.
  */
 
 const memoryFallback = new Map<string, string>()
@@ -55,7 +64,13 @@ interface DownloadSettingsState {
   setAutoCopy: (on: boolean) => void
   songsFolderName: string | null
   setSongsFolderName: (name: string | null) => void
+  /** Stored Mirror Route Priority selection; 'balanced' = default order. */
+  mirrorPriority: string
+  setMirrorPriority: (priority: string) => void
 }
+
+/** Default Mirror Route Priority: the built-in order, nothing custom. */
+export const MIRROR_PRIORITY_DEFAULT = 'balanced'
 
 export const useDownloadSettings = create<DownloadSettingsState>()(
   persist(
@@ -66,6 +81,8 @@ export const useDownloadSettings = create<DownloadSettingsState>()(
       setAutoCopy: (on) => set({ autoCopy: on }),
       songsFolderName: null,
       setSongsFolderName: (name) => set({ songsFolderName: name }),
+      mirrorPriority: MIRROR_PRIORITY_DEFAULT,
+      setMirrorPriority: (priority) => set({ mirrorPriority: priority }),
     }),
     {
       name: 'recosuk-download-settings',
@@ -74,6 +91,7 @@ export const useDownloadSettings = create<DownloadSettingsState>()(
         noVideo: state.noVideo,
         autoCopy: state.autoCopy,
         songsFolderName: state.songsFolderName,
+        mirrorPriority: state.mirrorPriority,
       }),
     },
   ),
@@ -87,4 +105,9 @@ export function getNoVideo(): boolean {
 /** Non-hook accessor for the auto-copy toggle (download path). */
 export function getAutoCopy(): boolean {
   return useDownloadSettings.getState().autoCopy
+}
+
+/** Non-hook accessor for the stored Mirror Route Priority (order resolution). */
+export function getMirrorPriority(): string {
+  return useDownloadSettings.getState().mirrorPriority
 }

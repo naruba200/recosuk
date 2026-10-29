@@ -10,6 +10,7 @@ import { useGuestStore } from '../lib/guestStore'
 import { useModeStore } from '../lib/modeStore'
 import { useProfileData } from '../lib/profileService'
 import { useDownloadSettings } from '../lib/downloadSettings'
+import { resolveNativeMirrorOrder } from '../lib/downloadManager'
 import {
   isFileSystemAccessSupported,
   isTauriShell,
@@ -30,12 +31,17 @@ export default function Settings() {
   const setSongsFolderName = useDownloadSettings((s) => s.setSongsFolderName)
   const [folderBusy, setFolderBusy] = useState(false)
   const [folderNote, setFolderNote] = useState<string | null>(null)
-  // Mirror Route Priority (batch 12): display-only selection, exactly
-  // as the native select it replaces was — no functional wiring
-  // exists (the native order is fixed in downloadManager.ts), so
-  // picking here changes nothing but the shown label. The custom
-  // dropdown exists only so the popup is readable on dark themes.
-  const [routePriority, setRoutePriority] = useState('balanced')
+  // Mirror Route Priority (live): the stored choice drives the
+  // Auto mirror, the picker order, and the dock Retry cycle via
+  // resolveNativeMirrorOrder — see the row in Download options.
+  const mirrorPriority = useDownloadSettings((s) => s.mirrorPriority)
+  const setMirrorPriority = useDownloadSettings((s) => s.setMirrorPriority)
+  const resolvedOrder = resolveNativeMirrorOrder(noVideo)
+  // A stale/unknown stored value resolves to the default order;
+  // show the matching 'balanced' label instead of a blank button.
+  const priorityValue = ['balanced', 'catboy', 'nerinyan', 'sayobot'].includes(mirrorPriority)
+    ? mirrorPriority
+    : 'balanced'
   const fsaSupported = isFileSystemAccessSupported()
   // Defensive shell detection only: adjusts the Desktop-app group
   // copy below. It never disables or removes any control — the
@@ -321,6 +327,48 @@ export default function Settings() {
                     </button>
                   </div>
                 </div>
+                {/* Row: Mirror Route Priority — live: the stored
+                    choice drives the Auto mirror, the picker
+                    order, and the dock Retry cycle (see
+                    resolveNativeMirrorOrder in downloadManager.ts).
+                    osu! official stays pinned first in the menu
+                    and always opens in a new tab. */}
+                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                  <div className="flex flex-col">
+                    <span className="font-label-md text-label-md text-on-surface">Mirror Route Priority
+                    </span>
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">Which mirror is tried first, and the order Retry cycles through
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-space-sm flex-wrap">
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface font-label-md text-label-md" aria-label={`Current mirror order: ${resolvedOrder.join(', ')}`}>
+                      {resolvedOrder.map((mirrorId, i) => (
+                        <span key={mirrorId} className="flex items-center gap-1.5">
+                          {i > 0 && (
+                            <span className="text-outline-variant text-[11px]">{'>'}
+                            </span>
+                          )}
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${i === 0 ? 'bg-tertiary/20 text-tertiary' : i === 1 ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest text-on-surface-variant'}`}>{i + 1}
+                          </span>
+                          <span>{mirrorId}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                    <MenuSelect
+                      options={[
+                        { value: 'balanced', label: 'Priority: beatconnect first' },
+                        { value: 'catboy', label: 'Priority: catboy first' },
+                        { value: 'nerinyan', label: 'Priority: nerinyan first' },
+                        { value: 'sayobot', label: 'Priority: sayobot first' },
+                      ]}
+                      value={priorityValue}
+                      onChange={setMirrorPriority}
+                      ariaLabel="Mirror route priority"
+                      buttonClassName="relative flex items-center h-9 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    />
+                  </div>
+                </div>
               </div>
               </div>
               {/* Group 2 — Desktop app: getting downloads into osu!
@@ -412,11 +460,13 @@ export default function Settings() {
                   <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">Downloads & Client Sync
                   </span>
                 </div>
-                <span className="font-label-sm text-label-sm text-on-surface-variant">Mirror prioritization and local game paths
+                <span className="font-label-sm text-label-sm text-on-surface-variant">Sample settings and local game paths
                 </span>
               </div>
-              {/* Sample settings: folder path, slots and mirror priority
-                  are illustration, not wired-up preferences. */}
+              {/* Sample settings: folder path, slots and the
+                  sample toggles are illustration, not wired-up
+                  preferences. The live Mirror Route Priority
+                  control lives in Download options above. */}
               <ExampleBlock note="Example settings — these download options don't change behaviour yet.">
               <div className="flex flex-col divide-y divide-surface-container-highest/60">
                 {/* Row: Download Folder Path */}
@@ -453,47 +503,6 @@ export default function Settings() {
                       <span className="translate-x-1 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-outline-variant shadow transition duration-200 ease-in-out my-1" id="toggleKnob">
                       </span>
                     </button>
-                  </div>
-                </div>
-                {/* Row: Mirror choice route order */}
-                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
-                  <div className="flex flex-col">
-                    <span className="font-label-md text-label-md text-on-surface">Mirror Route Priority
-                    </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Automatic failover sequence when mirrors encounter rate-limits
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-space-sm flex-wrap">
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface font-label-md text-label-md">
-                      <span className="w-5 h-5 rounded-full bg-tertiary/20 text-tertiary flex items-center justify-center text-[10px] font-bold">1
-                      </span>
-                      <span>beatconnect
-                      </span>
-                      <span className="text-outline-variant text-[11px]">{'>'}
-                      </span>
-                      <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold">2
-                      </span>
-                      <span>nerinyan
-                      </span>
-                      <span className="text-outline-variant text-[11px]">{'>'}
-                      </span>
-                      <span className="w-5 h-5 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center text-[10px] font-bold">3
-                      </span>
-                      <span>sayobot
-                      </span>
-                    </div>
-                    <MenuSelect
-                      options={[
-                        { value: 'balanced', label: 'Priority: beatconnect first' },
-                        { value: 'nerinyan', label: 'Priority: nerinyan first' },
-                        { value: 'sayobot', label: 'Priority: sayobot first' },
-                        { value: 'direct', label: 'Direct Bancho only (Supporter)' },
-                      ]}
-                      value={routePriority}
-                      onChange={setRoutePriority}
-                      ariaLabel="Mirror route priority"
-                      buttonClassName="relative flex items-center h-9 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    />
                   </div>
                 </div>
                 {/* Row: Concurrent downloads limit */}
