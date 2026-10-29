@@ -44,8 +44,12 @@ import { seenStore } from './seenStore'
  *   official: `?noVideo=1` (batch 12, verified from osu!'s own game
  *     client source: `DownloadBeatmapSetRequest.cs` builds the
  *     target as `beatmapsets/{id}/download` plus `?noVideo=1` when
- *     no-video is requested). The official option stays a new-tab
- *     link requiring osu! login — only the query param is added.
+ *     no-video is requested). The official download uses the same
+ *     hidden-iframe handoff as the mirrors on the first attempt
+ *     (batch 13) — the browser's osu! session does the auth, so
+ *     no redirect and no new tab; a Retry on an official row opens
+ *     the page in a new tab as the visible fallback when the user
+ *     is signed out (the iframe then fails silently).
  */
 export interface MirrorUrlOptions {
   /** Request the mirror's no-video file variant where one is verified. */

@@ -16,10 +16,19 @@ import { MIRRORS, recordDownload, type MirrorSource } from './mirrors'
  * fake a percentage).
  *
  * Honest limits (do not soften these in UI copy):
- * - The OFFICIAL osu! source is never used here: osu! downloads need
- *   an osu! login session in the browser and are not available via
- *   the API, so "osu! official" stays an "open the osu! page" link
- *   (new tab) and still needs the user's osu! login there.
+ * - The OFFICIAL osu! source uses this same iframe handoff when
+ *   explicitly requested (batch 13): navigating a hidden iframe
+ *   to the official download URL saves the file without leaving
+ *   the page, PROVIDED the user is signed into osu! in that
+ *   browser — the browser's osu! session does the auth, and the
+ *   page never sees session cookies. If they are not signed in,
+ *   the iframe fails SILENTLY (cross-origin, undetectable from
+ *   the page): the row keeps reading "Downloading" and nothing
+ *   visibly happens. The escape hatch is the dock Retry, which
+ *   opens the official page in a new tab (see retryTarget in
+ *   downloadQueue.ts) — the tab is never used on a first attempt.
+ *   Official downloads are not available via the API, and the
+ *   official origin is never fetched from the page.
  * - No fallback chain is possible with native downloads: the page
  *   cannot tell whether the browser's download succeeded, so Auto
  *   always uses the first mirror in the order and the menu lets the
@@ -41,12 +50,13 @@ export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan'
 /**
  * Display/default order (batch 12, part 9): osu! official FIRST,
  * then the native mirrors in their usual order. This order drives
- * the DownloadButton menu, the primary download action, and the
- * dock Retry cycle. It must NEVER drive an iframe handoff: the
- * official option is a new-tab link (osu! login session), so
- * downloadManager.startDownload and the Songs-folder copy keep
- * using the NATIVE orders above, and bulk downloads stay
- * native-only. The two orders are deliberately separate constants.
+ * the DownloadButton menu and the dock Retry cycle. It does NOT
+ * change the Auto default in startDownload below (native order):
+ * the pack loop and bulk downloads rely on Auto staying
+ * native-only, and official is only handed off when explicitly
+ * requested (the queue's first attempt uses the iframe handoff;
+ * only a Retry opens a tab — see downloadQueue.ts). The two
+ * orders are deliberately separate constants.
  */
 export const DISPLAY_MIRROR_ORDER = ['official', ...NATIVE_MIRROR_ORDER] as const
 export const DISPLAY_MIRROR_ORDER_NO_VIDEO = [
@@ -69,7 +79,9 @@ export interface DownloadResult {
   /** The mirror the download was handed to. */
   mirrorId: string
   /** True only when the handed-to mirror actually serves a no-video
-   *  file (today: catboy). Never claim a no-video copy otherwise. */
+   *  file (today: catboy, and official with `?noVideo=1` — verified
+   *  from osu!'s own game client source). Never claim a no-video
+   *  copy otherwise. */
   noVideoApplied: boolean
 }
 
@@ -113,7 +125,8 @@ export function createDownloadManager(deps: DownloadManagerDeps = {}) {
     const mirror = request.mirrorId
       ? mirrorByIdOrThrow(request.mirrorId)
       : mirrorByIdOrThrow(order[0])
-    const noVideoApplied = request.noVideo === true && mirror.id === 'catboy'
+    const noVideoApplied =
+      request.noVideo === true && (mirror.id === 'catboy' || mirror.id === 'official')
     startBrowserDownload(mirror.url(request.beatmapsetId, { noVideo: request.noVideo }))
     // Recorded on click: native downloads report no completion.
     void record(request.seenKeyValue, request.beatmapsetId, mirror.id)

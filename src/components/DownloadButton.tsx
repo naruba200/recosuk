@@ -25,12 +25,14 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * via its own plain single-stream fetch — that fetch is the copy,
  * not the download (see lib/downloadQueue.ts).
  *
- * - Main button: osu! OFFICIAL first (batch 12, part 9) — opens
- *   the official download in a new tab (with `?noVideo=1` when
- *   no-video is on) and registers the attempt in the dock, so
- *   Retry cycles on from official to the native mirrors. The
- *   official option is never iframed: it needs the user's osu!
- *   login session in the browser tab.
+ * - Main button: osu! OFFICIAL first (batch 12, part 9) — the
+ *   download goes through the hidden-iframe handoff like the
+ *   native mirrors (batch 13: no redirect, no new tab; the
+ *   browser's osu! session does the auth) and registers the
+ *   attempt in the dock, so Retry cycles on from official to
+ *   the native mirrors — except a Retry while the row is still
+ *   on official, which opens the official page in a new tab as
+ *   the visible fallback for a signed-out user.
  * - Expand menu: official first, then Auto (native order), then
  *   each native mirror. The official entry is a register action,
  *   not a bare link, so its attempt is tracked like any other.
@@ -85,10 +87,12 @@ export default function DownloadButton({
     onDownloaded?.()
   }
 
-  // Primary action (batch 12, part 9): osu! official first. The
-  // register opens the official download in a new tab (with
-  // ?noVideo=1 when the toggle is on) and tracks the attempt, so
-  // the dock Retry cycle starts from official.
+  // Primary action (batch 12, part 9; batch 13): osu! official
+  // first. The register hands the official URL to the browser
+  // via the hidden-iframe handoff (no redirect, no new tab) and
+  // tracks the attempt, so the dock Retry cycle starts from
+  // official — with the tab fallback on a Retry while the row
+  // is still on official.
   const startOfficial = () => start('official')
 
   const isDone = suppressDownloadedState
@@ -132,7 +136,7 @@ export default function DownloadButton({
               type="button"
               onClick={startOfficial}
             >
-              osu! official — opens osu! page (needs your osu! login)
+              osu! official
               {noVideo ? ' (no video)' : ''}
             </button>
             <button

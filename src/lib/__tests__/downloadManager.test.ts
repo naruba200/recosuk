@@ -91,6 +91,31 @@ describe('downloadManager (native browser downloads)', () => {
     }
   })
 
+  it('an explicit official pick hands the official URL to the browser via the iframe handoff', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'official' })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'official', noVideoApplied: false })
+    expect(startBrowserDownload).toHaveBeenCalledTimes(1)
+    expect(startBrowserDownload).toHaveBeenCalledWith(
+      'https://osu.ppy.sh/beatmapsets/42/download',
+    )
+  })
+
+  it('an explicit official pick with noVideo uses ?noVideo=1 and reports noVideoApplied', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'official', noVideo: true })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'official', noVideoApplied: true })
+    expect(startBrowserDownload).toHaveBeenCalledWith(
+      'https://osu.ppy.sh/beatmapsets/42/download?noVideo=1',
+    )
+  })
+
   it('throws for an unknown mirror id instead of downloading the wrong file', () => {
     const manager = createDownloadManager({
       startBrowserDownload: vi.fn(),
