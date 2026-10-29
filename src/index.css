@@ -4,6 +4,314 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------ */
+/* Themes (batch 11, part 2). Full palettes are documented in          */
+/* src/lib/themes.ts; the variables below ARE the palettes.           */
+/* `--c-*` holds an RGB triplet so Tailwind's `/opacity` modifiers    */
+/* work through `rgb(var(--c-*) / <alpha-value>)` in                  */
+/* tailwind.config.js. `:root` carries Dark Stage so the first paint  */
+/* (before JS sets data-theme) already matches the default theme.     */
+/* Fixed brand/semantic vars (same in every theme): --c-recpink,      */
+/* --c-stargold, --c-hitgreen.                                        */
+/* ------------------------------------------------------------------ */
+:root {
+  --c-recpink: 255 102 170;
+  --c-stargold: 255 204 34;
+  --c-hitgreen: 126 231 135;
+  --c-error: 255 180 171;
+  --c-shadow: 0 0 0;
+  --c-background: 22 16 32;
+  --c-inverse-on-surface: 52 45 63;
+  --c-inverse-primary: 113 59 208;
+  --c-inverse-surface: 234 222 245;
+  --c-on-background: 234 222 245;
+  --c-on-primary: 63 0 142;
+  --c-on-primary-container: 54 0 125;
+  --c-on-primary-fixed: 37 0 90;
+  --c-on-primary-fixed-variant: 88 25 184;
+  --c-on-secondary: 100 0 56;
+  --c-on-secondary-container: 255 154 192;
+  --c-on-secondary-fixed: 62 0 33;
+  --c-on-secondary-fixed-variant: 141 0 81;
+  --c-on-surface: 234 222 245;
+  --c-on-surface-variant: 204 195 214;
+  --c-on-tertiary: 0 52 74;
+  --c-on-tertiary-container: 0 45 65;
+  --c-on-tertiary-fixed: 0 30 45;
+  --c-on-tertiary-fixed-variant: 0 76 106;
+  --c-outline: 149 141 159;
+  --c-outline-variant: 74 68 84;
+  --c-panel: 34 24 50;
+  --c-paper: 245 241 250;
+  --c-primary: 210 187 255;
+  --c-primary-container: 164 118 255;
+  --c-primary-fixed: 234 221 255;
+  --c-primary-fixed-dim: 210 187 255;
+  --c-secondary: 255 176 204;
+  --c-secondary-container: 145 0 84;
+  --c-secondary-fixed: 255 217 228;
+  --c-secondary-fixed-dim: 255 176 204;
+  --c-stage: 21 15 31;
+  --c-surface: 22 16 32;
+  --c-surface-bright: 61 54 72;
+  --c-surface-container: 35 29 45;
+  --c-surface-container-high: 46 39 56;
+  --c-surface-container-highest: 57 50 67;
+  --c-surface-container-low: 31 25 41;
+  --c-surface-container-lowest: 17 11 27;
+  --c-surface-dim: 22 16 32;
+  --c-surface-tint: 210 187 255;
+  --c-surface-variant: 57 50 67;
+  --c-tertiary: 128 208 255;
+  --c-tertiary-container: 0 155 211;
+  --c-tertiary-fixed: 197 231 255;
+  --c-tertiary-fixed-dim: 128 208 255;
+}
+[data-theme="dark-stage"] {
+  --c-background: 22 16 32;
+  --c-inverse-on-surface: 52 45 63;
+  --c-inverse-primary: 113 59 208;
+  --c-inverse-surface: 234 222 245;
+  --c-on-background: 234 222 245;
+  --c-on-primary: 63 0 142;
+  --c-on-primary-container: 54 0 125;
+  --c-on-primary-fixed: 37 0 90;
+  --c-on-primary-fixed-variant: 88 25 184;
+  --c-on-secondary: 100 0 56;
+  --c-on-secondary-container: 255 154 192;
+  --c-on-secondary-fixed: 62 0 33;
+  --c-on-secondary-fixed-variant: 141 0 81;
+  --c-on-surface: 234 222 245;
+  --c-on-surface-variant: 204 195 214;
+  --c-on-tertiary: 0 52 74;
+  --c-on-tertiary-container: 0 45 65;
+  --c-on-tertiary-fixed: 0 30 45;
+  --c-on-tertiary-fixed-variant: 0 76 106;
+  --c-outline: 149 141 159;
+  --c-outline-variant: 74 68 84;
+  --c-panel: 34 24 50;
+  --c-paper: 245 241 250;
+  --c-primary: 210 187 255;
+  --c-primary-container: 164 118 255;
+  --c-primary-fixed: 234 221 255;
+  --c-primary-fixed-dim: 210 187 255;
+  --c-secondary: 255 176 204;
+  --c-secondary-container: 145 0 84;
+  --c-secondary-fixed: 255 217 228;
+  --c-secondary-fixed-dim: 255 176 204;
+  --c-stage: 21 15 31;
+  --c-surface: 22 16 32;
+  --c-surface-bright: 61 54 72;
+  --c-surface-container: 35 29 45;
+  --c-surface-container-high: 46 39 56;
+  --c-surface-container-highest: 57 50 67;
+  --c-surface-container-low: 31 25 41;
+  --c-surface-container-lowest: 17 11 27;
+  --c-surface-dim: 22 16 32;
+  --c-surface-tint: 210 187 255;
+  --c-surface-variant: 57 50 67;
+  --c-tertiary: 128 208 255;
+  --c-tertiary-container: 0 155 211;
+  --c-tertiary-fixed: 197 231 255;
+  --c-tertiary-fixed-dim: 128 208 255;
+}
+/* EVA Unit-01: purple armour, neon green, near-black, orange details. */
+[data-theme="eva-unit-01"] {
+  --c-background: 10 7 16;
+  --c-inverse-on-surface: 36 23 54;
+  --c-inverse-primary: 122 79 208;
+  --c-inverse-surface: 234 247 227;
+  --c-on-background: 234 247 227;
+  --c-on-primary: 13 9 20;
+  --c-on-primary-container: 233 217 255;
+  --c-on-primary-fixed: 26 11 46;
+  --c-on-primary-fixed-variant: 122 79 208;
+  --c-on-secondary: 42 18 0;
+  --c-on-secondary-container: 255 196 138;
+  --c-on-secondary-fixed: 42 18 0;
+  --c-on-secondary-fixed-variant: 178 90 0;
+  --c-on-surface: 234 247 227;
+  --c-on-surface-variant: 185 196 168;
+  --c-on-tertiary: 0 33 23;
+  --c-on-tertiary-container: 168 245 214;
+  --c-on-tertiary-fixed: 0 33 23;
+  --c-on-tertiary-fixed-variant: 43 182 115;
+  --c-outline: 90 74 115;
+  --c-outline-variant: 58 46 82;
+  --c-panel: 30 18 51;
+  --c-paper: 239 255 227;
+  --c-primary: 157 255 63;
+  --c-primary-container: 90 45 158;
+  --c-primary-fixed: 217 255 176;
+  --c-primary-fixed-dim: 157 255 63;
+  --c-secondary: 255 178 122;
+  --c-secondary-container: 92 46 10;
+  --c-secondary-fixed: 255 225 194;
+  --c-secondary-fixed-dim: 255 178 122;
+  --c-stage: 13 9 20;
+  --c-surface: 13 9 20;
+  --c-surface-bright: 58 42 85;
+  --c-surface-container: 27 18 41;
+  --c-surface-container-high: 36 23 54;
+  --c-surface-container-highest: 46 30 69;
+  --c-surface-container-low: 20 14 32;
+  --c-surface-container-lowest: 7 4 16;
+  --c-surface-dim: 10 7 16;
+  --c-surface-tint: 157 255 63;
+  --c-surface-variant: 61 51 82;
+  --c-tertiary: 125 240 200;
+  --c-tertiary-container: 11 110 79;
+  --c-tertiary-fixed: 184 255 228;
+  --c-tertiary-fixed-dim: 125 240 200;
+}
+/* Dark Horse (Hook Agency): yellow #feda6a, silver #d4d4dc, slate #1d1e22. */
+[data-theme="dark-horse"] {
+  --c-background: 22 23 27;
+  --c-inverse-on-surface: 38 38 38;
+  --c-inverse-primary: 138 109 0;
+  --c-inverse-surface: 245 245 245;
+  --c-on-background: 245 245 245;
+  --c-on-primary: 29 30 34;
+  --c-on-primary-container: 255 243 196;
+  --c-on-primary-fixed: 36 30 0;
+  --c-on-primary-fixed-variant: 201 162 39;
+  --c-on-secondary: 29 30 34;
+  --c-on-secondary-container: 236 236 242;
+  --c-on-secondary-fixed: 29 30 34;
+  --c-on-secondary-fixed-variant: 142 142 156;
+  --c-on-surface: 245 245 245;
+  --c-on-surface-variant: 220 220 220;
+  --c-on-tertiary: 14 20 26;
+  --c-on-tertiary-container: 214 228 239;
+  --c-on-tertiary-fixed: 14 20 26;
+  --c-on-tertiary-fixed-variant: 95 122 144;
+  --c-outline: 110 110 120;
+  --c-outline-variant: 63 63 63;
+  --c-panel: 38 39 44;
+  --c-paper: 245 245 245;
+  --c-primary: 254 218 106;
+  --c-primary-container: 107 84 0;
+  --c-primary-fixed: 255 243 196;
+  --c-primary-fixed-dim: 254 218 106;
+  --c-secondary: 212 212 220;
+  --c-secondary-container: 57 63 77;
+  --c-secondary-fixed: 236 236 242;
+  --c-secondary-fixed-dim: 212 212 220;
+  --c-stage: 29 30 34;
+  --c-surface: 29 30 34;
+  --c-surface-bright: 69 76 92;
+  --c-surface-container: 35 36 41;
+  --c-surface-container-high: 44 45 51;
+  --c-surface-container-highest: 57 63 77;
+  --c-surface-container-low: 26 27 31;
+  --c-surface-container-lowest: 18 19 22;
+  --c-surface-dim: 22 23 27;
+  --c-surface-tint: 254 218 106;
+  --c-surface-variant: 63 63 63;
+  --c-tertiary: 143 168 191;
+  --c-tertiary-container: 46 58 71;
+  --c-tertiary-fixed: 214 228 239;
+  --c-tertiary-fixed-dim: 143 168 191;
+}
+/* Punch of Color (Hook Agency "Dark Backgrounds With a Punch of Color"). */
+[data-theme="punch-of-color"] {
+  --c-background: 20 18 16;
+  --c-inverse-on-surface: 50 43 37;
+  --c-inverse-primary: 190 79 12;
+  --c-inverse-surface: 255 244 236;
+  --c-on-background: 255 244 236;
+  --c-on-primary: 42 14 0;
+  --c-on-primary-container: 255 244 236;
+  --c-on-primary-fixed: 42 14 0;
+  --c-on-primary-fixed-variant: 224 106 26;
+  --c-on-secondary: 26 14 0;
+  --c-on-secondary-container: 255 217 194;
+  --c-on-secondary-fixed: 26 14 0;
+  --c-on-secondary-fixed-variant: 194 67 0;
+  --c-on-surface: 255 244 236;
+  --c-on-surface-variant: 216 201 188;
+  --c-on-tertiary: 36 18 3;
+  --c-on-tertiary-container: 247 227 208;
+  --c-on-tertiary-fixed: 36 18 3;
+  --c-on-tertiary-fixed-variant: 176 122 74;
+  --c-outline: 122 106 92;
+  --c-outline-variant: 74 64 56;
+  --c-panel: 38 33 29;
+  --c-paper: 255 244 236;
+  --c-primary: 255 160 107;
+  --c-primary-container: 190 79 12;
+  --c-primary-fixed: 255 217 194;
+  --c-primary-fixed-dim: 255 160 107;
+  --c-secondary: 255 90 9;
+  --c-secondary-container: 107 37 0;
+  --c-secondary-fixed: 255 196 163;
+  --c-secondary-fixed-dim: 255 138 76;
+  --c-stage: 26 23 20;
+  --c-surface: 26 23 20;
+  --c-surface-bright: 69 60 51;
+  --c-surface-container: 38 33 29;
+  --c-surface-container-high: 50 43 37;
+  --c-surface-container-highest: 57 57 57;
+  --c-surface-container-low: 29 26 23;
+  --c-surface-container-lowest: 15 13 11;
+  --c-surface-dim: 20 18 16;
+  --c-surface-tint: 255 160 107;
+  --c-surface-variant: 74 64 56;
+  --c-tertiary: 232 180 138;
+  --c-tertiary-container: 74 46 24;
+  --c-tertiary-fixed: 247 227 208;
+  --c-tertiary-fixed-dim: 232 180 138;
+}
+/* Fresh Modern (Hook Agency): deep purple #1d1145, teal #0db4b9, pinks. */
+[data-theme="fresh-modern"] {
+  --c-background: 23 13 56;
+  --c-inverse-on-surface: 53 39 112;
+  --c-inverse-primary: 13 180 185;
+  --c-inverse-surface: 246 242 255;
+  --c-on-background: 246 242 255;
+  --c-on-primary: 0 40 43;
+  --c-on-primary-container: 200 244 245;
+  --c-on-primary-fixed: 0 40 43;
+  --c-on-primary-fixed-variant: 13 180 185;
+  --c-on-secondary: 46 10 20;
+  --c-on-secondary-container: 251 217 217;
+  --c-on-secondary-fixed: 46 10 20;
+  --c-on-secondary-fixed-variant: 231 109 137;
+  --c-on-surface: 246 242 255;
+  --c-on-surface-variant: 207 198 232;
+  --c-on-tertiary: 46 10 20;
+  --c-on-tertiary-container: 249 194 207;
+  --c-on-tertiary-fixed: 46 10 20;
+  --c-on-tertiary-fixed-variant: 201 74 104;
+  --c-outline: 122 108 176;
+  --c-outline-variant: 74 61 122;
+  --c-panel: 39 26 87;
+  --c-paper: 246 242 255;
+  --c-primary: 111 216 219;
+  --c-primary-container: 11 110 116;
+  --c-primary-fixed: 200 244 245;
+  --c-primary-fixed-dim: 111 216 219;
+  --c-secondary: 242 161 161;
+  --c-secondary-container: 122 46 69;
+  --c-secondary-fixed: 251 217 217;
+  --c-secondary-fixed-dim: 242 161 161;
+  --c-stage: 29 17 69;
+  --c-surface: 29 17 69;
+  --c-surface-bright: 78 64 148;
+  --c-surface-container: 42 28 94;
+  --c-surface-container-high: 53 39 112;
+  --c-surface-container-highest: 66 52 131;
+  --c-surface-container-low: 33 19 76;
+  --c-surface-container-lowest: 18 10 44;
+  --c-surface-dim: 23 13 56;
+  --c-surface-tint: 111 216 219;
+  --c-surface-variant: 74 61 122;
+  --c-tertiary: 231 109 137;
+  --c-tertiary-container: 110 33 64;
+  --c-tertiary-fixed: 249 194 207;
+  --c-tertiary-fixed-dim: 231 109 137;
+}
+
 body {
   @apply bg-stage text-paper font-sans antialiased;
   font-feature-settings: 'tnum' 1;
@@ -22,8 +330,8 @@ body {
 
     body {
       font-family: 'Inter', sans-serif;
-      background-color: #150F1F;
-      color: #F5F1FA;
+      background-color: rgb(var(--c-stage) / 1);
+      color: rgb(var(--c-paper) / 1);
       margin: 0;
       padding: 0;
       overflow-x: hidden;
@@ -64,7 +372,7 @@ body {
       }
     }
     .hit-circle-glow {
-      box-shadow: 0 0 70px -10px rgba(255, 102, 170, 0.45), 0 0 35px -5px rgba(157, 107, 255, 0.35);
+      box-shadow: 0 0 70px -10px rgb(var(--c-recpink) / 0.45), 0 0 35px -5px rgb(var(--c-primary-container) / 0.35);
     }
     .approach-ring {
       animation: approachCircle 3.5s ease-in-out infinite;
@@ -73,14 +381,14 @@ body {
       animation: pulseRing 4s ease-in-out infinite;
     }
     .glass-panel {
-      background: rgba(34, 24, 50, 0.82);
+      background: rgb(var(--c-panel) / 0.82);
       backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 102, 170, 0.16);
+      border: 1px solid rgb(var(--c-recpink) / 0.16);
     }
     /* Subtle osu! background pattern with beatmap grid motif */
     .bg-grid-osu {
-      background-image: radial-gradient(rgba(157, 107, 255, 0.12) 1.5px, transparent 1.5px),
-                        radial-gradient(rgba(255, 102, 170, 0.08) 1.5px, transparent 1.5px);
+      background-image: radial-gradient(rgb(var(--c-primary-container) / 0.12) 1.5px, transparent 1.5px),
+                        radial-gradient(rgb(var(--c-recpink) / 0.08) 1.5px, transparent 1.5px);
       background-size: 40px 40px;
       background-position: 0 0, 20px 20px;
     }
@@ -89,14 +397,14 @@ body {
 
     /* Subtle osu! coordinate dot grid matching the reference screen */
     .osu-grid-bg {
-      background-color: #150F1F;
-      background-image: radial-gradient(rgba(157, 107, 255, 0.16) 1.2px, transparent 1.2px);
+      background-color: rgb(var(--c-stage) / 1);
+      background-image: radial-gradient(rgb(var(--c-primary-container) / 0.16) 1.2px, transparent 1.2px);
       background-size: 32px 32px;
     }
     
     /* Radial ambient atmospheric glows */
     .ambient-glow-mania {
-      background: radial-gradient(circle at 50% 36%, rgba(157, 107, 255, 0.18) 0%, rgba(255, 102, 170, 0.08) 45%, transparent 75%);
+      background: radial-gradient(circle at 50% 36%, rgb(var(--c-primary-container) / 0.18) 0%, rgb(var(--c-recpink) / 0.08) 45%, transparent 75%);
     }
   
 
@@ -125,11 +433,11 @@ body {
     /* Ambient pulse for central hit circle */
     @keyframes hitCirclePulse {
       0%, 100% {
-        box-shadow: 0 0 45px rgba(157, 107, 255, 0.45), 0 0 90px rgba(255, 102, 170, 0.2);
+        box-shadow: 0 0 45px rgb(var(--c-primary-container) / 0.45), 0 0 90px rgb(var(--c-recpink) / 0.2);
         transform: scale(1);
       }
       50% {
-        box-shadow: 0 0 65px rgba(157, 107, 255, 0.65), 0 0 120px rgba(255, 102, 170, 0.35);
+        box-shadow: 0 0 65px rgb(var(--c-primary-container) / 0.65), 0 0 120px rgb(var(--c-recpink) / 0.35);
         transform: scale(1.02);
       }
     }
@@ -182,8 +490,8 @@ body {
   width: 18px;
   height: 18px;
   border-radius: 9999px;
-  background: #d2bbff;
-  border: 2px solid #150f1f;
+  background: rgb(var(--c-primary) / 1);
+  border: 2px solid rgb(var(--c-stage) / 1);
   cursor: pointer;
 }
 .dual-range::-moz-range-thumb {
@@ -191,8 +499,8 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: #d2bbff;
-  border: 2px solid #150f1f;
+  background: rgb(var(--c-primary) / 1);
+  border: 2px solid rgb(var(--c-stage) / 1);
   cursor: pointer;
 }
 .dual-range::-moz-range-track {

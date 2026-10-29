@@ -10,9 +10,11 @@ import { useProfileData } from '../lib/profileService'
 import { useDownloadSettings } from '../lib/downloadSettings'
 import {
   isFileSystemAccessSupported,
+  isTauriShell,
   pickSongsFolder,
   songsFolderStore,
 } from '../lib/songsFolder'
+import { THEMES, useThemeStore } from '../lib/themes'
 import { MODE_LABELS } from '../lib/mode'
 export default function Settings() {
   const { user, tier, guestSession, signOut } = useAuth()
@@ -27,6 +29,12 @@ export default function Settings() {
   const [folderBusy, setFolderBusy] = useState(false)
   const [folderNote, setFolderNote] = useState<string | null>(null)
   const fsaSupported = isFileSystemAccessSupported()
+  // Defensive shell detection only: adjusts the Desktop-app group
+  // copy below. It never disables or removes any control — the
+  // web folder flow stays visible and working either way.
+  const inTauri = isTauriShell()
+  const theme = useThemeStore((s) => s.theme)
+  const setTheme = useThemeStore((s) => s.setTheme)
 
   const chooseFolder = async () => {
     setFolderBusy(true)
@@ -75,7 +83,7 @@ export default function Settings() {
             <div className="absolute -right-12 -top-12 w-48 h-48 bg-secondary/10 rounded-full blur-3xl pointer-events-none">
             </div>
             <div className="flex items-center gap-space-md z-10">
-              <div className="w-10 h-10 rounded-full bg-secondary-container/40 flex items-center justify-center flex-shrink-0 text-secondary shadow-[0_0_16px_rgba(255,176,204,0.25)]">
+              <div className="w-10 h-10 rounded-full bg-secondary-container/40 flex items-center justify-center flex-shrink-0 text-secondary shadow-[0_0_16px_rgb(var(--c-secondary)_/_0.25)]">
                 <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>person_alert
                 </span>
               </div>
@@ -110,7 +118,7 @@ export default function Settings() {
                   <span className="material-symbols-outlined text-[16px]">logout</span>
                 </button>
               ) : (
-                <button className="inline-flex items-center gap-1.5 px-space-md py-2 rounded-full bg-secondary hover:bg-secondary-fixed text-on-secondary transition-all font-label-md text-label-md font-bold shadow-[0_0_18px_rgba(255,176,204,0.4)] active:scale-95" type="button" onClick={() => navigate('/auth')}>
+                <button className="inline-flex items-center gap-1.5 px-space-md py-2 rounded-full bg-secondary hover:bg-secondary-fixed text-on-secondary transition-all font-label-md text-label-md font-bold shadow-[0_0_18px_rgb(var(--c-secondary)_/_0.4)] active:scale-95" type="button" onClick={() => navigate('/auth')}>
                   <span>{tier === 'guest' ? 'Create account' : 'Sign in'}</span>
                   <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                 </button>
@@ -134,7 +142,7 @@ export default function Settings() {
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(210,187,255,0.7)]">
+                  <span className="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgb(var(--c-primary)_/_0.7)]">
                   </span>
                   <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">Account
                   </span>
@@ -195,8 +203,8 @@ export default function Settings() {
                               </span>
                             )}
                           </div>
-                          <span className="inline-flex items-center gap-1 font-label-sm text-[10px] text-[#7EE787] pl-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#7EE787] animate-pulse">
+                          <span className="inline-flex items-center gap-1 font-label-sm text-[10px] text-hitgreen pl-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-hitgreen animate-pulse">
                             </span>
                             <span>{status === 'loading' ? 'Loading…' : 'Synced'}
                             </span>
@@ -263,7 +271,7 @@ export default function Settings() {
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(255,102,170,0.7)]">
+                  <span className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgb(var(--c-recpink)_/_0.7)]">
                   </span>
                   <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">Download options
                   </span>
@@ -271,6 +279,13 @@ export default function Settings() {
                 <span className="font-label-sm text-label-sm text-on-surface-variant">Applies to every download button
                 </span>
               </div>
+              {/* Group 1 — Browser downloads: settings that affect
+                  downloads in this browser. Grouping/labels only;
+                  the toggle below is unchanged. */}
+              <div className="flex flex-col gap-space-lg">
+              <div className="flex flex-col">
+                <h3 className="font-headline-sm text-headline-sm text-on-surface text-[14px]">Browser downloads</h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Settings that affect downloads in this browser.</p>
               <div className="flex flex-col divide-y divide-surface-container-highest/60">
                 {/* Row: Download without video */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
@@ -294,6 +309,21 @@ export default function Settings() {
                     </button>
                   </div>
                 </div>
+              </div>
+              </div>
+              {/* Group 2 — Desktop app: getting downloads into osu!
+                  itself. This group stays visible and fully working
+                  on the web exactly as before (Chromium folder
+                  permission flow); the native desktop app will do
+                  the same copy with no permission dance. */}
+              <div className="flex flex-col">
+                <h3 className="font-headline-sm text-headline-sm text-on-surface text-[14px]">Desktop app</h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+                  {inTauri
+                    ? 'You are running in the desktop shell. The folder controls below work the same as in the browser.'
+                    : 'Getting downloads into osu! itself. Works in this browser today via a folder permission — the native desktop app will do it without the permission dance.'}
+                </p>
+              <div className="flex flex-col divide-y divide-surface-container-highest/60">
                 {/* Row: Auto-copy into osu! Songs folder (item 8) */}
                 <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
                   <div className="flex flex-col max-w-xl">
@@ -358,12 +388,14 @@ export default function Settings() {
                   </div>
                 </div>
               </div>
+              </div>
+              </div>
             </div>
             {/* SECTION 3: DOWNLOADS & CLIENT SYNC */}
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_rgba(128,208,255,0.7)]">
+                  <span className="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_rgb(var(--c-tertiary)_/_0.7)]">
                   </span>
                   <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">Downloads & Client Sync
                   </span>
@@ -484,7 +516,7 @@ export default function Settings() {
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-primary-container shadow-[0_0_8px_rgba(164,118,255,0.7)]">
+                  <span className="w-2 h-2 rounded-full bg-primary-container shadow-[0_0_8px_rgb(var(--c-primary-container)_/_0.7)]">
                   </span>
                   <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">App & Engine
                   </span>
@@ -493,19 +525,51 @@ export default function Settings() {
                 </span>
               </div>
               <div className="flex flex-col divide-y divide-surface-container-highest/60">
-                {/* Row: Theme */}
-                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+                {/* Row: Theme — real picker (batch 11). Applies
+                    immediately to every token-coloured surface and
+                    persists in localStorage; Dark Stage is the
+                    default when nothing is stored. */}
+                <div className="py-space-md flex flex-col gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
                   <div className="flex flex-col">
                     <span className="font-label-md text-label-md text-on-surface">Interface Theme
                     </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Locked to Dark Stage for rhythm game contrast & eye strain reduction
+                    <span className="font-body-sm text-body-sm text-on-surface-variant">Pick a colour theme. It applies across the app and is remembered on this device.
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md">
-                    <span className="material-symbols-outlined text-[16px] text-primary">lock
-                    </span>
-                    <span className="text-on-surface font-semibold">Dark Stage (OLED)
-                    </span>
+                  <div className="grid gap-space-sm sm:grid-cols-2" role="radiogroup" aria-label="Interface theme">
+                    {THEMES.map((t) => {
+                      const selected = t.id === theme
+                      return (
+                        <button
+                          key={t.id}
+                          role="radio"
+                          aria-checked={selected}
+                          aria-label={`${t.label} theme`}
+                          className={`flex items-start gap-3 rounded-DEFAULT border px-3 py-2.5 text-left transition-all ${selected ? 'border-primary bg-primary/10' : 'border-outline-variant/40 bg-surface-container hover:bg-surface-container-high'}`}
+                          type="button"
+                          onClick={() => setTheme(t.id)}
+                        >
+                          <span className="flex flex-shrink-0 -space-x-1.5 pt-0.5" aria-hidden="true">
+                            {t.swatches.map((hex) => (
+                              <span
+                                key={hex}
+                                className="w-5 h-5 rounded-full border-2 border-surface-container"
+                                style={{ backgroundColor: hex }}
+                              />
+                            ))}
+                          </span>
+                          <span className="flex flex-col min-w-0">
+                            <span className="font-label-md text-label-md text-on-surface font-bold flex items-center gap-1.5">
+                              {t.label}
+                              {selected && (
+                                <span className="material-symbols-outlined text-[16px] text-primary">check_circle</span>
+                              )}
+                            </span>
+                            <span className="font-body-sm text-body-sm text-on-surface-variant">{t.description}</span>
+                          </span>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
                 {/* Row: Replay Introduction */}
@@ -600,7 +664,7 @@ export default function Settings() {
             <div className="flex flex-col pt-4">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-error/15 to-transparent">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-error shadow-[0_0_8px_rgba(255,180,171,0.7)]">
+                  <span className="w-2 h-2 rounded-full bg-error shadow-[0_0_8px_rgb(var(--c-error)_/_0.7)]">
                   </span>
                   <span className="font-headline-sm text-headline-sm text-error uppercase tracking-wider text-[14px]">Danger Zone
                   </span>

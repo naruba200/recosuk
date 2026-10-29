@@ -8,6 +8,7 @@ import LockedButton from '../components/LockedButton'
 import { isProxyConfigured, OsuServiceError } from '../lib/osu'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
+import { useSidebarIdentity } from '../lib/profileService'
 import { useDownloadSettings } from '../lib/downloadSettings'
 import { downloadManager } from '../lib/downloadManager'
 import { attemptSongsCopy } from '../lib/songCopy'
@@ -15,6 +16,9 @@ import { seenKey, seenStore } from '../lib/seenStore'
 import { useModeStore } from '../lib/modeStore'
 import { modeLabel } from '../lib/mode'
 import { useCapabilities } from '../lib/capabilities'
+import { useRowMaps } from '../lib/useRowMaps'
+import { useDownloadQueue } from '../lib/downloadQueue'
+import { scheduleBulkDownload } from '../lib/bulkDownload'
 import { supabase } from '../lib/supabase'
 import {
   RANKED_WINDOWS,
@@ -159,6 +163,8 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const { user } = useAuth()
   const caps = useCapabilities()
   const navigate = useNavigate()
+  const noVideo = useDownloadSettings((s) => s.noVideo)
+  const register = useDownloadQueue((s) => s.register)
   const [windowId, setWindowId] = useState<RankedWindowId>('week')
   const [compilation, setCompilation] = useState<RankedCompilation | null>(null)
   const [loading, setLoading] = useState(true)
@@ -230,6 +236,53 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const downloaded = seenStore.load(seenKeyValue).downloaded
   const entries = compilation?.entries ?? []
 
+  // Batched row state (batch 11, part 5): one feedback query for
+  // the global mode + one batched containment lookup, passed to
+  // the rows — rows never query per row.
+  const rowMaps = useRowMaps({
+    userId: user?.id,
+    canRate: caps.canRate,
+    canSave: caps.canSave,
+    feedbackMode: mode,
+    beatmapsetIds: entries.map((e) => e.candidate.beatmapsetId),
+  })
+
+  // Download all (batch 11, part 7): every entry through the
+  // dock register, staggered — see lib/bulkDownload.ts. A
+  // pending run is cancelled when the mode/window changes or
+  // the section unmounts, so a stale run never downloads the
+  // previous window's list.
+  const bulkCancelRef = useRef<(() => void) | null>(null)
+  const [bulkActive, setBulkActive] = useState(false)
+  useEffect(
+    () => () => {
+      bulkCancelRef.current?.()
+      bulkCancelRef.current = null
+    },
+    [mode, windowId],
+  )
+  const downloadAllRanked = () => {
+    if (bulkActive || entries.length === 0) return
+    bulkCancelRef.current?.()
+    setBulkActive(true)
+    bulkCancelRef.current = scheduleBulkDownload(
+      entries.map((e) => ({
+        beatmapsetId: e.candidate.beatmapsetId,
+        artist: e.candidate.artist,
+        title: e.candidate.title,
+      })),
+      {
+        register,
+        seenKeyValue,
+        noVideo,
+        onSettled: () => {
+          setBulkActive(false)
+          bulkCancelRef.current = null
+        },
+      },
+    )
+  }
+
   return (
     <section className="flex flex-col gap-space-md" aria-label="Ranked lists">
       <div className="flex flex-col gap-space-xs">
@@ -292,6 +345,16 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
           <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
           <span>{saving ? 'Saving…' : 'Save as list'}</span>
         </LockedButton>
+        <button
+          className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
+          type="button"
+          disabled={loading || bulkActive || entries.length === 0}
+          onClick={downloadAllRanked}
+          aria-label={`Download all ${entries.length} ranked maps`}
+        >
+          <span className="material-symbols-outlined text-[16px]">download</span>
+          <span>{bulkActive ? 'Queuing downloads…' : `Download all (${entries.length})`}</span>
+        </button>
       </div>
 
       {saveMessage && (
@@ -344,6 +407,12 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
               downloaded={downloaded.includes(entry.candidate.beatmapsetId)}
               onDownloaded={() => setDownloadedTick((n) => n + 1)}
               rank={entry.rank}
+              feedback={rowMaps.feedbackById.get(entry.candidate.beatmapId) ?? null}
+              containing={rowMaps.containingBySet.get(entry.candidate.beatmapsetId) ?? []}
+              onFeedbackChange={rowMaps.onFeedbackChange}
+              onContainingChange={(ids) =>
+                rowMaps.onContainingChange(entry.candidate.beatmapsetId, ids)
+              }
             />
           ))}
         </div>
@@ -633,9 +702,10 @@ function CollectionsReal() {
 }
 
 export default function Collections() {
-  const { tier, guestSession } = useAuth()
+  const { tier } = useAuth()
+  const { username: sidebarName } = useSidebarIdentity()
   const identity = {
-    username: guestSession?.osuUsername ?? 'Guest',
+    username: sidebarName ?? 'Loading…',
     pp: 0,
     tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
   }

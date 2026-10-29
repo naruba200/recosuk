@@ -101,10 +101,20 @@ export function normalizePack(raw: unknown): BeatmapPack | null {
   }
 }
 
-/** Normalize a packs-list payload (array or `{ packs: [...] }`). */
+/** Normalize a packs-list payload. The documented shape comes first:
+ * `GET /beatmaps/packs` returns `{ beatmap_packs: BeatmapPack[] }`
+ * (osu! API docs, "Get Beatmap Packs"). A bare array and the legacy
+ * `{ packs: [...] }` envelope are kept for compat. */
 export function normalizePackList(payload: unknown): BeatmapPack[] {
-  const rec = asRecord(payload)
-  const list = Array.isArray(payload) ? payload : rec ? rec.packs : null
+  let list: unknown = null
+  if (Array.isArray(payload)) {
+    list = payload
+  } else {
+    const rec = asRecord(payload)
+    if (rec) {
+      list = Array.isArray(rec.beatmap_packs) ? rec.beatmap_packs : rec.packs
+    }
+  }
   if (!Array.isArray(list)) return []
   const packs: BeatmapPack[] = []
   for (const entry of list) {

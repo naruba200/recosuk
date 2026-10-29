@@ -392,7 +392,7 @@ describe('filter-aware difficulty pick (Retry-loop fix)', () => {
       bpmMax: 180,
       lenMinSec: 0,
       lenMaxSec: 600,
-      tagText: '',
+      userTag: null,
     }
     const blind = setToCandidate(twoDiffSet(), 'mania', profile)
     expect(blind?.bpm).toBe(250)
@@ -413,7 +413,7 @@ describe('filter-aware difficulty pick (Retry-loop fix)', () => {
       bpmMax: 180,
       lenMinSec: 0,
       lenMaxSec: 600,
-      tagText: '',
+      userTag: null,
     }
     const result = await generateRecommendations(profile, 'mania', {
       count: 20,
@@ -433,7 +433,7 @@ describe('filter-aware difficulty pick (Retry-loop fix)', () => {
       bpmMax: 190,
       lenMinSec: 60,
       lenMaxSec: 300,
-      tagText: 'piano',
+      userTag: 'style/chordjack',
     }
     const widened = widenRecFilters(base)
     expect(widened.srMin).toBe(3)
@@ -442,8 +442,8 @@ describe('filter-aware difficulty pick (Retry-loop fix)', () => {
     expect(widened.bpmMax).toBe(220)
     expect(widened.lenMinSec).toBe(0)
     expect(widened.lenMaxSec).toBe(3600)
-    expect(widened.tagText).toBe('piano')
-    expect(clearRecTag(base).tagText).toBe('')
+    expect(widened.userTag).toBe('style/chordjack')
+    expect(clearRecTag(base).userTag).toBeNull()
     expect(clearRecTag(base).srMin).toBe(4)
   })
 })

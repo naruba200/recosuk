@@ -18,6 +18,8 @@ import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import { defaultFiltersFor, generateRecommendations, type RecCandidate } from '../lib/recommend'
 import { seenKey, seenStore } from '../lib/seenStore'
+import { useCapabilities } from '../lib/capabilities'
+import { useRowMaps } from '../lib/useRowMaps'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
@@ -454,7 +456,8 @@ function finishOnboarding(navigate: (path: string) => void) {
 function WelcomeRecsReal({ data }: { data: ProfileData }) {
   const navigate = useNavigate()
   const mode = useModeStore((s) => s.mode)
-  const { tier } = useAuth()
+  const { tier, user } = useAuth()
+  const caps = useCapabilities()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
   const [items, setItems] = useState<RecCandidate[]>(
@@ -462,6 +465,14 @@ function WelcomeRecsReal({ data }: { data: ProfileData }) {
   )
   const [busy, setBusy] = useState(false)
   const [downloadedTick, setDownloadedTick] = useState(0)
+  // Batched row state (batch 11, part 5) — see RecommendationsReal.
+  const rowMaps = useRowMaps({
+    userId: user?.id,
+    canRate: caps.canRate,
+    canSave: caps.canSave,
+    feedbackMode: mode,
+    beatmapsetIds: items.map((c) => c.beatmapsetId),
+  })
 
   const generate = useCallback(async () => {
     setBusy(true)
@@ -538,6 +549,10 @@ function WelcomeRecsReal({ data }: { data: ProfileData }) {
             seenKeyValue={key}
             downloaded={downloaded.includes(c.beatmapsetId)}
             onDownloaded={() => setDownloadedTick((n) => n + 1)}
+            feedback={rowMaps.feedbackById.get(c.beatmapId) ?? null}
+            containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
+            onFeedbackChange={rowMaps.onFeedbackChange}
+            onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
           />
         ))}
         <span className="hidden">{downloadedTick}</span>

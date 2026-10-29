@@ -1,11 +1,17 @@
 // Converted from Stitch export: stitch-raw/10-lists.html
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
+import DownloadButton from '../components/DownloadButton'
 import ExampleBlock from '../components/ExampleBlock'
 import { useAuth } from '../lib/auth'
+import { useSidebarIdentity } from '../lib/profileService'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
-import { MODE_ACCENTS } from '../lib/modeStore'
+import { MODE_ACCENTS, useModeStore } from '../lib/modeStore'
 import { modeLabel, type GameMode } from '../lib/mode'
+import { useDownloadSettings } from '../lib/downloadSettings'
+import { useDownloadQueue } from '../lib/downloadQueue'
+import { scheduleBulkDownload } from '../lib/bulkDownload'
+import { seenKey, seenStore } from '../lib/seenStore'
 import {
   createList,
   deleteList,
@@ -546,7 +552,14 @@ function ModeChip({ mode }: { mode: GameMode | null }) {
   )
 }
 
-function ListsReal({ userId }: { userId: string }) {
+function ListsReal({ userId, username }: { userId: string; username: string | null }) {
+  const globalMode = useModeStore((s) => s.mode)
+  const noVideo = useDownloadSettings((s) => s.noVideo)
+  const register = useDownloadQueue((s) => s.register)
+  // Seen key for download recording: the account's osu! username,
+  // falling back to a Lists-local key until identity resolves
+  // (same fallback pattern as Mirror/Collections).
+  const seenKeyValue = seenKey('account', username ?? 'lists')
   const [lists, setLists] = useState<UserList[] | null>(null)
   const [counts, setCounts] = useState<Record<string, ListItemRow[]>>({})
   const [error, setError] = useState<string | null>(null)
@@ -560,6 +573,44 @@ function ListsReal({ userId }: { userId: string }) {
   const [renameName, setRenameName] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [downloadedTick, setDownloadedTick] = useState(0)
+  // Download All (batch 11, part 7): one staggered run at a time;
+  // starting another cancels the pending handoffs of the first.
+  // Unmount cancels the pending chain too. Already-handed-off
+  // items stay in the dock (their browser downloads cannot be
+  // recalled); closing a list detail does NOT cancel its run —
+  // the user asked for those files.
+  const [bulkActiveListId, setBulkActiveListId] = useState<string | null>(null)
+  const bulkCancelRef = useRef<(() => void) | null>(null)
+  useEffect(
+    () => () => {
+      bulkCancelRef.current?.()
+      bulkCancelRef.current = null
+    },
+    [],
+  )
+
+  const downloadAllForList = (list: UserList, items: DetailItem[]) => {
+    if (bulkActiveListId !== null || items.length === 0) return
+    bulkCancelRef.current?.()
+    setBulkActiveListId(list.id)
+    bulkCancelRef.current = scheduleBulkDownload(
+      items.map(({ row, summary }) => ({
+        beatmapsetId: row.beatmapset_id,
+        artist: summary?.artist ?? '',
+        title: summary ? summary.title : `Beatmapset #${row.beatmapset_id}`,
+      })),
+      {
+        register,
+        seenKeyValue,
+        noVideo,
+        onSettled: () => {
+          setBulkActiveListId(null)
+          bulkCancelRef.current = null
+        },
+      },
+    )
+  }
 
   const refreshLists = async () => {
     const loaded = await loadLists(supabase, userId)
@@ -682,6 +733,10 @@ function ListsReal({ userId }: { userId: string }) {
 
   const totalMaps = Object.values(counts).reduce((n, rows) => n + rows.length, 0)
   const anySummaryMissing = detail?.some((d) => d.summary === null) ?? false
+  // Re-read on tick so per-song buttons show the done state after
+  // a download (same pattern as Recommendations/Mirror).
+  void downloadedTick
+  const downloadedIds = seenStore.load(seenKeyValue).downloaded
 
   return (
     <div className="flex flex-col w-full">
@@ -892,6 +947,24 @@ function ListsReal({ userId }: { userId: string }) {
                       beatmap lookup. The saved maps themselves are intact.
                     </p>
                   )}
+                  {detail !== null && detail.length > 0 && (
+                    <div className="flex items-center justify-end">
+                      <button
+                        className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
+                        type="button"
+                        disabled={bulkActiveListId !== null}
+                        onClick={() => downloadAllForList(list, detail)}
+                        aria-label={`Download all ${detail.length} maps in ${list.name}`}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">download</span>
+                        <span>
+                          {bulkActiveListId === list.id
+                            ? 'Queuing downloads…'
+                            : `Download all (${detail.length})`}
+                        </span>
+                      </button>
+                    </div>
+                  )}
                   {detail?.map(({ row, summary }) => (
                     <div
                       key={row.id}
@@ -917,6 +990,15 @@ function ListsReal({ userId }: { userId: string }) {
                         </span>
                       </div>
                       <ModeChip mode={row.mode} />
+                      <DownloadButton
+                        beatmapsetId={row.beatmapset_id}
+                        artist={summary?.artist ?? ''}
+                        title={summary ? summary.title : `Beatmapset #${row.beatmapset_id}`}
+                        mode={row.mode ?? globalMode}
+                        seenKeyValue={seenKeyValue}
+                        downloaded={downloadedIds.includes(row.beatmapset_id)}
+                        onDownloaded={() => setDownloadedTick((n) => n + 1)}
+                      />
                       <button
                         className="w-8 h-8 rounded-full hover:bg-surface-container-high text-on-surface-variant hover:text-error flex items-center justify-center flex-shrink-0 disabled:opacity-60"
                         type="button"
@@ -940,16 +1022,17 @@ function ListsReal({ userId }: { userId: string }) {
 }
 
 export default function Lists() {
-  const { user, tier, guestSession } = useAuth()
+  const { user, tier } = useAuth()
+  const { username: sidebarName } = useSidebarIdentity()
   const pageIdentity = {
-    username: guestSession?.osuUsername ?? user?.email ?? 'Guest',
+    username: sidebarName ?? 'Loading…',
     pp: 0,
     tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
   }
   const isReal = tier === 'account' && !!user && isSupabaseConfigured
   return (
     <AppShell identity={pageIdentity}>
-      {isReal && user ? <ListsReal userId={user.id} /> : <ListsDemo />}
+      {isReal && user ? <ListsReal userId={user.id} username={sidebarName} /> : <ListsDemo />}
     </AppShell>
   )
 }

@@ -89,14 +89,32 @@ export async function loadFeedbackForBeatmap(
     .select(FEEDBACK_COLS)
     .eq('user_id', userId)
     .eq('beatmap_id', beatmapId)
-    .single()
-  // No row yet is the normal case for an unrated map: PostgREST
-  // answers the single() lookup with PGRST116 — return null
-  // instead of surfacing it as a failure.
+    // maybeSingle(): zero rows is the normal unrated case and
+    // answers null with NO error — the old single() answered it
+    // with PGRST116, which PostgREST surfaces as HTTP 406, so
+    // every unrated row in a list spammed a 406 into the console
+    // (batch 11, part 5). The PGRST116 tolerance below stays as
+    // belt-and-braces for any client that still reports it.
+    .maybeSingle()
   if (error && (error as { code?: string }).code !== 'PGRST116') {
     throwIf(error, 'Could not load your rating')
   }
   return (data ?? null) as FeedbackEntry | null
+}
+
+/**
+ * Batched row lookup (batch 11, part 5): one loadFeedbackForMode /
+ * loadAllFeedback call per list page, keyed by beatmap_id for the
+ * rows to read without a query each. Pure — no I/O, fully tested.
+ * Later entries win on a duplicate beatmap_id (the table's
+ * user+beatmap uniqueness means duplicates should not occur).
+ */
+export function feedbackByBeatmapId(
+  entries: FeedbackEntry[],
+): Map<number, FeedbackEntry> {
+  const map = new Map<number, FeedbackEntry>()
+  for (const entry of entries) map.set(entry.beatmap_id, entry)
+  return map
 }
 
 /**

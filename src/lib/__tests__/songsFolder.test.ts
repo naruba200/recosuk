@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { createSongsFolderStore, isFileSystemAccessSupported } from '../songsFolder'
+import { createSongsFolderStore, isFileSystemAccessSupported, isTauriShell } from '../songsFolder'
 
 /**
  * Minimal in-memory IndexedDB fake: only the surface the store uses
@@ -189,5 +189,24 @@ describe('songsFolderStore (IndexedDB stubbed)', () => {
 describe('isFileSystemAccessSupported', () => {
   it('is false without a window picker (node test env)', () => {
     expect(isFileSystemAccessSupported()).toBe(false)
+  })
+})
+
+describe('isTauriShell (guarded presence check, copy-only)', () => {
+  it('is false for a plain window object', () => {
+    expect(isTauriShell({})).toBe(false)
+    expect(isTauriShell({ showDirectoryPicker: () => {} })).toBe(false)
+  })
+
+  it('is true when __TAURI__ is present', () => {
+    expect(isTauriShell({ __TAURI__: {} })).toBe(true)
+    expect(isTauriShell({ __TAURI__: undefined })).toBe(true)
+  })
+
+  it('is false (never throws) for non-objects and no window', () => {
+    expect(isTauriShell(null)).toBe(false)
+    expect(isTauriShell(undefined)).toBe(false)
+    expect(isTauriShell('tauri')).toBe(false)
+    expect(isTauriShell()).toBe(false)
   })
 })

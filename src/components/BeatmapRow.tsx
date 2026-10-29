@@ -16,11 +16,7 @@ import {
   removeFromList,
   type UserList,
 } from '../lib/lists'
-import {
-  loadFeedbackForBeatmap,
-  upsertFeedback,
-  type FeedbackEntry,
-} from '../lib/feedback'
+import { upsertFeedback, type FeedbackEntry } from '../lib/feedback'
 import LockedButton from './LockedButton'
 import DownloadButton from './DownloadButton'
 
@@ -44,12 +40,37 @@ interface BeatmapRowProps {
   mode: GameMode
   seenKeyValue: string
   downloaded?: boolean
+  /**
+   * Mirror only (batch 11, part 3): suppress the downloaded
+   * badge + the download button's done-state icon on Mirror
+   * rows. Download recording/history is untouched — the button
+   * still registers the download; only the row display hides
+   * that this set was downloaded. Every other screen keeps the
+   * indicator (default false).
+   */
+  hideDownloadedIndicator?: boolean
+  /** Card (grid) layout: same content, stacked instead of a row. */
+  card?: boolean
   /** Unlimited feed only: renders the Skip (✕) action. */
   onSkip?: () => void
   onDownloaded?: () => void
   /** Ranked compilation lists only: renders the #N rank badge and
    *  the play count. Absent everywhere else — rows stay unchanged. */
   rank?: number
+  /**
+   * Batched row state (batch 11, part 5): the list page loads the
+   * mode's feedback + list containment ONCE (see lib/useRowMaps)
+   * and passes each row its slice. Rows NEVER query for this
+   * themselves — the old per-row loadFeedbackForBeatmap /
+   * listsContainingSet calls (one 406 + two queries per row) are
+   * gone. Absent = unrated / in no list (e.g. a caller that does
+   * not pass maps); rating/save writes bubble up through the
+   * callbacks so the parent map — and every row — sees them.
+   */
+  feedback?: FeedbackEntry | null
+  containing?: readonly string[]
+  onFeedbackChange?: (entry: FeedbackEntry) => void
+  onContainingChange?: (listIds: string[]) => void
 }
 
 function Stars({ filled }: { filled: number }) {
@@ -340,9 +361,15 @@ export default function BeatmapRow({
   mode,
   seenKeyValue,
   downloaded = false,
+  hideDownloadedIndicator = false,
+  card = false,
   onSkip,
   onDownloaded,
   rank,
+  feedback = null,
+  containing = [],
+  onFeedbackChange = () => {},
+  onContainingChange = () => {},
 }: BeatmapRowProps) {
   const preview = usePreviewPlayer()
   const caps = useCapabilities()
@@ -350,49 +377,18 @@ export default function BeatmapRow({
   const navigate = useNavigate()
   const [saveOpen, setSaveOpen] = useState(false)
   const [rateOpen, setRateOpen] = useState(false)
-  const [containing, setContaining] = useState<string[] | null>(null)
-  const [feedback, setFeedback] = useState<FeedbackEntry | null>(null)
   const playing = preview.isPlaying(c.beatmapsetId)
-  const isDownloaded = downloaded
+  const isDownloaded = downloaded && !hideDownloadedIndicator
 
   const goAuth = () => navigate('/auth')
 
-  // Account rows load their saved/rated state once (one small query
-  // each). Guests never query: they have no rows to read.
-  useEffect(() => {
-    if (!caps.canSave || !user || !supabase) return
-    let live = true
-    listsContainingSet(supabase, user.id, c.beatmapsetId)
-      .then((ids) => {
-        if (live) setContaining(ids)
-      })
-      .catch(() => {
-        /* the picker re-loads on open and reports errors there */
-      })
-    return () => {
-      live = false
-    }
-  }, [caps.canSave, user, c.beatmapsetId])
-
-  useEffect(() => {
-    if (!caps.canRate || !user || !supabase) return
-    let live = true
-    loadFeedbackForBeatmap(supabase, user.id, c.beatmapId)
-      .then((entry) => {
-        if (live) setFeedback(entry)
-      })
-      .catch(() => {
-        /* the popover reports errors when opened */
-      })
-    return () => {
-      live = false
-    }
-  }, [caps.canRate, user, c.beatmapId])
-
-  const inAnyList = (containing ?? []).length > 0
+  // Saved/rated state comes from the parent's batched maps (props
+  // above) — this row makes no per-row queries. Guests get the
+  // empty defaults and the locked controls, as before.
+  const inAnyList = containing.length > 0
 
   return (
-    <article className="group relative flex flex-col xl:flex-row items-start xl:items-center justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md">
+    <article className={`group relative flex flex-col ${card ? 'items-start' : 'xl:flex-row xl:items-center'} justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md`}>
       <div className="flex items-center gap-space-md flex-1 min-w-0 w-full">
         <div className="relative flex-shrink-0">
           <div className="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
@@ -462,7 +458,9 @@ export default function BeatmapRow({
           </div>
         </div>
       </div>
-      <div className="flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none">
+      <div className={card
+        ? 'flex items-center justify-end gap-space-sm w-full pt-2 border-t border-surface-container-highest/30'
+        : 'flex items-center justify-between xl:justify-end gap-space-sm w-full xl:w-auto pt-2 xl:pt-0 border-t border-surface-container-highest/30 xl:border-none'}>
         {caps.canRate && user ? (
           <div className="relative">
             <button
@@ -483,7 +481,7 @@ export default function BeatmapRow({
                 mode={mode}
                 userId={user.id}
                 feedback={feedback}
-                onFeedbackChange={setFeedback}
+                onFeedbackChange={onFeedbackChange}
                 onClose={() => setRateOpen(false)}
               />
             )}
@@ -516,7 +514,8 @@ export default function BeatmapRow({
             title={c.title}
             mode={mode}
             seenKeyValue={seenKeyValue}
-            downloaded={isDownloaded}
+            downloaded={downloaded}
+            suppressDownloadedState={hideDownloadedIndicator}
             onDownloaded={onDownloaded}
           />
           {caps.canSave && user ? (
@@ -538,8 +537,8 @@ export default function BeatmapRow({
                   candidate={c}
                   mode={mode}
                   userId={user.id}
-                  containing={containing ?? []}
-                  onContainingChange={setContaining}
+                  containing={[...containing]}
+                  onContainingChange={onContainingChange}
                   onClose={() => setSaveOpen(false)}
                 />
               )}

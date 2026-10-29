@@ -28,6 +28,8 @@ import { FeedReal } from './RecommendationsUnlimited'
 import { seenKey, seenStore } from '../lib/seenStore'
 import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
+import { useCapabilities } from '../lib/capabilities'
+import { useRowMaps } from '../lib/useRowMaps'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
@@ -819,10 +821,21 @@ function RecommendationsReal({
 }) {
   const mode = useModeStore((s) => s.mode)
   const { tier, user } = useAuth()
+  const caps = useCapabilities()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
   const [count, setCount] = useState(30)
   const [items, setItems] = useState<RecCandidate[]>([])
+  // Batched row state (batch 11, part 5): one feedback query for
+  // the mode + one batched containment lookup for the rendered
+  // sets, passed down to the rows — rows never query per row.
+  const rowMaps = useRowMaps({
+    userId: user?.id,
+    canRate: caps.canRate,
+    canSave: caps.canSave,
+    feedbackMode: mode,
+    beatmapsetIds: items.map((c) => c.beatmapsetId),
+  })
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1021,7 +1034,7 @@ function RecommendationsReal({
                     >
                       Loosen ranges
                     </button>
-                    {filters.tagText.trim() && (
+                    {filters.userTag !== null && (
                       <button
                         className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
                         type="button"
@@ -1055,6 +1068,10 @@ function RecommendationsReal({
               seenKeyValue={key}
               downloaded={downloaded.includes(c.beatmapsetId)}
               onDownloaded={() => setDownloadedTick((n) => n + 1)}
+              feedback={rowMaps.feedbackById.get(c.beatmapId) ?? null}
+              containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
+              onFeedbackChange={rowMaps.onFeedbackChange}
+              onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
             />
           ))}
           {/* Part 4 + batch 7, item 3 — Renew: rendered at the bottom
@@ -1081,6 +1098,7 @@ function RecommendationsReal({
                 title="Start over from the first window with a freshly shuffled set — every Renew re-randomizes"
                 onClick={() => {
                   resumeRef.current = null
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
                   void generate(filters, count, { fresh: true, shuffle: true })
                 }}
               >

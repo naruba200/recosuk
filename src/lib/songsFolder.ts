@@ -144,6 +144,33 @@ export function createSongsFolderStore(deps: SongsFolderStoreDeps = {}) {
 /** Default store backed by the real IndexedDB + localStorage. */
 export const songsFolderStore = createSongsFolderStore()
 
+/**
+ * Defensive Tauri desktop-shell detection (batch 11). No Tauri
+ * helper existed in this codebase, so this is a guarded
+ * `window.__TAURI__` presence check only: it must never throw, and
+ * it only ever adjusts explanatory copy in Settings — it never
+ * enables, disables, or removes any download control. The web
+ * File System Access flow stays fully working wherever it works
+ * today, including inside a future Tauri shell that still serves
+ * the web build.
+ */
+export function isTauriShell(
+  win: unknown = (() => {
+    try {
+      return globalThis.window
+    } catch {
+      return undefined
+    }
+  })(),
+): boolean {
+  try {
+    if (!win || typeof win !== 'object') return false
+    return '__TAURI__' in (win as Record<string, unknown>)
+  } catch {
+    return false
+  }
+}
+
 /** True only where the real folder pickers exist (Chromium desktop). */
 export function isFileSystemAccessSupported(): boolean {
   try {

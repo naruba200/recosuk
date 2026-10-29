@@ -250,6 +250,131 @@ async function fetchAccountProfileRow(userId: string): Promise<AccountProfileRow
   }
 }
 
+// Shared account-row fetch (batch 10): the profiles-row lookup used to
+// live inside useProfileData only, so page shells that needed just the
+// linked osu! name (Mirror/Collections/History/Lists) read the guest
+// session alone and showed "Guest" for signed-in account users. This
+// hook owns the row fetch; useProfileData consumes it, and the sidebar
+// identity hook consumes it too. Concurrent instances share one
+// in-flight request per user id; sequential mounts refetch, matching
+// the previous per-hook behaviour.
+const accountRowRequests = new Map<string, Promise<AccountProfileRow | null>>()
+
+function fetchAccountProfileRowShared(userId: string): Promise<AccountProfileRow | null> {
+  const pending = accountRowRequests.get(userId)
+  if (pending) return pending
+  const request = fetchAccountProfileRow(userId).finally(() => {
+    if (accountRowRequests.get(userId) === request) accountRowRequests.delete(userId)
+  })
+  accountRowRequests.set(userId, request)
+  return request
+}
+
+export function useAccountProfileRow(): {
+  accountRow: AccountProfileRow | null
+  loaded: boolean
+} {
+  const { user } = useAuth()
+  const [accountRow, setAccountRow] = useState<AccountProfileRow | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  // Account identity comes from the profiles row (written at link time
+  // or by guest→account conversion).
+  useEffect(() => {
+    if (!user) {
+      setAccountRow(null)
+      setLoaded(true)
+      return
+    }
+    let active = true
+    // Clear any previous user's row immediately so a stale name never
+    // flashes while the new user's row loads.
+    setAccountRow(null)
+    setLoaded(false)
+    fetchAccountProfileRowShared(user.id).then((row) => {
+      if (!active) return
+      setAccountRow(row)
+      if (row?.selected_mode && isGameMode(row.selected_mode)) {
+        useModeStore.getState().initMode(row.selected_mode)
+      }
+      setLoaded(true)
+    })
+    return () => {
+      active = false
+    }
+  }, [user])
+
+  return { accountRow, loaded }
+}
+
+export interface SidebarIdentityInput {
+  /** Canonical name from fetched profile data (useProfileData data.user.username). */
+  profileUsername?: string | null
+  /** Identity from useProfileData (guest session > account row > pending link). */
+  identityUsername?: string | null
+  /** Account profiles-row osu_username (useAccountProfileRow). */
+  accountUsername?: string | null
+  /** Guest session name. */
+  guestUsername?: string | null
+  /** Pending-link name (localStorage, pre-conversion). */
+  pendingUsername?: string | null
+  /** Signed-in user's email. */
+  email?: string | null
+  /** True while auth/account-row resolution is still pending. */
+  resolving: boolean
+}
+
+/**
+ * Sidebar display-name resolution (batch 10, single shared chain —
+ * mirrors Settings). Priority: fetched profile name → profile-data
+ * identity → account profiles row → guest session → pending link →
+ * signed-in email → 'Guest'. Returns null ONLY while resolution is
+ * still pending and no name is known yet, so callers render a neutral
+ * placeholder instead of flashing 'Guest' for an account user whose
+ * row hasn't loaded.
+ */
+export function resolveSidebarIdentity(input: SidebarIdentityInput): string | null {
+  const candidates = [
+    input.profileUsername,
+    input.identityUsername,
+    input.accountUsername,
+    input.guestUsername,
+    input.pendingUsername,
+  ]
+  for (const candidate of candidates) {
+    const name = candidate?.trim()
+    if (name) return name
+  }
+  if (input.resolving) return null
+  const email = input.email?.trim()
+  return email ? email : 'Guest'
+}
+
+/**
+ * Sidebar identity for page shells that don't load full profile data
+ * (Mirror/Collections/History/Lists): resolves the display name from
+ * the account profiles row, guest session, and pending link, without
+ * fetching osu! profile data. Returns null while resolution is still
+ * pending — callers render a placeholder ('Loading…', matching
+ * Dashboard/Stats) instead of flashing 'Guest'.
+ */
+export function useSidebarIdentity(): { username: string | null; resolving: boolean } {
+  const { user, loading: authLoading, guestSession } = useAuth()
+  const { accountRow, loaded: accountRowLoaded } = useAccountProfileRow()
+  const pendingUsername = readPendingLink()?.osuUsername ?? null
+  const guestUsername = guestSession?.osuUsername ?? null
+  const resolving =
+    authLoading || (!!user && !accountRowLoaded && !pendingUsername && !guestUsername)
+  const username = resolveSidebarIdentity({
+    accountUsername: accountRow?.osu_username ?? null,
+    guestUsername,
+    pendingUsername,
+    email: user?.email ?? null,
+    resolving,
+  })
+  return { username, resolving: username === null }
+}
+
 export interface UseProfileData {
   status: ProfileStatus
   data: ProfileData | null
@@ -261,31 +386,11 @@ export interface UseProfileData {
 export function useProfileData(mode: GameMode): UseProfileData {
   const { user, tier, loading: authLoading } = useAuth()
   const guestSession = useGuestStore((s) => s.session)
-  const [accountRow, setAccountRow] = useState<AccountProfileRow | null>(null)
+  const { accountRow } = useAccountProfileRow()
   const [data, setData] = useState<ProfileData | null>(null)
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [error, setError] = useState<string | null>(null)
   const runRef = useRef(0)
-
-  // Account identity comes from the profiles row (written at link time
-  // or by guest→account conversion).
-  useEffect(() => {
-    if (!user) {
-      setAccountRow(null)
-      return
-    }
-    let active = true
-    fetchAccountProfileRow(user.id).then((row) => {
-      if (!active) return
-      setAccountRow(row)
-      if (row?.selected_mode && isGameMode(row.selected_mode)) {
-        useModeStore.getState().initMode(row.selected_mode)
-      }
-    })
-    return () => {
-      active = false
-    }
-  }, [user])
 
   const pending = readPendingLink()
   const identity: Identity | null = (() => {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
 import { useAuth } from '../lib/auth'
+import { useSidebarIdentity } from '../lib/profileService'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { MODE_ACCENTS } from '../lib/modeStore'
 import { GAME_MODES, modeLabel, type GameMode } from '../lib/mode'
@@ -1249,9 +1250,10 @@ function HistoryReal({ userId }: { userId: string }) {
 }
 
 export default function History() {
-  const { user, tier, guestSession } = useAuth()
+  const { user, tier } = useAuth()
+  const { username: sidebarName } = useSidebarIdentity()
   const pageIdentity = {
-    username: guestSession?.osuUsername ?? user?.email ?? 'Guest',
+    username: sidebarName ?? 'Loading…',
     pp: 0,
     tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
   }

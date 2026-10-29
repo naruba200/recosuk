@@ -6,6 +6,7 @@ import {
   MIRROR_SORTS,
   DEFAULT_MIRROR_SORT,
   mirrorPageCacheKey,
+  parseMirrorView,
   type MirrorFilters,
 } from '../mirrorSearch'
 import type { RecCandidate } from '../recommend'
@@ -134,5 +135,59 @@ describe('mirrorPageCacheKey', () => {
     const d = mirrorPageCacheKey({ ...base, sort: 'plays_desc', cursor: null })
     expect(new Set([a, b, c, d]).size).toBe(4)
     expect(mirrorPageCacheKey({ ...base, cursor: null })).toBe(a)
+  })
+
+  it('separates the selected user tag, so a tagged page never serves untagged results', () => {
+    const base = {
+      mode: 'mania' as const,
+      queryText: 'xi',
+      sort: 'updated_desc' as const,
+      cursor: null,
+    }
+    const untagged = mirrorPageCacheKey({ ...base, filters: filters() })
+    const tagged = mirrorPageCacheKey({
+      ...base,
+      filters: filters({ userTag: 'style/chordjack' }),
+    })
+    expect(tagged).not.toBe(untagged)
+  })
+})
+
+describe('user tag filter (server-side tag="..." clause)', () => {
+  it('appends tag="group/name" to the query text, last', () => {
+    expect(buildMirrorQueryText('xi', filters({ userTag: 'style/chordjack' }))).toBe(
+      'xi tag="style/chordjack"',
+    )
+    expect(
+      buildMirrorQueryText('', filters({ creator: 'mapper', userTag: 'jumps/back and forth' })),
+    ).toBe('creator=mapper tag="jumps/back and forth"')
+  })
+
+  it('adds no clause when no user tag is selected', () => {
+    expect(buildMirrorQueryText('xi', filters())).toBe('xi')
+    expect(buildMirrorQueryText('', filters())).toBe('')
+  })
+
+  it('does NOT re-check the tag client-side: candidates carry no voted-tags field', () => {
+    // A candidate whose mapper tags contain nothing like the
+    // selected user tag still passes — osu! filtered upstream.
+    expect(
+      mirrorCandidateMatches(
+        candidate({ tags: ['stream'] }),
+        filters({ userTag: 'style/chordjack' }),
+      ),
+    ).toBe(true)
+  })
+})
+
+describe('parseMirrorView (grid/list preference)', () => {
+  it('accepts grid, and falls back to list for anything else', () => {
+    expect(parseMirrorView('grid')).toBe('grid')
+    expect(parseMirrorView('list')).toBe('list')
+    expect(parseMirrorView(null)).toBe('list')
+    expect(parseMirrorView(undefined)).toBe('list')
+    expect(parseMirrorView('')).toBe('list')
+    expect(parseMirrorView('GRID')).toBe('list')
+    expect(parseMirrorView('cards')).toBe('list')
   })
 })

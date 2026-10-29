@@ -1,5 +1,6 @@
 import { proxyCall } from './osu'
 import { dataCache } from './dataCache'
+import { appendUserTagClause } from './userTags'
 import type { GameMode } from './mode'
 import type { RecCandidate, SearchPage } from './recommend'
 
@@ -35,14 +36,14 @@ export type MirrorSort =
   | 'title_asc'
   | 'title_desc'
 
-export const MIRROR_SORTS: { value: MirrorSort; label: string }[] = [
-  { value: 'updated_desc', label: 'Newest first (upload date)' },
-  { value: 'updated_asc', label: 'Oldest first' },
-  { value: 'plays_desc', label: 'Most played' },
-  { value: 'favourites_desc', label: 'Most favourited' },
-  { value: 'rating_desc', label: 'Highest rated' },
-  { value: 'title_asc', label: 'Title A–Z' },
-  { value: 'title_desc', label: 'Title Z–A' },
+export const MIRROR_SORTS: { value: MirrorSort; label: string; shortLabel: string }[] = [
+  { value: 'updated_desc', label: 'Newest first (upload date)', shortLabel: 'Newest' },
+  { value: 'updated_asc', label: 'Oldest first', shortLabel: 'Oldest' },
+  { value: 'plays_desc', label: 'Most played', shortLabel: 'Most played' },
+  { value: 'favourites_desc', label: 'Most favourited', shortLabel: 'Most favourited' },
+  { value: 'rating_desc', label: 'Highest rated', shortLabel: 'Highest rated' },
+  { value: 'title_asc', label: 'Title A–Z', shortLabel: 'Title A–Z' },
+  { value: 'title_desc', label: 'Title Z–A', shortLabel: 'Title Z–A' },
 ]
 
 /** osu! website default: newest first, like the site's listing. */
@@ -106,6 +107,16 @@ export interface MirrorFilters {
   language: number
   /** Mapper/creator name (substring server-side via `creator=`). */
   creator: string
+  /**
+   * Selected lazer user tag, as its "group/name" id (null = none).
+   * Filtering is SERVER-side only: the id becomes a
+   * `tag="group/name"` clause in the query text
+   * (buildMirrorQueryText). It is deliberately NOT re-checked in
+   * mirrorCandidateMatches — candidates carry no voted-tags
+   * field, only mapper tags, so a client-side check would be
+   * mapper-text guessing.
+   */
+  userTag: string | null
   sr: RangeFilter
   bpm: RangeFilter
   /** Length in seconds. */
@@ -124,6 +135,7 @@ export function defaultMirrorFilters(): MirrorFilters {
     genre: 0,
     language: 0,
     creator: '',
+    userTag: null,
     sr: empty(),
     bpm: empty(),
     lengthSec: empty(),
@@ -146,10 +158,13 @@ function rangeClauses(key: string, range: RangeFilter): string[] {
 }
 
 /**
- * Build the osu! `q` string: free text + creator + stat ranges.
- * A creator name containing whitespace is double-quoted (the site's
- * parser treats `creator="name here"` as one value); embedded quotes
- * are stripped so a name can never break out of the clause.
+ * Build the osu! `q` string: free text + creator + stat ranges +
+ * the selected user tag's `tag="group/name"` clause (server-side
+ * filter, appended last by the single construction site in
+ * userTags.ts). A creator name containing whitespace is
+ * double-quoted (the site's parser treats `creator="name here"`
+ * as one value); embedded quotes are stripped so a name can
+ * never break out of the clause.
  */
 export function buildMirrorQueryText(userText: string, filters: MirrorFilters): string {
   const parts: string[] = []
@@ -166,7 +181,7 @@ export function buildMirrorQueryText(userText: string, filters: MirrorFilters): 
   parts.push(...rangeClauses('od', filters.od))
   parts.push(...rangeClauses('hp', filters.hp))
   parts.push(...rangeClauses('cs', filters.cs))
-  return parts.join(' ')
+  return appendUserTagClause(parts.join(' '), filters.userTag)
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +194,10 @@ function inRange(value: number, range: RangeFilter): boolean {
   return true
 }
 
-/** Re-check a candidate against the filters. Unknown values (0) pass. */
+/** Re-check a candidate against the filters. Unknown values (0) pass.
+ *  The user-tag filter is NOT re-checked here: it is enforced
+ *  server-side by the `tag="..."` clause in the query text, and
+ *  candidates carry no voted-tags field to check against. */
 export function mirrorCandidateMatches(candidate: RecCandidate, filters: MirrorFilters): boolean {
   if (filters.status !== 'any' && candidate.status !== filters.status) return false
   const creator = filters.creator.trim().toLowerCase()
@@ -216,9 +234,24 @@ export function mirrorPageCacheKey(req: MirrorPageRequest): string {
     req.filters.status,
     req.filters.genre,
     req.filters.language,
+    req.filters.userTag,
     req.sort,
     req.cursor ?? null,
   ])
+}
+
+// ---------------------------------------------------------------------------
+// Results view preference (grid / list), persisted in localStorage
+// ---------------------------------------------------------------------------
+
+export type MirrorView = 'list' | 'grid'
+
+export const MIRROR_VIEW_STORAGE_KEY = 'recosuk:mirror-view'
+
+/** Parse a stored view value; anything unrecognised (including
+ *  null / missing) is the list view — the pre-existing layout. */
+export function parseMirrorView(raw: string | null | undefined): MirrorView {
+  return raw === 'grid' ? 'grid' : 'list'
 }
 
 function normalizePage(page: unknown): SearchPage {

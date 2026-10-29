@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
 import LoadingState from '../components/LoadingState'
+import UserTagPicker from '../components/UserTagPicker'
 import { isProxyConfigured } from '../lib/osu'
 import { GAME_MODES, MODE_LABELS, type GameMode } from '../lib/mode'
 import { useModeStore } from '../lib/modeStore'
@@ -25,14 +26,20 @@ import {
   MIRROR_LANGUAGES,
   MIRROR_SORTS,
   MIRROR_STATUSES,
+  MIRROR_VIEW_STORAGE_KEY,
   mirrorCandidateMatches,
+  parseMirrorView,
   type MirrorFilters,
   type MirrorSort,
+  type MirrorView,
   type RangeFilter,
 } from '../lib/mirrorSearch'
 import { seenKey, seenStore } from '../lib/seenStore'
+import { useCapabilities } from '../lib/capabilities'
+import { useRowMaps } from '../lib/useRowMaps'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
+import { useSidebarIdentity } from '../lib/profileService'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
 const DEMO_IDENTITY = {
@@ -800,21 +807,38 @@ const TAB_ORDER: { id: MirrorTab; label: string; dot?: string }[] = [
 function MirrorReal() {
   const globalMode = useModeStore((s) => s.mode)
   const setGlobalMode = useModeStore((s) => s.setMode)
-  const { tier } = useAuth()
+  const { tier, user } = useAuth()
+  const caps = useCapabilities()
   const guestSession = useGuestStore((s) => s.session)
   const [tab, setTab] = useState<MirrorTab>(globalMode)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [sort, setSort] = useState<MirrorSort>(DEFAULT_MIRROR_SORT)
   const [filters, setFilters] = useState<MirrorFilters>(() => defaultMirrorFilters())
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  // Drawer animation state: `drawerMounted` keeps the fixed
+  // overlay in the DOM for the close transition;
+  // `drawerShown` drives the transform/opacity classes. The
+  // drawer is a fixed overlay, so opening/closing it never
+  // reflows the page (no layout jump); the slide is a pure
+  // transform transition.
+  const [drawerMounted, setDrawerMounted] = useState(false)
+  const [drawerShown, setDrawerShown] = useState(false)
+  const drawerTimerRef = useRef<number | null>(null)
+  // Grid/list view, persisted in localStorage. List is the
+  // pre-existing layout and the fallback for any stored junk.
+  const [view, setView] = useState<MirrorView>(() => {
+    try {
+      return parseMirrorView(window.localStorage.getItem(MIRROR_VIEW_STORAGE_KEY))
+    } catch {
+      return 'list'
+    }
+  })
   const [results, setResults] = useState<MirrorResult[]>([])
   const [total, setTotal] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loadWarning, setLoadWarning] = useState<string | null>(null)
-  const [downloadedTick, setDownloadedTick] = useState(0)
   const [cursors, setCursors] = useState<Partial<Record<GameMode, string | null>>>({})
   const [exhausted, setExhausted] = useState<Partial<Record<GameMode, boolean>>>({})
   const runRef = useRef(0)
@@ -1013,6 +1037,7 @@ function MirrorReal() {
     filters.genre !== 0 ||
     filters.language !== 0 ||
     filters.creator.trim() !== '' ||
+    filters.userTag !== null ||
     [filters.sr, filters.bpm, filters.lengthSec, filters.ar, filters.od, filters.hp, filters.cs].some(
       (r) => r.min !== null || r.max !== null,
     )
@@ -1023,20 +1048,72 @@ function MirrorReal() {
     (filters.genre !== 0 ? 1 : 0) +
     (filters.language !== 0 ? 1 : 0) +
     (filters.creator.trim() !== '' ? 1 : 0) +
+    (filters.userTag !== null ? 1 : 0) +
     [filters.sr, filters.bpm, filters.lengthSec, filters.ar, filters.od, filters.hp, filters.cs].filter(
       (r) => r.min !== null || r.max !== null,
     ).length
 
+  const openDrawer = useCallback(() => {
+    if (drawerTimerRef.current !== null) {
+      window.clearTimeout(drawerTimerRef.current)
+      drawerTimerRef.current = null
+    }
+    setDrawerMounted(true)
+    // Two frames so the mount paints in the hidden state before
+    // the transition class flips on (otherwise it slides in from
+    // mid-transition or appears instantly).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setDrawerShown(true))
+    })
+  }, [])
+
+  const closeDrawer = useCallback(() => {
+    setDrawerShown(false)
+    drawerTimerRef.current = window.setTimeout(() => {
+      setDrawerMounted(false)
+      drawerTimerRef.current = null
+    }, 300)
+  }, [])
+
+  // Unmount timer cleanup if the screen unmounts mid-close.
+  useEffect(
+    () => () => {
+      if (drawerTimerRef.current !== null) window.clearTimeout(drawerTimerRef.current)
+    },
+    [],
+  )
+
+  // Persist the grid/list choice; a storage failure (private
+  // mode) just means the choice does not survive a reload.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MIRROR_VIEW_STORAGE_KEY, view)
+    } catch {
+      /* ignore */
+    }
+  }, [view])
+
   // Escape closes the filter drawer; closing never touches the
   // chosen filters (they live in `filters`, not in drawer state).
   useEffect(() => {
-    if (!drawerOpen) return
+    if (!drawerMounted) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDrawerOpen(false)
+      if (e.key === 'Escape') closeDrawer()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [drawerOpen])
+  }, [drawerMounted, closeDrawer])
+
+  // Batched row state (batch 11, part 5): feedbackMode 'all'
+  // because the All tab renders rows in all four modes — one
+  // loadAllFeedback for the page, not one query per row per mode.
+  const rowMaps = useRowMaps({
+    userId: user?.id,
+    canRate: caps.canRate,
+    canSave: caps.canSave,
+    feedbackMode: 'all',
+    beatmapsetIds: results.map((r) => r.candidate.beatmapsetId),
+  })
 
   const downloaded = seenStore.load(key).downloaded
   const sessionDownloads = results.filter((r) => downloaded.includes(r.candidate.beatmapsetId))
@@ -1079,90 +1156,123 @@ function MirrorReal() {
           Downloads are the full beatmapset file (.osz contains every difficulty). The mode changes what you discover and which difficulty is shown.
         </p>
         <div className="flex flex-col gap-space-sm pt-space-xs">
-          <div className="relative flex items-center w-full">
-            <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[22px] pointer-events-none">search</span>
-            <input
-              className="w-full h-12 pl-12 pr-32 rounded-full bg-surface-container text-on-surface placeholder:text-on-surface-variant/60 font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary shadow-sm transition-all"
-              placeholder="Search beatmaps, artists, or mappers"
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <div className="absolute right-1.5 flex items-center">
-              <button
-                className="px-space-lg h-9 rounded-full bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1 shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all"
-                type="button"
-                onClick={() => {
-                  setDebouncedQuery(query)
-                  void runFreshSearch({
-                    fresh: false,
-                    queryText: buildMirrorQueryText(query, filters),
-                  })
-                }}
-              >
-                <span className="material-symbols-outlined text-[18px]">tune</span>
-                <span>Search</span>
-              </button>
+          {/* One toolbar row: search bar left, controls right.
+              The search button stays inside the input (it submits
+              the live text immediately); sort / advanced-filters
+              / refresh / view sit in the same row to its right. */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="relative flex items-center flex-1 min-w-0">
+              <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[22px] pointer-events-none">search</span>
+              <input
+                className="w-full h-12 pl-12 pr-32 rounded-full bg-surface-container text-on-surface placeholder:text-on-surface-variant/60 font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary shadow-sm transition-all"
+                placeholder="Search beatmaps, artists, or mappers"
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <div className="absolute right-1.5 flex items-center">
+                <button
+                  className="px-space-lg h-9 rounded-full bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1 shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all"
+                  type="button"
+                  onClick={() => {
+                    setDebouncedQuery(query)
+                    void runFreshSearch({
+                      fresh: false,
+                      queryText: buildMirrorQueryText(query, filters),
+                    })
+                  }}
+                >
+                  <span className="material-symbols-outlined text-[18px]">tune</span>
+                  <span>Search</span>
+                </button>
+              </div>
             </div>
-          </div>
-          {/* Toolbar: sort + one filter icon (drawer) + refresh.
-              All advanced controls live in the drawer; the toolbar
-              stays visible and uncluttered. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm">
-              <span className="text-on-surface-variant">Sort:</span>
-              <select
-                aria-label="Sort results"
-                className="bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer"
-                value={sort}
-                onChange={(e) => setSort(e.target.value as MirrorSort)}
+            {/* Toolbar controls: styled sort pill (short labels,
+                narrower than the old bare select), advanced
+                filters tune button, icon-only refresh, and the
+                grid/list view switcher. Filter/sort/refresh
+                behaviour is unchanged — only the presentation. */}
+            <div className="flex flex-wrap items-center gap-2 flex-shrink-0" role="toolbar" aria-label="Mirror controls">
+              <label className="relative flex items-center h-9 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm hover:bg-surface-bright transition-colors cursor-pointer focus-within:ring-2 focus-within:ring-primary">
+                <span className="text-on-surface-variant mr-1.5">Sort:</span>
+                <select
+                  aria-label="Sort results"
+                  className="appearance-none bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer w-24 sm:w-28 truncate"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as MirrorSort)}
+                >
+                  {MIRROR_SORTS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.shortLabel}</option>
+                  ))}
+                </select>
+                <span className="material-symbols-outlined absolute right-2 text-on-surface-variant text-[18px] pointer-events-none">arrow_drop_down</span>
+              </label>
+              <button
+                className={`relative flex items-center justify-center w-9 h-9 rounded-full transition-colors ${drawerShown || filtersActive ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant hover:text-on-surface'}`}
+                type="button"
+                aria-label={`Advanced filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+                aria-expanded={drawerMounted}
+                title="Advanced filters"
+                onClick={openDrawer}
               >
-                {MIRROR_SORTS.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </label>
-            <button
-              className={`relative flex items-center justify-center w-9 h-9 rounded-full transition-colors ${drawerOpen || filtersActive ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant hover:text-on-surface'}`}
-              type="button"
-              aria-label={`Advanced filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
-              aria-expanded={drawerOpen}
-              title="Advanced filters"
-              onClick={() => setDrawerOpen(true)}
-            >
-              <span className="material-symbols-outlined text-[20px]">tune</span>
-              {activeFilterCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-primary text-on-primary font-label-sm text-[10px] font-bold flex items-center justify-center">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-            <button
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors"
-              type="button"
-              title="Refresh (bypass cache)"
-              onClick={() => void runFreshSearch({ fresh: true })}
-            >
-              <span className="material-symbols-outlined text-[14px]">refresh</span>
-              <span>Refresh</span>
-            </button>
+                <span className="material-symbols-outlined text-[20px]">tune</span>
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-primary text-on-primary font-label-sm text-[10px] font-bold flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+              <button
+                className="flex items-center justify-center w-9 h-9 rounded-full bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors"
+                type="button"
+                aria-label="Refresh (bypass cache)"
+                title="Refresh (bypass cache)"
+                onClick={() => void runFreshSearch({ fresh: true })}
+              >
+                <span className="material-symbols-outlined text-[18px]">refresh</span>
+              </button>
+              <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-surface-container" role="group" aria-label="Results view">
+                <button
+                  className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${view === 'list' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:text-on-surface'}`}
+                  type="button"
+                  aria-label="List view"
+                  aria-pressed={view === 'list'}
+                  title="List view"
+                  onClick={() => setView('list')}
+                >
+                  <span className="material-symbols-outlined text-[18px]">view_list</span>
+                </button>
+                <button
+                  className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${view === 'grid' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:text-on-surface'}`}
+                  type="button"
+                  aria-label="Grid view"
+                  aria-pressed={view === 'grid'}
+                  title="Grid view"
+                  onClick={() => setView('grid')}
+                >
+                  <span className="material-symbols-outlined text-[18px]">grid_view</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Advanced-filters drawer: slides in from the right. Filter
-          state lives in `filters` (same as before), so choosing
-          here resets the list + cursors exactly like the old panel
-          did, and closing the drawer loses nothing. */}
-      {drawerOpen && (
+      {/* Advanced-filters drawer: slides in from the right on a
+          transform transition (mounted for the 300ms close
+          transition, then unmounted). Filter state lives in
+          `filters` (same as before), so choosing here resets the
+          list + cursors exactly like the old panel did, and
+          closing the drawer loses nothing. */}
+      {drawerMounted && (
         <div className="fixed inset-0 z-50">
           <div
-            className="absolute inset-0 bg-black/60"
+            className={`absolute inset-0 bg-black/60 transition-opacity duration-300 motion-reduce:transition-none ${drawerShown ? 'opacity-100' : 'opacity-0'}`}
             aria-hidden="true"
-            onClick={() => setDrawerOpen(false)}
+            onClick={closeDrawer}
           ></div>
           <aside
-            className="absolute right-0 top-0 h-full w-[360px] max-w-[92vw] bg-surface-container-low shadow-xl flex flex-col"
+            className={`absolute right-0 top-0 h-full w-[360px] max-w-[92vw] bg-surface-container-low shadow-xl flex flex-col transition-transform duration-300 ease-out motion-reduce:transition-none ${drawerShown ? 'translate-x-0' : 'translate-x-full'}`}
             role="dialog"
             aria-modal="true"
             aria-label="Advanced filters"
@@ -1176,7 +1286,7 @@ function MirrorReal() {
                 className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface flex items-center justify-center transition-colors"
                 type="button"
                 aria-label="Close advanced filters"
-                onClick={() => setDrawerOpen(false)}
+                onClick={closeDrawer}
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
@@ -1217,6 +1327,13 @@ function MirrorReal() {
                   onChange={(e) => updateFilters({ creator: e.target.value })}
                 />
               </FilterSection>
+              <FilterSection title="User Tag">
+                <UserTagPicker
+                  mode={tab}
+                  value={filters.userTag}
+                  onChange={(next) => updateFilters({ userTag: next })}
+                />
+              </FilterSection>
               <FilterSection title="Difficulty">
                 <div className="flex flex-col gap-space-md">
                   <RangeSlider label="Star rating" range={filters.sr} min={0} max={12} step={0.1} onChange={(r) => updateRange('sr', r)} />
@@ -1244,7 +1361,7 @@ function MirrorReal() {
               <button
                 className="flex-1 py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold hover:opacity-95 transition-opacity"
                 type="button"
-                onClick={() => setDrawerOpen(false)}
+                onClick={closeDrawer}
               >
                 Apply Filters{filtersActive ? ` (${activeFilterCount})` : ''}
               </button>
@@ -1286,19 +1403,51 @@ function MirrorReal() {
               No beatmapsets found for this search in {tab === 'all' ? 'any mode' : MODE_LABELS[tab]}. Try a different artist, mapper, or title — or loosen the filters.
             </p>
           )}
-          <div className="flex flex-col gap-3">
-            {results.map(({ candidate, mode: entryMode }) => (
-              <BeatmapRow
-                key={`${entryMode}-${candidate.beatmapsetId}`}
-                candidate={candidate}
-                mode={entryMode}
-                seenKeyValue={key}
-                downloaded={downloaded.includes(candidate.beatmapsetId)}
-                onDownloaded={() => setDownloadedTick((n) => n + 1)}
-              />
-            ))}
-          </div>
-          <span className="hidden">{downloadedTick}</span>
+          {/* List = the pre-existing rows. Grid = the same rows
+              as stacked cards in a responsive 2-column grid
+              (BeatmapRow `card`), same content and actions.
+              No downloaded indicator on Mirror rows in either
+              view (batch 11, part 3): rows render without the
+              downloaded badge/icon; download recording and the
+              "Downloaded from Mirror" history panel are untouched. */}
+          {view === 'grid' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {results.map(({ candidate, mode: entryMode }) => (
+                <BeatmapRow
+                  key={`${entryMode}-${candidate.beatmapsetId}`}
+                  candidate={candidate}
+                  mode={entryMode}
+                  seenKeyValue={key}
+                  hideDownloadedIndicator
+                  card
+                  feedback={rowMaps.feedbackById.get(candidate.beatmapId) ?? null}
+                  containing={rowMaps.containingBySet.get(candidate.beatmapsetId) ?? []}
+                  onFeedbackChange={rowMaps.onFeedbackChange}
+                  onContainingChange={(ids) =>
+                    rowMaps.onContainingChange(candidate.beatmapsetId, ids)
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {results.map(({ candidate, mode: entryMode }) => (
+                <BeatmapRow
+                  key={`${entryMode}-${candidate.beatmapsetId}`}
+                  candidate={candidate}
+                  mode={entryMode}
+                  seenKeyValue={key}
+                  hideDownloadedIndicator
+                  feedback={rowMaps.feedbackById.get(candidate.beatmapId) ?? null}
+                  containing={rowMaps.containingBySet.get(candidate.beatmapsetId) ?? []}
+                  onFeedbackChange={rowMaps.onFeedbackChange}
+                  onContainingChange={(ids) =>
+                    rowMaps.onContainingChange(candidate.beatmapsetId, ids)
+                  }
+                />
+              ))}
+            </div>
+          )}
           {/* Infinite-scroll sentinel: loads the next cursor page. */}
           <div ref={sentinelRef} className="h-2" aria-hidden="true"></div>
           {loadingMore && (
@@ -1505,12 +1654,13 @@ function RangeSlider({
 
 
 export default function Mirror() {
-  const { tier, guestSession } = useAuth()
+  const { tier } = useAuth()
+  const { username: sidebarName } = useSidebarIdentity()
   if (!isProxyConfigured) return <MirrorDemo />
   return (
     <AppShell
       identity={{
-        username: guestSession?.osuUsername ?? 'Guest',
+        username: sidebarName ?? 'Loading…',
         pp: 0,
         tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'mirror browsing',
       }}

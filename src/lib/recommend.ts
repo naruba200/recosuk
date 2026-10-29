@@ -4,6 +4,7 @@ import type { GameMode } from './mode'
 import { modeLabel } from './mode'
 import type { SkillProfile } from './skillProfile'
 import { gapReason } from './interpretations'
+import { appendUserTagClause } from './userTags'
 import { isHardSeen, type SeenState } from './seenStore'
 
 /**
@@ -104,8 +105,16 @@ export interface RecFilters {
   rankedLovedOnly: boolean
   /** Mania only: restrict to this key count (null = any). */
   keyCount: number | null
-  /** Free-text tag/keyword the map's tags/title must contain. */
-  tagText: string
+  /**
+   * Selected lazer user tag, as its "group/name" id (null = none).
+   * Filtering is SERVER-side: the id becomes a `tag="group/name"`
+   * clause on every search query (see buildCandidateQueries).
+   * There is deliberately NO client-side tag check in
+   * applyFilters: the search payload carries only mapper tags
+   * (`SearchBeatmapset.tags`), never per-map voted user tags,
+   * so matching the id against mapper text would be guessing.
+   */
+  userTag: string | null
 }
 
 /**
@@ -147,16 +156,21 @@ export function defaultFiltersFor(profile: SkillProfile): RecFilters {
     lenMaxSec: 600,
     rankedLovedOnly: true,
     keyCount: profile.mode === 'mania' ? profile.mainKeyCount : null,
-    tagText: '',
+    userTag: null,
   }
 }
 
 /**
  * Search queries for candidate generation. The primary query uses the
  * osu! search query syntax (stars/bpm bounds) so the window arrives
- * pre-narrowed; tag variants widen the pool with the player's own
- * playstyle vocabulary. Everything is re-filtered client-side anyway —
- * the query is an optimisation, the filters are the guarantee.
+ * pre-narrowed; playstyle variants widen the pool with the player's
+ * own playstyle vocabulary as full-text terms. The selected user
+ * tag (if any) is appended as a `tag="group/name"` clause to EVERY
+ * query: generation unions the queries' results, so a clause on
+ * only the primary query would let the variant queries re-admit
+ * untagged maps. Everything is re-filtered client-side anyway for
+ * the numeric/status filters — the tag clause is the filter, and
+ * it is enforced upstream, not by matching mapper text.
  */
 export function buildCandidateQueries(
   profile: SkillProfile,
@@ -165,15 +179,15 @@ export function buildCandidateQueries(
 ): string[] {
   // Mode travels as its own proxy param; the query text is mode-agnostic.
   void mode
-  const primary =
+  const base =
     `stars>=${filters.srMin.toFixed(1)} stars<=${filters.srMax.toFixed(1)} ` +
     `bpm>=${filters.bpmMin} bpm<=${filters.bpmMax}`
-  const queries = [primary]
+  // appendUserTagClause is the single construction site for the
+  // clause (userTags.ts): `tag="group/name"`, or unchanged text
+  // when no tag is selected.
+  const queries = [appendUserTagClause(base, filters.userTag)]
   for (const tag of profile.playstyleTags.slice(0, 2)) {
-    queries.push(`${tag} ${primary}`)
-  }
-  if (filters.tagText.trim()) {
-    queries.push(`${filters.tagText.trim()} ${primary}`)
+    queries.push(appendUserTagClause(`${tag} ${base}`, filters.userTag))
   }
   return [...new Set(queries)]
 }
@@ -358,16 +372,20 @@ export function widenRecFilters(filters: RecFilters): RecFilters {
 
 /** One-tap escape from the filtered-out empty state: drop only the tag. */
 export function clearRecTag(filters: RecFilters): RecFilters {
-  return { ...filters, tagText: '' }
+  return { ...filters, userTag: null }
 }
 
-/** Filters narrow the pool BEFORE scoring (§3) — they never re-sort. */
+/** Filters narrow the pool BEFORE scoring (§3) — they never re-sort.
+ *  The user-tag filter is NOT applied here: it is enforced
+ *  server-side by the `tag="..."` clause on every search query
+ *  (buildCandidateQueries). Candidates carry no voted-tags field
+ *  to check against — only mapper tags — so a client-side tag
+ *  check would be mapper-text guessing, which batch 11 removed. */
 export function applyFilters(
   candidates: RecCandidate[],
   filters: RecFilters,
   mode: GameMode,
 ): RecCandidate[] {
-  const tag = filters.tagText.trim().toLowerCase()
   return candidates.filter((c) => {
     if (c.sr < filters.srMin || c.sr > filters.srMax) return false
     if (c.bpm > 0 && (c.bpm < filters.bpmMin || c.bpm > filters.bpmMax)) return false
@@ -380,10 +398,6 @@ export function applyFilters(
     // them emptied every mania run whose payloads lacked CS.
     if (mode === 'mania' && filters.keyCount !== null && c.cs > 0 && Math.round(c.cs) !== filters.keyCount)
       return false
-    if (tag) {
-      const haystack = `${c.tags.join(' ')} ${c.title} ${c.artist}`.toLowerCase()
-      if (!haystack.includes(tag)) return false
-    }
     return true
   })
 }

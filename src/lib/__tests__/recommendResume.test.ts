@@ -334,7 +334,7 @@ describe('Feed dedupe unchanged (batch 6, part 4)', () => {
       lenMaxSec: 600,
       rankedLovedOnly: false,
       keyCount: null,
-      tagText: '',
+      userTag: null,
     }
     const session = new FeedSession(
       profile,

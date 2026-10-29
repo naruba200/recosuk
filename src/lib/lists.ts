@@ -165,6 +165,45 @@ export async function removeFromList(
 }
 
 /**
+ * Batched containment lookup (batch 11, part 5): for a whole
+ * rendered list at once — one loadLists plus ONE list_items
+ * select (`.in()` on both ids), keyed by beatmapset id. The
+ * per-row `listsContainingSet` below did both queries PER ROW
+ * (and BeatmapRow called it once per rendered row), so a 30-row
+ * list fired 60 queries before any row painted. Callers that
+ * render many rows must use this and pass the map down; the
+ * single-set form stays for the one-shot save popover, which
+ * fires only when the user opens it.
+ */
+export async function loadListsContainingSets(
+  client: SupabaseClient | null,
+  userId: string,
+  beatmapsetIds: readonly number[],
+): Promise<Map<number, string[]>> {
+  const empty = new Map<number, string[]>()
+  const wanted = [...new Set(beatmapsetIds)]
+  if (wanted.length === 0) return empty
+  const db = requireClient(client)
+  const lists = await loadLists(db, userId)
+  const ownIds = [...new Set(lists.map((l) => l.id))]
+  if (ownIds.length === 0) return empty
+  const { data, error } = await db
+    .from('list_items')
+    .select('list_id, beatmapset_id')
+    .in('list_id', ownIds)
+    .in('beatmapset_id', wanted)
+  throwIf(error, 'Could not check your lists')
+  const found = (data ?? []) as { list_id: string; beatmapset_id: number }[]
+  const map = new Map<number, string[]>()
+  for (const row of found) {
+    const ids = map.get(row.beatmapset_id) ?? []
+    if (!ids.includes(row.list_id)) ids.push(row.list_id)
+    map.set(row.beatmapset_id, ids)
+  }
+  return map
+}
+
+/**
  * Ids of the caller's lists containing this set — drives the
  * picker's checked state and the row's saved icon. Intersected
  * with the caller's own list ids client-side (the select itself

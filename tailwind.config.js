@@ -3,15 +3,28 @@
 // display/sans font families) kept alongside the full Stitch DESIGN.md extend config
 // extracted to stitch-tailwind-config.raw.txt (colors, borderRadius, spacing,
 // fontFamily, fontSize). Stitch values win on shared keys (they are the exported design tokens).
+//
+// THEMING (batch 11): theme-varying tokens are CSS variables defined
+// per `[data-theme]` block in src/index.css (`--c-<token>`, RGB
+// triplets). Each colour below resolves through
+// `rgb(var(--c-<token>) / <alpha-value>)` so Tailwind opacity
+// modifiers (`bg-primary/20`, `text-secondary/80`, …) keep working
+// and every token class re-tints when the theme changes. Dark Stage
+// values in index.css are the pre-theme hexes verbatim, so the
+// default theme is pixel-identical to this config's old values.
+// FIXED tokens (brand/semantic, identical in every theme — see
+// src/lib/themes.ts): recpink, stargold, hitgreen, modes.*, and the
+// error family stay as literal hexes here.
+const themeVar = (name) => `rgb(var(--c-${name}) / <alpha-value>)`
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
       "colors": {
-            "stage": "#150F1F",
-            "panel": "#221832",
-            "paper": "#F5F1FA",
+            "stage": themeVar('stage'),
+            "panel": themeVar('panel'),
+            "paper": themeVar('paper'),
             "recpink": "#FF66AA",
             "stargold": "#FFCC22",
             "hitgreen": "#7EE787",
@@ -21,53 +34,53 @@ export default {
                   "fruits": "#4CC3FF",
                   "mania": "#9D6BFF"
             },
-            "surface-variant": "#393243",
-            "secondary-fixed": "#ffd9e4",
-            "primary-fixed-dim": "#d2bbff",
+            "surface-variant": themeVar('surface-variant'),
+            "secondary-fixed": themeVar('secondary-fixed'),
+            "primary-fixed-dim": themeVar('primary-fixed-dim'),
             "on-error": "#690005",
-            "on-primary": "#3f008e",
-            "tertiary-fixed-dim": "#80d0ff",
-            "outline-variant": "#4a4454",
-            "outline": "#958d9f",
-            "on-secondary-fixed-variant": "#8d0051",
-            "surface-bright": "#3d3648",
+            "on-primary": themeVar('on-primary'),
+            "tertiary-fixed-dim": themeVar('tertiary-fixed-dim'),
+            "outline-variant": themeVar('outline-variant'),
+            "outline": themeVar('outline'),
+            "on-secondary-fixed-variant": themeVar('on-secondary-fixed-variant'),
+            "surface-bright": themeVar('surface-bright'),
             "error-container": "#93000a",
-            "surface-container-highest": "#393243",
-            "on-surface": "#eadef5",
-            "on-tertiary-fixed-variant": "#004c6a",
-            "on-secondary": "#640038",
-            "inverse-on-surface": "#342d3f",
-            "on-tertiary": "#00344a",
-            "primary-fixed": "#eaddff",
-            "on-primary-fixed": "#25005a",
-            "secondary": "#ffb0cc",
-            "tertiary-container": "#009bd3",
-            "inverse-primary": "#713bd0",
-            "on-tertiary-container": "#002d41",
-            "secondary-fixed-dim": "#ffb0cc",
-            "surface-dim": "#161020",
+            "surface-container-highest": themeVar('surface-container-highest'),
+            "on-surface": themeVar('on-surface'),
+            "on-tertiary-fixed-variant": themeVar('on-tertiary-fixed-variant'),
+            "on-secondary": themeVar('on-secondary'),
+            "inverse-on-surface": themeVar('inverse-on-surface'),
+            "on-tertiary": themeVar('on-tertiary'),
+            "primary-fixed": themeVar('primary-fixed'),
+            "on-primary-fixed": themeVar('on-primary-fixed'),
+            "secondary": themeVar('secondary'),
+            "tertiary-container": themeVar('tertiary-container'),
+            "inverse-primary": themeVar('inverse-primary'),
+            "on-tertiary-container": themeVar('on-tertiary-container'),
+            "secondary-fixed-dim": themeVar('secondary-fixed-dim'),
+            "surface-dim": themeVar('surface-dim'),
             "error": "#ffb4ab",
-            "on-surface-variant": "#ccc3d6",
-            "primary": "#d2bbff",
-            "on-secondary-container": "#ff9ac0",
-            "secondary-container": "#910054",
-            "primary-container": "#a476ff",
-            "tertiary": "#80d0ff",
+            "on-surface-variant": themeVar('on-surface-variant'),
+            "primary": themeVar('primary'),
+            "on-secondary-container": themeVar('on-secondary-container'),
+            "secondary-container": themeVar('secondary-container'),
+            "primary-container": themeVar('primary-container'),
+            "tertiary": themeVar('tertiary'),
             "on-error-container": "#ffdad6",
-            "background": "#161020",
-            "on-primary-fixed-variant": "#5819b8",
-            "surface-container-lowest": "#110b1b",
-            "surface-container": "#231d2d",
-            "tertiary-fixed": "#c5e7ff",
-            "on-background": "#eadef5",
-            "surface-tint": "#d2bbff",
-            "on-secondary-fixed": "#3e0021",
-            "inverse-surface": "#eadef5",
-            "surface": "#161020",
-            "on-primary-container": "#36007d",
-            "surface-container-low": "#1f1929",
-            "on-tertiary-fixed": "#001e2d",
-            "surface-container-high": "#2e2738"
+            "background": themeVar('background'),
+            "on-primary-fixed-variant": themeVar('on-primary-fixed-variant'),
+            "surface-container-lowest": themeVar('surface-container-lowest'),
+            "surface-container": themeVar('surface-container'),
+            "tertiary-fixed": themeVar('tertiary-fixed'),
+            "on-background": themeVar('on-background'),
+            "surface-tint": themeVar('surface-tint'),
+            "on-secondary-fixed": themeVar('on-secondary-fixed'),
+            "inverse-surface": themeVar('inverse-surface'),
+            "surface": themeVar('surface'),
+            "on-primary-container": themeVar('on-primary-container'),
+            "surface-container-low": themeVar('surface-container-low'),
+            "on-tertiary-fixed": themeVar('on-tertiary-fixed'),
+            "surface-container-high": themeVar('surface-container-high')
       },
       "borderRadius": {
             "DEFAULT": "1rem",
@@ -119,9 +132,6 @@ export default {
             ],
             "headline-xl-mobile": [
                   "Outfit"
-            ],
-            "label-md": [
-                  "Inter"
             ],
             "headline-lg": [
                   "Outfit"

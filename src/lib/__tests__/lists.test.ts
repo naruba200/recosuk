@@ -5,6 +5,7 @@ import {
   createList,
   deleteList,
   listsContainingSet,
+  loadListsContainingSets,
   loadListItems,
   loadLists,
   removeFromList,
@@ -90,6 +91,39 @@ describe('lists service (M5)', () => {
     })
     expect(await listsContainingSet(client(db), 'u1', 7)).toEqual(['mine-1'])
     expect(await listsContainingSet(client(db), 'u1', 999)).toEqual([])
+  })
+
+  it('loadListsContainingSets batches many sets into one lookup, own lists only', async () => {
+    const db = new FakeDb({
+      lists: [
+        { id: 'mine-1', user_id: 'u1', name: 'A', is_public: false, created_at: '2026-01-01T00:00:00Z' },
+        { id: 'mine-2', user_id: 'u1', name: 'B', is_public: false, created_at: '2026-01-01T00:00:00Z' },
+        { id: 'theirs', user_id: 'u2', name: 'C', is_public: true, created_at: '2026-01-01T00:00:00Z' },
+      ],
+      list_items: [
+        { id: 'i1', list_id: 'mine-1', beatmapset_id: 7, beatmap_id: 70, mode: 'mania', added_at: '2026-01-01T00:00:00Z' },
+        { id: 'i2', list_id: 'mine-2', beatmapset_id: 7, beatmap_id: 70, mode: 'mania', added_at: '2026-01-01T00:00:00Z' },
+        { id: 'i3', list_id: 'mine-1', beatmapset_id: 20, beatmap_id: 200, mode: 'mania', added_at: '2026-01-01T00:00:00Z' },
+        { id: 'i4', list_id: 'theirs', beatmapset_id: 30, beatmap_id: 300, mode: 'mania', added_at: '2026-01-01T00:00:00Z' },
+      ],
+    })
+    const map = await loadListsContainingSets(client(db), 'u1', [7, 20, 30, 999, 7])
+    expect(map.get(7)).toEqual(['mine-1', 'mine-2'])
+    expect(map.get(20)).toEqual(['mine-1'])
+    expect(map.has(30)).toBe(false)
+    expect(map.has(999)).toBe(false)
+    expect(map.size).toBe(2)
+  })
+
+  it('loadListsContainingSets returns an empty map for no ids or no lists', async () => {
+    const db = new FakeDb({
+      lists: [{ id: 'mine-1', user_id: 'u1', name: 'A', is_public: false, created_at: '2026-01-01T00:00:00Z' }],
+      list_items: [
+        { id: 'i1', list_id: 'mine-1', beatmapset_id: 7, beatmap_id: 70, mode: 'mania', added_at: '2026-01-01T00:00:00Z' },
+      ],
+    })
+    expect((await loadListsContainingSets(client(db), 'u1', [])).size).toBe(0)
+    expect((await loadListsContainingSets(client(db), 'u2', [7])).size).toBe(0)
   })
 
   it('throws a readable error when Supabase is not connected', async () => {

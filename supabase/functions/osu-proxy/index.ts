@@ -27,6 +27,7 @@ type GameMode = (typeof VALID_MODES)[number]
 const MIN_UPSTREAM_GAP_MS = 350 // politeness throttle between osu! calls
 const CACHE_TTL_USER_MS = 5 * 60 * 1000 // user / plays: 5 minutes
 const CACHE_TTL_BEATMAP_MS = 60 * 60 * 1000 // beatmap lookups: 1 hour
+const CACHE_TTL_TAGS_MS = 24 * 60 * 60 * 1000 // user-tag vocabulary: 24 hours (barely changes)
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -137,7 +138,12 @@ function errorJson(error: string, status: number): Response {
 
 async function osuFetch(path: string, init?: RequestInit): Promise<unknown> {
   const cacheKey = `${init?.method ?? 'GET'} ${path} ${init?.body ?? ''}`
-  const ttl = path.includes('/beatmaps/') ? CACHE_TTL_BEATMAP_MS : CACHE_TTL_USER_MS
+  const ttl =
+    path === '/tags'
+      ? CACHE_TTL_TAGS_MS
+      : path.includes('/beatmaps/')
+        ? CACHE_TTL_BEATMAP_MS
+        : CACHE_TTL_USER_MS
   const hit = cacheGet(cacheKey)
   if (hit !== undefined) return hit
 
@@ -209,6 +215,8 @@ async function runAction(params: Params): Promise<unknown> {
     'getBeatmapset',
     'getBeatmapPacks',
     'getBeatmapPack',
+    // The user-tag vocabulary is global (no mode scope).
+    'getBeatmapUserTags',
   ])
   const mode = MODE_FREE_ACTIONS.has(action) ? undefined : requireMode(params)
 
@@ -282,6 +290,23 @@ async function runAction(params: Params): Promise<unknown> {
     case 'getBeatmapPack': {
       const pack = encodeURIComponent(requireString(params, 'pack'))
       return osuFetch(`/beatmaps/packs/${pack}`)
+    }
+    // User-tag vocabulary (batch 11, part 4): lazer's fixed,
+    // player-voted tag vocabulary, `GET /tags` with the app
+    // (public) token — read-only, no user OAuth needed. Mode-free:
+    // the vocabulary is global; per-mode applicability (if the
+    // payload carries it) is read client-side.
+    //
+    // The response shape is NOT documented, so the function
+    // returns the upstream body verbatim (same thunk/cache
+    // pattern as the other actions, 24h cache) and the client
+    // normalises it defensively, falling back to the bundled
+    // wiki vocabulary when the shape is unrecognised. Until this
+    // source is redeployed the proxy answers 400 for this
+    // action and the client uses the bundled vocabulary.
+    // Deploy: supabase functions deploy osu-proxy --no-verify-jwt
+    case 'getBeatmapUserTags': {
+      return osuFetch('/tags')
     }
     default:
       throw new ProxyError(`Unknown action: ${action}`, 400)

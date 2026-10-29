@@ -4,6 +4,7 @@ import {
   boostForCandidate,
   deleteFeedback,
   enrichRatedSets,
+  feedbackByBeatmapId,
   loadAllFeedback,
   loadFeedbackForBeatmap,
   loadFeedbackForMode,
@@ -62,6 +63,48 @@ describe('feedback service (M5)', () => {
     const found = await loadFeedbackForBeatmap(client(db), 'u1', 9)
     expect(found?.status).toBe('skipped')
     expect(found?.rating).toBeNull()
+  })
+
+  it('loadFeedbackForBeatmap uses maybeSingle, so an unrated map returns null with no 406 error', async () => {
+    // Stub builder: single() would answer PGRST116 (the old 406
+    // spam); maybeSingle() answers clean null. The service must
+    // call the latter and never touch the former.
+    const calls: string[] = []
+    const builder: Record<string, unknown> = {}
+    builder.select = () => builder
+    builder.eq = () => builder
+    builder.single = () => {
+      calls.push('single')
+      return Promise.resolve({ data: null, error: { code: 'PGRST116', message: 'no rows' } })
+    }
+    builder.maybeSingle = () => {
+      calls.push('maybeSingle')
+      return Promise.resolve({ data: null, error: null })
+    }
+    const stub = { from: () => builder } as unknown as SupabaseClient
+    expect(await loadFeedbackForBeatmap(stub, 'u1', 9)).toBeNull()
+    expect(calls).toEqual(['maybeSingle'])
+  })
+
+  it('loadFeedbackForBeatmap still tolerates a PGRST116 error if a client reports one', async () => {
+    const builder: Record<string, unknown> = {}
+    builder.select = () => builder
+    builder.eq = () => builder
+    builder.maybeSingle = () =>
+      Promise.resolve({ data: null, error: { code: 'PGRST116', message: 'no rows' } })
+    const stub = { from: () => builder } as unknown as SupabaseClient
+    expect(await loadFeedbackForBeatmap(stub, 'u1', 9)).toBeNull()
+  })
+
+  it('feedbackByBeatmapId keys entries by beatmap_id for batched row lookup', () => {
+    const map = feedbackByBeatmapId([
+      { user_id: 'u1', beatmap_id: 11, beatmapset_id: 1, mode: 'mania', status: 'tried', rating: 5 },
+      { user_id: 'u1', beatmap_id: 22, beatmapset_id: 2, mode: 'mania', status: 'skipped', rating: null },
+    ])
+    expect(map.get(11)?.rating).toBe(5)
+    expect(map.get(22)?.status).toBe('skipped')
+    expect(map.get(99)).toBeUndefined()
+    expect(map.size).toBe(2)
   })
 
   it('loadAllFeedback returns every mode, newest first; deleteFeedback removes', async () => {

@@ -20,6 +20,8 @@ import {
 import { seenKey, seenStore, type SeenState } from '../lib/seenStore'
 import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
+import { useCapabilities } from '../lib/capabilities'
+import { useRowMaps } from '../lib/useRowMaps'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
@@ -909,9 +911,18 @@ export function FeedReal({
 }) {
   const mode = useModeStore((s) => s.mode)
   const { tier, user } = useAuth()
+  const caps = useCapabilities()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
   const [items, setItems] = useState<RecCandidate[]>([])
+  // Batched row state (batch 11, part 5) — see RecommendationsReal.
+  const rowMaps = useRowMaps({
+    userId: user?.id,
+    canRate: caps.canRate,
+    canSave: caps.canSave,
+    feedbackMode: mode,
+    beatmapsetIds: items.map((c) => c.beatmapsetId),
+  })
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
   const [feedStats, setFeedStats] = useState({ examined: 0, produced: 0 })
   const [ended, setEnded] = useState(false)
@@ -1036,7 +1047,7 @@ export function FeedReal({
       ...filters,
       srMin: Math.max(0, filters.srMin - 0.5),
       srMax: filters.srMax + 1,
-      tagText: '',
+      userTag: null,
       keyCount: null,
     }
     onFiltersChange(looser)
@@ -1119,6 +1130,10 @@ export function FeedReal({
               downloaded={downloaded.includes(c.beatmapsetId)}
               onDownloaded={() => setDownloadedTick((n) => n + 1)}
               onSkip={() => handleSkip(c)}
+              feedback={rowMaps.feedbackById.get(c.beatmapId) ?? null}
+              containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
+              onFeedbackChange={rowMaps.onFeedbackChange}
+              onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
             />
           ))}
           <span className="hidden">{downloadedTick}</span>

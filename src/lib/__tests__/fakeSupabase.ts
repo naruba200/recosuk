@@ -1,7 +1,7 @@
 /**
  * Minimal in-memory stand-in for the Supabase JS client, covering
  * exactly the query-builder surface the lists/feedback services
- * use (select/insert/upsert/update/delete + eq/order/single).
+ * use (select/insert/upsert/update/delete + eq/in/order/single/maybeSingle).
  * Lets the M5 service tests run with no network and no real
  * project. Column lists are ignored (full rows come back); RLS is
  * NOT simulated — the services are tested for query shape and
@@ -39,6 +39,7 @@ class FakeQuery implements PromiseLike<QueryResult> {
   private filters: Array<(r: Row) => boolean> = []
   private orderBy: { col: string; ascending: boolean } | null = null
   private wantSingle = false
+  private wantMaybeSingle = false
   private db: FakeDb
   private table: string
 
@@ -80,6 +81,12 @@ class FakeQuery implements PromiseLike<QueryResult> {
     return this
   }
 
+  in(col: string, vals: unknown[]): this {
+    const set = new Set(vals)
+    this.filters.push((r) => set.has(r[col]))
+    return this
+  }
+
   order(col: string, opts?: { ascending?: boolean }): this {
     this.orderBy = { col, ascending: opts?.ascending ?? true }
     return this
@@ -87,6 +94,11 @@ class FakeQuery implements PromiseLike<QueryResult> {
 
   single(): this {
     this.wantSingle = true
+    return this
+  }
+
+  maybeSingle(): this {
+    this.wantMaybeSingle = true
     return this
   }
 
@@ -126,6 +138,10 @@ class FakeQuery implements PromiseLike<QueryResult> {
     switch (this.op) {
       case 'select': {
         const out = this.matched()
+        if (this.wantMaybeSingle) {
+          // maybeSingle: zero rows is null with NO error (no PGRST116).
+          return { data: out.length > 0 ? out[0] : null, error: null }
+        }
         if (this.wantSingle) {
           if (out.length === 0) {
             return { data: null, error: { code: 'PGRST116', message: 'no rows' } }

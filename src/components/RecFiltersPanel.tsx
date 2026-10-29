@@ -1,6 +1,7 @@
 import type { GameMode } from '../lib/mode'
 import type { SkillProfile } from '../lib/skillProfile'
 import { defaultFiltersFor, type RecFilters } from '../lib/recommend'
+import UserTagPicker from './UserTagPicker'
 
 /**
  * The Recommendations filter rail (Stitch markup) with real controlled
@@ -10,7 +11,6 @@ import { defaultFiltersFor, type RecFilters } from '../lib/recommend'
  * profile-derived defaults.
  */
 
-const TAG_CHIPS = ['jumpstream', 'chordjack', 'ln', 'stream', 'technical', 'stamina']
 const KEY_COUNTS = [4, 5, 6, 7, 8]
 
 interface Props {
@@ -31,7 +31,6 @@ export default function RecFiltersPanel({
   appliedCount,
 }: Props) {
   const set = (patch: Partial<RecFilters>) => onDraftChange({ ...draft, ...patch })
-  const tagChips = [...new Set([...profile.playstyleTags, ...TAG_CHIPS])].slice(0, 6)
 
   return (
     <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-space-md bg-surface-container-low p-space-md rounded-lg shadow-md sticky top-20">
@@ -117,29 +116,16 @@ export default function RecFiltersPanel({
         </div>
       )}
 
-      {/* Pattern tags */}
+      {/* User tag (batch 11, part 4): the fixed lazer vocabulary,
+          grouped by category and filtered to this mode. Filtering
+          is server-side via the tag="..." search clause — the old
+          free-text mapper-tag chips + keyword input are gone. */}
       <div className="flex flex-col gap-space-xs">
-        <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Pattern Skillsets</span>
-        <div className="flex flex-wrap gap-1.5">
-          {tagChips.map((tag) => (
-            <button
-              key={tag}
-              className={draft.tagText === tag
-                ? 'px-2.5 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm'
-                : 'px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm transition-colors'}
-              type="button"
-              onClick={() => set({ tagText: draft.tagText === tag ? '' : tag })}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-        <input
-          className="w-full bg-surface-container text-on-surface px-3 py-2 rounded-full font-body-sm text-body-sm focus:outline-none focus:bg-surface-container-highest transition-colors placeholder:text-outline-variant"
-          placeholder="Or type a tag / keyword…"
-          type="text"
-          value={draft.tagText}
-          onChange={(e) => set({ tagText: e.target.value })}
+        <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">User Tag</span>
+        <UserTagPicker
+          mode={mode}
+          value={draft.userTag}
+          onChange={(next) => set({ userTag: next })}
         />
       </div>
 

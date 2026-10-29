@@ -49,7 +49,10 @@ export function ModePills() {
               active
                 ? {
                     backgroundColor: MODE_ACCENTS[m],
-                    color: '#161020',
+                    // Dark surface text on the bright mode accent:
+                    // follows the theme's surface token, not a
+                    // hardcoded stage hex (batch 11 theming audit).
+                    color: 'rgb(var(--c-surface-dim) / 1)',
                     boxShadow: `0 0 14px ${MODE_ACCENTS[m]}73`,
                   }
                 : undefined
@@ -144,7 +147,7 @@ export default function AppShell({
       data-mode={mode}
       style={{ ['--mode-accent' as string]: MODE_ACCENTS[mode] }}
     >
-      <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
+      <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgb(var(--c-shadow)_/_0.4)]">
         <div className="flex flex-col gap-space-md px-space-md">
           <NavLink
             to="/dashboard"
@@ -152,7 +155,7 @@ export default function AppShell({
             aria-label="RecOsuk — go to Dashboard"
             className="flex items-center gap-space-sm px-space-xs pt-space-xs rounded-DEFAULT hover:opacity-90 transition-opacity cursor-pointer"
           >
-            <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgba(255,176,204,0.35)]">
+            <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgb(var(--c-secondary)_/_0.35)]">
               <span className="text-on-secondary font-headline-md text-headline-md leading-none">o!</span>
             </div>
             <div className="flex flex-col">
@@ -199,7 +202,7 @@ export default function AppShell({
                 className={({ isActive }) =>
                   `flex items-center gap-space-sm px-space-md py-2.5 rounded-DEFAULT transition-all ${
                     isActive
-                      ? 'bg-primary-container text-on-primary-container font-semibold shadow-[0_0_14px_rgba(164,118,255,0.35)]'
+                      ? 'bg-primary-container text-on-primary-container font-semibold shadow-[0_0_14px_rgb(var(--c-primary-container)_/_0.35)]'
                       : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
                   }`
                 }
@@ -214,7 +217,7 @@ export default function AppShell({
           <SidebarAuthControl />
           <div className="flex items-center justify-between p-space-sm rounded-DEFAULT bg-surface-container">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#7EE787] animate-pulse"></span>
+              <span className="w-2 h-2 rounded-full bg-hitgreen animate-pulse"></span>
               <span className="font-label-sm text-label-sm text-on-surface-variant">osu! server</span>
             </div>
             <span className="font-label-sm text-label-sm text-on-surface">online</span>
@@ -226,7 +229,7 @@ export default function AppShell({
         </div>
       </aside>
       <div className="pl-[232px]">
-        <header className="fixed top-0 left-[232px] right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-xl z-40 flex items-center justify-between px-space-xl shadow-[0_1px_8px_rgba(0,0,0,0.3)]">
+        <header className="fixed top-0 left-[232px] right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-xl z-40 flex items-center justify-between px-space-xl shadow-[0_1px_8px_rgb(var(--c-shadow)_/_0.3)]">
           <div className="flex items-center gap-space-sm">
             <span className="font-label-sm text-label-sm text-on-surface-variant">Stage context</span>
             <span className="text-outline-variant font-label-sm text-label-sm">/</span>

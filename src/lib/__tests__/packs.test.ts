@@ -57,6 +57,33 @@ describe('normalizePack', () => {
   it('tolerates a list entry without beatmapsets (ids filled by the detail call)', () => {
     expect(normalizePack({ tag: 'P9', name: 'Pack 9' })?.beatmapsetIds).toEqual([])
   })
+
+  it('reads the documented BeatmapPack shape (osu! API docs, BeatmapPack object)', () => {
+    // Every field below is a documented BeatmapPack field; beatmapsets
+    // entries are documented Beatmapset objects (id/artist/title).
+    const pack = normalizePack({
+      author: 'osu!',
+      date: '2025-01-01T00:00:00+00:00',
+      name: 'Beatmap Pack #1234',
+      no_diff_reduction: false,
+      ruleset_id: 0,
+      tag: 'S1234',
+      url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
+      beatmapsets: [
+        { id: 1, artist: 'Artist One', title: 'Title One' },
+        { id: 2, artist: 'Artist Two', title: 'Title Two' },
+      ],
+    })
+    expect(pack?.tag).toBe('S1234')
+    expect(pack?.name).toBe('Beatmap Pack #1234')
+    expect(pack?.url).toBe('https://osu.ppy.sh/beatmaps/packs/S1234')
+    expect(pack?.date).toBe('2025-01-01T00:00:00+00:00')
+    expect(pack?.beatmapsetIds).toEqual([1, 2])
+    expect(pack?.setMeta).toEqual([
+      { id: 1, artist: 'Artist One', title: 'Title One' },
+      { id: 2, artist: 'Artist Two', title: 'Title Two' },
+    ])
+  })
 })
 
 describe('normalizePackList', () => {
@@ -66,6 +93,47 @@ describe('normalizePackList', () => {
     expect(normalizePackList({ packs: raw }).map((p) => p.tag)).toEqual(['A', 'B'])
     expect(normalizePackList({})).toEqual([])
     expect(normalizePackList(null)).toEqual([])
+  })
+
+  it('accepts the documented { beatmap_packs: [...] } shape (GET /beatmaps/packs)', () => {
+    // Regression: the deployed proxy passes osu!'s response through
+    // unchanged, so the list arrives under `beatmap_packs`, not
+    // `packs`. Dropping it left Collections on "osu! returned no
+    // packs" forever. Entries carry the documented BeatmapPack fields.
+    const payload = {
+      beatmap_packs: [
+        {
+          tag: 'S1234',
+          name: 'Beatmap Pack #1234',
+          url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
+          date: '2025-01-01T00:00:00+00:00',
+          author: 'osu!',
+        },
+        { tag: 'S1235', name: 'Beatmap Pack #1235' },
+        null,
+      ],
+    }
+    const packs = normalizePackList(payload)
+    expect(packs.map((p) => p.tag)).toEqual(['S1234', 'S1235'])
+    expect(packs[0]).toMatchObject({
+      name: 'Beatmap Pack #1234',
+      url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
+      date: '2025-01-01T00:00:00+00:00',
+    })
+  })
+
+  it('prefers beatmap_packs over packs when both envelopes are present', () => {
+    const payload = {
+      beatmap_packs: [{ tag: 'REAL', name: 'Real Pack' }],
+      packs: [{ tag: 'STALE', name: 'Stale Pack' }],
+    }
+    expect(normalizePackList(payload).map((p) => p.tag)).toEqual(['REAL'])
+  })
+
+  it('an empty beatmap_packs array is the documented empty result, not a fallback trigger', () => {
+    expect(
+      normalizePackList({ beatmap_packs: [], packs: [{ tag: 'X', name: 'X' }] }),
+    ).toEqual([])
   })
 })
 
@@ -122,6 +190,29 @@ describe('fetchBeatmapPacks caching (item E1)', () => {
     const retried = await fetchBeatmapPacks({ fresh: true })
     expect(retried).toHaveLength(1)
     expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
+  })
+
+  it('fetches through the documented { beatmap_packs } envelope end to end', async () => {
+    mocks.proxyCall.mockResolvedValue({
+      beatmap_packs: [
+        {
+          tag: 'S1234',
+          name: 'Beatmap Pack #1234',
+          url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
+          date: '2025-01-01T00:00:00+00:00',
+        },
+      ],
+    })
+
+    expect(await fetchBeatmapPacks()).toEqual([
+      {
+        tag: 'S1234',
+        name: 'Beatmap Pack #1234',
+        url: 'https://osu.ppy.sh/beatmaps/packs/S1234',
+        date: '2025-01-01T00:00:00+00:00',
+        beatmapsetIds: [],
+      },
+    ])
   })
 })
 

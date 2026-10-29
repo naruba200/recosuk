@@ -78,11 +78,21 @@ describe('buildCandidateQueries', () => {
     expect(queries[0]).toContain('bpm>=')
   })
 
-  it('adds playstyle-tag variants and a user tag-text variant, deduped', () => {
-    const filters = { ...defaultFiltersFor(profile), tagText: 'chordjack' }
+  it('adds playstyle-tag variants, deduped, with no tag clause when no tag is selected', () => {
+    const filters = { ...defaultFiltersFor(profile), userTag: null }
     const queries = buildCandidateQueries(profile, 'mania', filters)
     expect(queries.some((q) => q.startsWith('jumpstream'))).toBe(true)
-    expect(queries.some((q) => q.startsWith('chordjack'))).toBe(true)
+    expect(queries.every((q) => !q.includes('tag="'))).toBe(true)
+    expect(new Set(queries).size).toBe(queries.length)
+  })
+
+  it('appends the tag="..." clause to EVERY query when a user tag is selected', () => {
+    const filters = { ...defaultFiltersFor(profile), userTag: 'style/chordjack' }
+    const queries = buildCandidateQueries(profile, 'mania', filters)
+    expect(queries.length).toBeGreaterThan(1)
+    for (const q of queries) {
+      expect(q).toContain('tag="style/chordjack"')
+    }
     expect(new Set(queries).size).toBe(queries.length)
   })
 })
@@ -141,11 +151,14 @@ describe('applyFilters narrows the pool', () => {
     expect(kept).toEqual([1, 8])
   })
 
-  it('tag text narrows further against tags/title/artist', () => {
-    const kept = applyFilters(pool, { ...filters, tagText: 'jumpstream' }, 'mania').map(
+  it('does NOT narrow client-side by user tag: the tag filter is server-side (tag="..." clause)', () => {
+    // Candidates carry only mapper tags — there is no voted-tags
+    // field to match against. A selected userTag must not drop
+    // candidates here; osu! already filtered upstream.
+    const kept = applyFilters(pool, { ...filters, userTag: 'style/jumpstream' }, 'mania').map(
       (c) => c.beatmapsetId,
     )
-    expect(kept).toEqual([1])
+    expect(kept).toEqual([1, 8])
   })
 
   it('key count filter is ignored outside mania', () => {
