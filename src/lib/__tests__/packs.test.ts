@@ -1,11 +1,23 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+  proxyCall: vi.fn(),
+}))
+
+vi.mock('../osu', () => ({
+  proxyCall: mocks.proxyCall,
+}))
+
 import {
+  fetchBeatmapPacks,
   groupPacks,
   normalizePack,
   normalizePackList,
   packPeriod,
+  PACKS_EMPTY_TTL_MS,
   type BeatmapPack,
 } from '../packs'
+import { dataCache } from '../dataCache'
 
 describe('normalizePack', () => {
   it('reads tag/name/url/date and ids from beatmapsets objects', () => {
@@ -54,6 +66,62 @@ describe('normalizePackList', () => {
     expect(normalizePackList({ packs: raw }).map((p) => p.tag)).toEqual(['A', 'B'])
     expect(normalizePackList({})).toEqual([])
     expect(normalizePackList(null)).toEqual([])
+  })
+})
+
+describe('fetchBeatmapPacks caching (item E1)', () => {
+  beforeEach(() => {
+    dataCache.clear()
+    mocks.proxyCall.mockReset()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-29T00:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('does not serve an empty list from the hour-long cache: it expires after 60s', async () => {
+    expect(PACKS_EMPTY_TTL_MS).toBe(60 * 1000)
+    mocks.proxyCall
+      .mockResolvedValueOnce({ packs: [] })
+      .mockResolvedValueOnce({ packs: [{ tag: 'P1', name: 'Pack One' }] })
+
+    expect(await fetchBeatmapPacks()).toEqual([])
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(1)
+
+    // 30s later the empty entry is still live — no refetch yet.
+    vi.setSystemTime(new Date('2026-10-29T00:00:30Z'))
+    expect(await fetchBeatmapPacks()).toEqual([])
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(1)
+
+    // Past 60s the empty entry is gone: a fresh fetch runs and the
+    // page recovers instead of sitting on the stale empty list.
+    vi.setSystemTime(new Date('2026-10-29T00:01:01Z'))
+    expect(await fetchBeatmapPacks()).toEqual([
+      { tag: 'P1', name: 'Pack One', beatmapsetIds: [] },
+    ])
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
+  })
+
+  it('still caches a non-empty list for the full hour', async () => {
+    mocks.proxyCall.mockResolvedValue({ packs: [{ tag: 'P1', name: 'Pack One' }] })
+
+    await fetchBeatmapPacks()
+    vi.setSystemTime(new Date('2026-10-29T00:30:00Z'))
+    await fetchBeatmapPacks()
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(1)
+  })
+
+  it('fresh: true bypasses even a live empty-cache entry (the Retry button path)', async () => {
+    mocks.proxyCall
+      .mockResolvedValueOnce({ packs: [] })
+      .mockResolvedValueOnce({ packs: [{ tag: 'P1', name: 'Pack One' }] })
+
+    expect(await fetchBeatmapPacks()).toEqual([])
+    const retried = await fetchBeatmapPacks({ fresh: true })
+    expect(retried).toHaveLength(1)
+    expect(mocks.proxyCall).toHaveBeenCalledTimes(2)
   })
 })
 

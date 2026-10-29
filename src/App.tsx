@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from
 import { AuthProvider, useAuth } from './lib/auth'
 import { useGuestStore } from './lib/guestStore'
 import { PreviewRouteStop } from './lib/previewPlayer'
+import DownloadDock from './components/DownloadDock'
 import { readOnboardedFlag, resolveRoute } from './lib/routeGuard'
 import OnboardingWelcome from './screens/OnboardingWelcome'
 import LinkOsu from './screens/LinkOsu'
@@ -216,6 +217,7 @@ export default function App() {
       <AuthProvider>
       <NavigationBridge />
       <PreviewRouteStop />
+      <DownloadDock />
       <Routes>
         <Route path="/onboarding" element={<OnboardingWelcome />} />
         <Route path="/onboarding/link" element={<LinkOsu />} />

@@ -38,6 +38,8 @@ export interface SongCopyRequest {
   artist: string
   title: string
   noVideo?: boolean
+  /** Restrict attempts to one mirror (explicit menu pick). Omitted = Auto order. */
+  mirrorId?: string
 }
 
 export type SongCopyOutcome =
@@ -69,7 +71,67 @@ export interface SongCopyDeps {
   storeDeps?: SongsFolderStoreDeps
 }
 
-async function writeToFolder(
+/** The mirror attempts for one set, in order: per mirror, the
+ * no-video URL first (when requested), then that same mirror's
+ * full-file URL. Mirrors with no no-video variant build identical
+ * URLs for both attempts and appear once. Shared by the
+ * Songs-folder copy and the download queue so both paths try the
+ * mirrors in exactly the same order. */
+export function mirrorAttemptUrls(request: SongCopyRequest): { mirrorId: string; url: string }[] {
+  const fullOrder = request.noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
+  const order = request.mirrorId ? fullOrder.filter((m) => m === request.mirrorId) : fullOrder
+  const attempts: { mirrorId: string; url: string }[] = []
+  for (const mirrorId of order) {
+    const mirror = MIRRORS.find((m) => m.id === mirrorId)
+    if (!mirror) continue
+    const urls = [...new Set([
+      mirror.url(request.beatmapsetId, { noVideo: request.noVideo } satisfies MirrorUrlOptions),
+      mirror.url(request.beatmapsetId, {}),
+    ])]
+    for (const url of urls) attempts.push({ mirrorId, url })
+  }
+  return attempts
+}
+
+export interface FetchedSet {
+  response: Response
+  mirrorId: string
+  url: string
+}
+
+/**
+ * Fetch the .osz from the mirrors in order and return the first
+ * response that answers 2xx, WITHOUT consuming its body — the
+ * caller owns the stream (folder write, queued download, or both
+ * via Response.clone()). Any non-2xx (a 425 Too Early from catboy's
+ * `{id}n` endpoint included) or fetch throw (CORS/network) moves to
+ * the next attempt. Returns null when every attempt fails; the last
+ * error is kept for honest reporting.
+ */
+export async function fetchSetResponse(
+  request: SongCopyRequest,
+  deps: SongCopyDeps = {},
+): Promise<{ fetched: FetchedSet; lastError: string } | { fetched: null; lastError: string }> {
+  const fetchFn = deps.fetchFn ?? globalThis.fetch
+  let lastError = 'all mirrors failed'
+  for (const { mirrorId, url } of mirrorAttemptUrls(request)) {
+    try {
+      const response = await fetchFn(url)
+      if (!response.ok) {
+        lastError = `${mirrorId} answered ${response.status}`
+        continue
+      }
+      return { fetched: { response, mirrorId, url }, lastError }
+    } catch (err) {
+      // CORS blocks and network failures land here: try the next
+      // attempt (same mirror's full file, then the next mirror).
+      lastError = err instanceof Error ? err.message : String(err)
+    }
+  }
+  return { fetched: null, lastError }
+}
+
+export async function writeResponseToFolder(
   handle: FileSystemDirectoryHandle,
   filename: string,
   response: Response,
@@ -99,49 +161,61 @@ async function writeToFolder(
 /**
  * Fetch the .osz from the mirrors in order and write it into the
  * folder handle. Returns 'failed' (never throws) when every mirror
- * fails or the write fails.
- *
- * Fallthrough order (batch 3, item D): for EACH mirror, the no-video
- * URL is tried first when the setting is on, then THAT SAME mirror's
- * full-file URL — any non-2xx (a 425 Too Early from catboy's `{id}n`
- * endpoint included) or fetch throw (CORS/network) moves to the
- * next attempt. Only after a mirror's variants are exhausted does
- * the loop move to the next mirror. Mirrors with no no-video variant
- * build identical URLs for both attempts and are fetched once.
+ * fails or the write fails. The mirror fallthrough lives in
+ * fetchSetResponse (batch 3, item D order preserved).
  */
 export async function copySetToSongsFolder(
   request: SongCopyRequest,
   handle: FileSystemDirectoryHandle,
   deps: SongCopyDeps = {},
 ): Promise<SongCopyOutcome> {
-  const fetchFn = deps.fetchFn ?? globalThis.fetch
-  const order = request.noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
   const filename = songsFolderFilename(request)
-  let lastError = 'all mirrors failed'
-  for (const mirrorId of order) {
-    const mirror = MIRRORS.find((m) => m.id === mirrorId)
-    if (!mirror) continue
-    const urls = [...new Set([
-      mirror.url(request.beatmapsetId, { noVideo: request.noVideo } satisfies MirrorUrlOptions),
-      mirror.url(request.beatmapsetId, {}),
-    ])]
-    for (const url of urls) {
-      try {
-        const response = await fetchFn(url)
-        if (!response.ok) {
-          lastError = `${mirrorId} answered ${response.status}`
-          continue
-        }
-        await writeToFolder(handle, filename, response)
-        return { status: 'copied', mirrorId, filename }
-      } catch (err) {
-        // CORS blocks and network failures land here: try the next
-        // attempt (same mirror's full file, then the next mirror).
-        lastError = err instanceof Error ? err.message : String(err)
-      }
-    }
+  const { fetched, lastError } = await fetchSetResponse(request, deps)
+  if (!fetched) return { status: 'failed', reason: lastError }
+  try {
+    await writeResponseToFolder(handle, filename, fetched.response)
+    return { status: 'copied', mirrorId: fetched.mirrorId, filename }
+  } catch (err) {
+    // A write failure is a folder problem, not a mirror problem:
+    // retrying other mirrors would fetch the same bytes into the
+    // same failing folder. Report it honestly.
+    return { status: 'failed', reason: err instanceof Error ? err.message : String(err) }
   }
-  return { status: 'failed', reason: lastError }
+}
+
+/**
+ * Write an already-fetched response into the stored Songs folder —
+ * the download queue's twin of attemptSongsCopy, minus the picker:
+ * the queue must never pop a folder picker mid-download. When
+ * auto-copy is off, the browser cannot pick folders, or no folder
+ * was stored, the copy is skipped (never fetched twice, never
+ * prompting). Never throws; every outcome is an honest status.
+ * The caller passes a Response.clone() so it can still read the
+ * original stream for the browser save.
+ */
+export async function writeFetchedSetToFolder(
+  request: SongCopyRequest,
+  response: Response,
+  deps: SongCopyDeps = {},
+): Promise<SongCopyOutcome> {
+  if (!getAutoCopy()) return { status: 'skipped', reason: 'auto-copy is off' }
+  if (!isFileSystemAccessSupported()) {
+    return { status: 'skipped', reason: 'this browser cannot pick folders' }
+  }
+  const loadHandle = deps.loadHandle ?? songsFolderStore.loadHandle
+  const ensurePermission = deps.ensurePermission ?? ensureFolderPermission
+  const handle = await loadHandle()
+  if (!handle) return { status: 'skipped', reason: 'no Songs folder chosen' }
+  if (!(await ensurePermission(handle))) {
+    return { status: 'failed', reason: 'Songs folder permission was not granted' }
+  }
+  const filename = songsFolderFilename(request)
+  try {
+    await writeResponseToFolder(handle, filename, response)
+    return { status: 'copied', mirrorId: '', filename }
+  } catch (err) {
+    return { status: 'failed', reason: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 // The user declining the folder picker is remembered for the session

@@ -141,8 +141,14 @@ export function groupPacks(packs: BeatmapPack[]): Record<PackPeriod, BeatmapPack
 
 const PACKS_TTL_MS = 60 * 60 * 1000
 const PACK_DETAIL_TTL_MS = 60 * 60 * 1000
+/** An empty list is almost certainly transient (a busy proxy, a
+ * hiccup upstream) — caching it for the full hour would freeze the
+ * Collections page on "try again in a moment" for up to an hour
+ * with no retry able to help. Empty results get 60s at most. */
+export const PACKS_EMPTY_TTL_MS = 60 * 1000
 
-/** The pack list, cached for an hour (packs change weekly at most). */
+/** The pack list, cached for an hour (packs change weekly at most);
+ * an empty list is cached for 60s only (see PACKS_EMPTY_TTL_MS). */
 export async function fetchBeatmapPacks(opts: { fresh?: boolean } = {}): Promise<BeatmapPack[]> {
   const key = 'packs:list'
   if (!opts.fresh) {
@@ -150,7 +156,7 @@ export async function fetchBeatmapPacks(opts: { fresh?: boolean } = {}): Promise
     if (hit) return hit
   }
   const packs = normalizePackList(await proxyCall<unknown>('getBeatmapPacks', {}))
-  dataCache.set(key, packs, PACKS_TTL_MS)
+  dataCache.set(key, packs, packs.length === 0 ? PACKS_EMPTY_TTL_MS : PACKS_TTL_MS)
   return packs
 }
 

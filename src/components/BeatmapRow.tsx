@@ -133,7 +133,7 @@ export default function BeatmapRow({
             className="w-9 h-9 rounded-full bg-surface-container hover:bg-primary-container hover:text-on-primary-container text-on-surface flex items-center justify-center transition-all shadow-sm"
             title={playing ? 'Pause preview' : 'Preview song'}
             type="button"
-            onClick={() => preview.toggle(c.beatmapsetId)}
+            onClick={() => preview.toggle(c.beatmapsetId, { title: c.title, artist: c.artist, cover: c.cover })}
           >
             <span className="material-symbols-outlined text-[18px]">{playing ? 'pause' : 'play_arrow'}</span>
           </button>

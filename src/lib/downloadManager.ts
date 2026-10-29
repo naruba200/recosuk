@@ -64,6 +64,13 @@ export interface DownloadManagerDeps {
   record?: (seenKeyValue: string, beatmapsetId: number, mirrorId: string) => Promise<void> | void
 }
 
+/** Point a fresh hidden iframe at the URL so the browser's native
+ * downloader takes over. Exported for the download queue's fallback
+ * path (fetch blocked by CORS → hand off, honestly marked). */
+export function startBrowserDownload(url: string): void {
+  defaultStartBrowserDownload(url)
+}
+
 function defaultStartBrowserDownload(url: string): void {
   // A fresh iframe per download: re-setting the same src on a reused
   // frame does not reliably re-trigger a download.

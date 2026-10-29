@@ -162,3 +162,39 @@ body {
 .rounded-DEFAULT {
   border-radius: 1rem;
 }
+
+/* --- Dual-thumb range sliders (Mirror filter drawer, batch 4) --- */
+/* The two range inputs overlap on one track: the inputs themselves
+   ignore pointer events and only their thumbs take them, so both
+   thumbs stay draggable. Thumb fill uses the primary token. */
+.dual-range {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: none;
+  background: transparent;
+  height: 24px;
+  margin: 0;
+}
+.dual-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #d2bbff;
+  border: 2px solid #150f1f;
+  cursor: pointer;
+}
+.dual-range::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #d2bbff;
+  border: 2px solid #150f1f;
+  cursor: pointer;
+}
+.dual-range::-moz-range-track {
+  background: transparent;
+}

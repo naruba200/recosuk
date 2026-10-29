@@ -3,7 +3,7 @@
 // rendered unchanged when the proxy is not configured. The real
 // variant at the bottom wires the search to the osu! API via the
 // proxy, with mode tabs (incl. All) and real mirror download links.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
 import LoadingState from '../components/LoadingState'
@@ -1162,15 +1162,15 @@ function MirrorReal() {
             onClick={() => setDrawerOpen(false)}
           ></div>
           <aside
-            className="absolute right-0 top-0 h-full w-[340px] max-w-[88vw] bg-surface-container-low shadow-xl overflow-y-auto flex flex-col gap-space-md p-space-md"
+            className="absolute right-0 top-0 h-full w-[360px] max-w-[92vw] bg-surface-container-low shadow-xl flex flex-col"
             role="dialog"
             aria-modal="true"
             aria-label="Advanced filters"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between px-space-md py-3 border-b border-surface-container-high flex-shrink-0">
               <div className="flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-primary text-[20px]">tune</span>
-                <h2 className="font-headline-sm text-headline-sm text-on-surface">Advanced filters</h2>
+                <h2 className="font-headline-sm text-headline-sm text-on-surface">Advanced Filters</h2>
               </div>
               <button
                 className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface flex items-center justify-center transition-colors"
@@ -1181,48 +1181,33 @@ function MirrorReal() {
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
-            <div className="flex flex-col gap-space-sm">
-              <label className="flex flex-col gap-1.5">
-                <span className="font-label-md text-label-md text-on-surface font-semibold">Status</span>
-                <select
-                  aria-label="Beatmap status"
-                  className="h-10 px-3 rounded-full bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+            <div className="flex-1 overflow-y-auto px-space-md py-space-md flex flex-col gap-space-lg">
+              <FilterSection title="Status">
+                <ChipGroup
+                  ariaLabel="Beatmap status"
+                  options={MIRROR_STATUSES}
                   value={filters.status}
-                  onChange={(e) => updateFilters({ status: e.target.value as MirrorFilters['status'] })}
-                >
-                  {MIRROR_STATUSES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="font-label-md text-label-md text-on-surface font-semibold">Genre</span>
-                <select
-                  aria-label="Genre"
-                  className="h-10 px-3 rounded-full bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  onChange={(v) => updateFilters({ status: v })}
+                />
+              </FilterSection>
+              <FilterSection title="Genre">
+                <ChipGroup
+                  ariaLabel="Genre"
+                  options={MIRROR_GENRES}
                   value={filters.genre}
-                  onChange={(e) => updateFilters({ genre: Number(e.target.value) })}
-                >
-                  {MIRROR_GENRES.map((g) => (
-                    <option key={g.value} value={g.value}>{g.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="font-label-md text-label-md text-on-surface font-semibold">Language</span>
-                <select
-                  aria-label="Language"
-                  className="h-10 px-3 rounded-full bg-surface-container text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  onChange={(v) => updateFilters({ genre: v })}
+                />
+              </FilterSection>
+              <FilterSection title="Language">
+                <ChipGroup
+                  ariaLabel="Language"
+                  options={MIRROR_LANGUAGES}
                   value={filters.language}
-                  onChange={(e) => updateFilters({ language: Number(e.target.value) })}
-                >
-                  {MIRROR_LANGUAGES.map((l) => (
-                    <option key={l.value} value={l.value}>{l.label}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="flex flex-col gap-1.5">
-                <label className="font-label-md text-label-md text-on-surface font-semibold" htmlFor="mirror-creator">Mapper / creator</label>
+                  onChange={(v) => updateFilters({ language: v })}
+                />
+              </FilterSection>
+              <FilterSection title="Mapper">
+                <label className="font-label-md text-label-md text-on-surface font-semibold sr-only" htmlFor="mirror-creator">Mapper / creator</label>
                 <input
                   id="mirror-creator"
                   className="w-full h-10 px-4 rounded-full bg-surface-container text-on-surface placeholder:text-on-surface-variant/60 font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary transition-all"
@@ -1231,37 +1216,38 @@ function MirrorReal() {
                   value={filters.creator}
                   onChange={(e) => updateFilters({ creator: e.target.value })}
                 />
-              </div>
+              </FilterSection>
+              <FilterSection title="Difficulty">
+                <div className="flex flex-col gap-space-md">
+                  <RangeSlider label="Star rating" range={filters.sr} min={0} max={12} step={0.1} onChange={(r) => updateRange('sr', r)} />
+                  <RangeSlider label="BPM" range={filters.bpm} min={0} max={300} step={1} onChange={(r) => updateRange('bpm', r)} />
+                  <RangeSlider label="Length (minutes)" range={filters.lengthSec} min={0} max={20} step={0.5} displayScale={1 / 60} onChange={(r) => updateRange('lengthSec', r)} />
+                  <RangeSlider label="Approach rate" range={filters.ar} min={0} max={11} step={0.1} onChange={(r) => updateRange('ar', r)} />
+                  <RangeSlider label="Overall difficulty" range={filters.od} min={0} max={11} step={0.1} onChange={(r) => updateRange('od', r)} />
+                  <RangeSlider label="HP drain" range={filters.hp} min={0} max={11} step={0.1} onChange={(r) => updateRange('hp', r)} />
+                  <RangeSlider label="Circle size / keys" range={filters.cs} min={0} max={10} step={1} onChange={(r) => updateRange('cs', r)} />
+                </div>
+              </FilterSection>
+              <p className="font-label-sm text-label-sm text-on-surface-variant">
+                Stat ranges narrow the search on osu! and are re-checked on every result. Genre, language and HP are applied by osu! only.
+              </p>
             </div>
-            <div className="flex flex-col gap-space-md">
-              <RangePair label="Star rating" range={filters.sr} step={0.1} onChange={(r) => updateRange('sr', r)} />
-              <RangePair label="BPM" range={filters.bpm} step={1} onChange={(r) => updateRange('bpm', r)} />
-              <LengthRangePair range={filters.lengthSec} onChange={(r) => updateRange('lengthSec', r)} />
-              <RangePair label="AR" range={filters.ar} step={0.1} onChange={(r) => updateRange('ar', r)} />
-              <RangePair label="OD" range={filters.od} step={0.1} onChange={(r) => updateRange('od', r)} />
-              <RangePair label="HP" range={filters.hp} step={0.1} onChange={(r) => updateRange('hp', r)} />
-              <RangePair label="CS / keys" range={filters.cs} step={1} onChange={(r) => updateRange('cs', r)} />
-            </div>
-            <p className="font-label-sm text-label-sm text-on-surface-variant">
-              Stat ranges narrow the search on osu! and are re-checked on every result. Genre, language and HP are applied by osu! only.
-            </p>
-            <div className="flex flex-col gap-2 pt-space-xs mt-auto">
+            <div className="flex items-center gap-2 px-space-md py-3 border-t border-surface-container-high flex-shrink-0">
               <button
-                className="w-full py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold hover:opacity-95 transition-opacity"
+                className="px-4 py-2.5 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high font-label-md text-label-md transition-colors disabled:opacity-40"
+                type="button"
+                disabled={!filtersActive}
+                onClick={clearFilters}
+              >
+                Clear All
+              </button>
+              <button
+                className="flex-1 py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold hover:opacity-95 transition-opacity"
                 type="button"
                 onClick={() => setDrawerOpen(false)}
               >
-                Show results{filtersActive ? ` (${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'})` : ''}
+                Apply Filters{filtersActive ? ` (${activeFilterCount})` : ''}
               </button>
-              {filtersActive && (
-                <button
-                  className="w-full py-2 rounded-full text-error hover:bg-error-container/30 font-label-sm text-label-sm transition-colors"
-                  type="button"
-                  onClick={clearFilters}
-                >
-                  Clear all filters
-                </button>
-              )}
             </div>
           </aside>
         </div>
@@ -1345,101 +1331,178 @@ function MirrorReal() {
               </div>
             )}
           </div>
-          <div className="rounded-lg bg-surface-container-low p-space-md shadow-md">
-            <h2 className="font-headline-sm text-headline-sm text-on-surface mb-space-sm">Mirror sources</h2>
-            <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Hit the download button on a result and your browser
-              downloads the .osz straight from a community mirror at full
-              speed — RecOsuk hands the file to your browser's download
-              manager and never leaves the page. The official osu! option
-              opens the osu! page and needs your osu! login there.
-            </p>
-          </div>
         </aside>
       </div>
     </div>
   )
 }
 
-function RangePair({
+/** Collapsible filter section in the drawer, BeatConnect-style:
+ * uppercase header + chevron, divider below. Sections start open. */
+function FilterSection({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <section className="border-b border-surface-container-high pb-space-md last:border-b-0">
+      <button
+        className="w-full flex items-center justify-between py-1 text-left"
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="font-label-md text-label-md text-on-surface font-bold uppercase tracking-wider">{title}</span>
+        <span className="material-symbols-outlined text-on-surface-variant text-[18px]">{open ? 'expand_less' : 'expand_more'}</span>
+      </button>
+      {open && <div className="pt-2">{children}</div>}
+    </section>
+  )
+}
+
+/** Single-select chip group: one value at a time, exactly like the
+ * select it replaces. The selected chip is filled + checked. */
+function ChipGroup<T extends string | number>({
+  ariaLabel,
+  options,
+  value,
+  onChange,
+}: {
+  ariaLabel: string
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((opt) => {
+        const selected = opt.value === value
+        return (
+          <button
+            key={String(opt.value)}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-full font-label-md text-label-md transition-colors ${
+              selected
+                ? 'bg-primary text-on-primary font-bold'
+                : 'bg-surface-container text-on-surface-variant hover:text-on-surface'
+            }`}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(opt.value)}
+          >
+            {selected && <span className="material-symbols-outlined text-[14px] leading-none">check</span>}
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Dual-thumb slider row: two overlapping range inputs (see
+ * `.dual-range` in index.css — only the thumbs take pointer
+ * events) over one track, paired with editable min/max value
+ * boxes. Boxes and sliders stay in sync both ways; dragging a
+ * thumb to a domain extreme (or clearing a box) unsets that
+ * bound (null), exactly like the old number-only inputs.
+ * `displayScale` converts stored units to display units (length
+ * is stored in seconds, shown in minutes).
+ */
+function RangeSlider({
   label,
   range,
+  min,
+  max,
   step,
+  displayScale = 1,
   onChange,
 }: {
   label: string
   range: RangeFilter
+  min: number
+  max: number
   step: number
+  displayScale?: number
   onChange: (range: RangeFilter) => void
 }) {
-  const num = (value: string): number | null =>
-    value === '' ? null : Number(value)
+  const toDisplay = (v: number | null): number | null => (v === null ? null : v * displayScale)
+  const fromDisplay = (d: number | null): number | null => (d === null ? null : d / displayScale)
+  const dispMin = toDisplay(range.min)
+  const dispMax = toDisplay(range.max)
+  const sliderMin = dispMin ?? min
+  const sliderMax = dispMax ?? max
+  const fmt = (v: number | null): string =>
+    v === null ? '' : String(Math.round(v * 100) / 100)
+  const parse = (text: string): number | null => {
+    if (text.trim() === '') return null
+    const n = Number(text)
+    return Number.isFinite(n) ? n : null
+  }
+  const normalize = (next: RangeFilter): RangeFilter => {
+    // Extremes mean "unset"; keep min <= max.
+    const lo = next.min !== null && next.min <= min ? null : next.min
+    const hi = next.max !== null && next.max >= max ? null : next.max
+    if (lo !== null && hi !== null && lo > hi) return { min: hi, max: hi }
+    return { min: lo, max: hi }
+  }
+  const setDisplay = (which: 'min' | 'max', text: string) => {
+    const parsed = parse(text)
+    const stored = fromDisplay(parsed)
+    onChange(normalize(which === 'min' ? { ...range, min: stored } : { ...range, max: stored }))
+  }
+  const pct = (v: number): number => ((v - min) / (max - min)) * 100
   return (
     <div className="flex flex-col gap-1">
-      <span className="font-label-md text-label-md text-on-surface font-semibold">{label}</span>
+      <span className="font-label-md text-label-md text-on-surface font-semibold uppercase tracking-wide text-[11px]">{label}</span>
+      <div className="relative h-6 flex items-center">
+        <div className="absolute left-0 right-0 h-1.5 rounded-full bg-surface-container-highest" aria-hidden="true" />
+        <div
+          className="absolute h-1.5 rounded-full bg-primary"
+          style={{ left: `${pct(sliderMin)}%`, right: `${100 - pct(sliderMax)}%` }}
+          aria-hidden="true"
+        />
+        <input
+          className="dual-range absolute inset-0 w-full z-10"
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={sliderMin}
+          aria-label={`${label} minimum`}
+          onChange={(e) => setDisplay('min', e.target.value)}
+        />
+        <input
+          className="dual-range absolute inset-0 w-full z-20"
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={sliderMax}
+          aria-label={`${label} maximum`}
+          onChange={(e) => setDisplay('max', e.target.value)}
+        />
+      </div>
       <div className="flex items-center gap-1.5">
         <input
-          aria-label={`${label} minimum`}
-          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
+          aria-label={`${label} minimum value`}
+          className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-surface-container text-on-surface font-body-md text-body-md text-center focus:outline-none focus:ring-2 focus:ring-primary"
           type="number"
           step={step}
-          min={0}
-          value={range.min ?? ''}
-          onChange={(e) => onChange({ ...range, min: num(e.target.value) })}
+          value={fmt(dispMin)}
+          onChange={(e) => setDisplay('min', e.target.value)}
         />
         <span className="text-on-surface-variant">–</span>
         <input
-          aria-label={`${label} maximum`}
-          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
+          aria-label={`${label} maximum value`}
+          className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-surface-container text-on-surface font-body-md text-body-md text-center focus:outline-none focus:ring-2 focus:ring-primary"
           type="number"
           step={step}
-          min={0}
-          value={range.max ?? ''}
-          onChange={(e) => onChange({ ...range, max: num(e.target.value) })}
+          value={fmt(dispMax)}
+          onChange={(e) => setDisplay('max', e.target.value)}
         />
       </div>
     </div>
   )
 }
 
-function LengthRangePair({
-  range,
-  onChange,
-}: {
-  range: RangeFilter
-  onChange: (range: RangeFilter) => void
-}) {
-  const toMinutes = (sec: number | null): string =>
-    sec === null ? '' : String(Math.round((sec / 60) * 100) / 100)
-  const toSeconds = (value: string): number | null =>
-    value === '' ? null : Number(value) * 60
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="font-label-md text-label-md text-on-surface font-semibold">Length (minutes)</span>
-      <div className="flex items-center gap-1.5">
-        <input
-          aria-label="Length minimum (minutes)"
-          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
-          type="number"
-          step={0.5}
-          min={0}
-          value={toMinutes(range.min)}
-          onChange={(e) => onChange({ ...range, min: toSeconds(e.target.value) })}
-        />
-        <span className="text-on-surface-variant">–</span>
-        <input
-          aria-label="Length maximum (minutes)"
-          className="w-20 h-9 px-3 rounded-full bg-surface-container text-on-surface font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary"
-          type="number"
-          step={0.5}
-          min={0}
-          value={toMinutes(range.max)}
-          onChange={(e) => onChange({ ...range, max: toSeconds(e.target.value) })}
-        />
-      </div>
-    </div>
-  )
-}
 
 export default function Mirror() {
   const { tier, guestSession } = useAuth()

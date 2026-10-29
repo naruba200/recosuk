@@ -350,9 +350,18 @@ function CollectionsReal() {
         </div>
       )}
       {!loading && !error && packs.length === 0 && (
-        <p className="font-body-md text-body-md text-on-surface-variant">
-          osu! returned no packs right now. Try again in a moment.
-        </p>
+        <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            osu! returned no packs right now. Try again in a moment.
+          </p>
+          <button
+            className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
+            type="button"
+            onClick={() => void load(true)}
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       {!loading &&

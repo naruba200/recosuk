@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import { downloadManager } from '../lib/downloadManager'
-import { MIRRORS, mirrorById, recordDownload } from '../lib/mirrors'
+import { useState } from 'react'
+import { MIRRORS, recordDownload } from '../lib/mirrors'
 import { useDownloadSettings } from '../lib/downloadSettings'
-import { attemptSongsCopy } from '../lib/songCopy'
+import { useDownloadQueue } from '../lib/downloadQueue'
 import { modeLabel, type GameMode } from '../lib/mode'
 
 /**
@@ -10,38 +9,26 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * Welcome Recs, Mirror). Behaviour only — the button/menu styling
  * follows the existing row action suite.
  *
- * Downloads are NATIVE browser downloads (QA fix): the button hands
- * the mirror URL to a hidden iframe and the browser's download
- * manager fetches the .osz at full speed. No fetch(), no Blob
- * buffering, and no progress bar — native downloads report no
- * progress to the page, so the UI honestly says "Downloading via
- * your browser…" while the handoff is fresh. The finished state is
- * ICON-ONLY (QA batch 2): the button flips to a checkmark and shows
- * no done-state text at all — the mirror name survives only in the
- * accessible label/title, never as visible copy.
+ * Downloads go through the DOWNLOAD QUEUE (batch 4, item C): the
+ * button enqueues the set and the bottom-right dock window shows
+ * real progress + rate, one file at a time. When the in-app fetch
+ * completes, the file is saved to the machine immediately; when
+ * fetch is blocked (CORS — most mirrors), the queue hands the URL
+ * to the browser's native downloader and marks the row honestly.
+ * The finished state is ICON-ONLY (QA batch 2): the button flips
+ * to a checkmark and shows no done-state text at all.
  *
- * Songs-folder auto-copy (item 8, opt-in): when the setting is on,
- * the button ALSO fetches the file and writes it into the user's
- * picked Songs folder (see lib/songCopy.ts). That copy is
- * best-effort and never blocks the browser download; a failed copy
- * is reported honestly in the transient note, and a successful one
- * is never claimed before the stream actually closes.
+ * Songs-folder auto-copy (opt-in) is handled by the queue worker
+ * from the SAME fetched bytes — never a second fetch (see
+ * lib/downloadQueue.ts).
  *
  * - Main button: Auto (Beatconnect first; catboy first when
- *   no-video is on). The download is recorded on click (success
- *   cannot be observed from the page).
+ *   no-video is on). Enqueued + recorded on click.
  * - Expand menu: pick one mirror, or the official osu! page. The
  *   official option is a plain new-tab link: osu! downloads need an
  *   osu! login session and are not available via the API, so RecOsuk
  *   cannot fetch that file itself.
  */
-
-type CopyState = 'idle' | 'copying' | 'copied' | 'failed'
-
-type ButtonState =
-  | { kind: 'idle' }
-  | { kind: 'downloading'; mirrorId: string; noVideoApplied: boolean; copy: CopyState }
-  | { kind: 'done'; mirrorId: string; noVideoApplied: boolean; copy: CopyState }
 
 interface DownloadButtonProps {
   beatmapsetId: number
@@ -63,71 +50,34 @@ export default function DownloadButton({
   onDownloaded,
 }: DownloadButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [state, setState] = useState<ButtonState>({ kind: 'idle' })
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const copyRunRef = useRef(0)
   const noVideo = useDownloadSettings((s) => s.noVideo)
-  const autoCopy = useDownloadSettings((s) => s.autoCopy)
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    },
-    [],
-  )
+  const enqueue = useDownloadQueue((s) => s.enqueue)
+  // Latest queue item for THIS set drives the button icon; the
+  // dock window owns the detailed progress/copy reporting.
+  const latest = useDownloadQueue((s) => {
+    const mine = s.items.filter((i) => i.beatmapsetId === beatmapsetId)
+    return mine[mine.length - 1]
+  })
 
   const start = (mirrorId?: string, opts: { noVideo?: boolean } = {}) => {
     setMenuOpen(false)
-    if (timerRef.current) clearTimeout(timerRef.current)
-    const effectiveNoVideo = opts.noVideo ?? noVideo
-    const result = downloadManager.startDownload({
+    enqueue({
       beatmapsetId,
-      mirrorId,
+      artist,
+      title,
       seenKeyValue,
-      noVideo: effectiveNoVideo,
-    })
-    const copyRun = ++copyRunRef.current
-    setState({
-      kind: 'downloading',
-      mirrorId: result.mirrorId,
-      noVideoApplied: result.noVideoApplied,
-      copy: autoCopy ? 'copying' : 'idle',
+      mirrorId,
+      noVideo: opts.noVideo ?? noVideo,
     })
     onDownloaded?.()
-    // Songs-folder auto-copy (item 8): best-effort, in addition to
-    // the browser download above. A stale resolution (user clicked
-    // another download meanwhile) must not rewrite the new state.
-    if (autoCopy) {
-      void attemptSongsCopy({ beatmapsetId, artist, title, noVideo: effectiveNoVideo }).then((outcome) => {
-        if (copyRunRef.current !== copyRun) return
-        const copy: CopyState = outcome.status === 'copied' ? 'copied' : outcome.status === 'failed' ? 'failed' : 'idle'
-        setState((prev) =>
-          prev.kind === 'idle' ? prev : { ...prev, copy },
-        )
-      })
-    }
-    // Native downloads give the page no completion signal; resolve to
-    // "done" shortly after the handoff instead of faking progress.
-    // EXCEPTION (batch 3, item D): a no-video download is never
-    // marked done on the iframe handoff alone — catboy's no-video
-    // endpoint has answered 425 (Too Early) in the wild, which the
-    // page cannot detect. It stays in the "handed off" state with
-    // the full-file retry below until the user picks otherwise.
-    timerRef.current = setTimeout(() => {
-      setState((prev) =>
-        prev.kind === 'downloading' && !prev.noVideoApplied
-          ? { kind: 'done', mirrorId: prev.mirrorId, noVideoApplied: prev.noVideoApplied, copy: prev.copy }
-          : prev,
-      )
-    }, 2500)
   }
 
-  // Full-file retry for a no-video attempt (batch 3, item D): normal
-  // mirror order, no-video off. One click from working when the
-  // no-video endpoint refuses the request.
-  const retryFullFile = () => start(undefined, { noVideo: false })
+  // Full-file retry for a no-video attempt handed to the browser
+  // (batch 3, item D): normal mirror order, no-video off. One click
+  // from working when the no-video endpoint refuses the request.
   const showFullFileRetry =
-    noVideo && state.kind !== 'idle' && state.noVideoApplied
+    !!latest && latest.status === 'browser' && latest.noVideo
+  const retryFullFile = () => start(undefined, { noVideo: false })
 
   const openOfficial = () => {
     void recordDownload(seenKeyValue, beatmapsetId, 'official')
@@ -135,36 +85,34 @@ export default function DownloadButton({
     onDownloaded?.()
   }
 
-  // Transient handoff text only. The finished state renders NO
-  // visible text (icon-only, QA batch 2) — the mirror name is kept
-  // in the button's title/aria-label, not in on-screen copy. The one
-  // exception is an honest copy FAILURE note: a failed Songs-folder
-  // copy must be visible, never silently swallowed.
-  const statusNote =
-    state.kind === 'downloading'
-      ? `Downloading via your browser (${mirrorById(state.mirrorId).name}${state.noVideoApplied ? ' · no video' : ''}) — check your downloads${state.copy === 'copying' ? ' · copying to Songs folder…' : state.copy === 'copied' ? ' · copied to Songs folder' : state.copy === 'failed' ? ' · Songs-folder copy failed' : ''}`
-      : state.kind === 'done' && state.copy === 'failed'
-        ? 'Browser download started — the Songs-folder copy failed. Check Settings.'
-        : null
+  const inFlight = latest?.status === 'queued' || latest?.status === 'downloading'
+  const isDone = downloaded || latest?.status === 'done' || latest?.status === 'browser'
+  // The one exception to icon-only: a failed Songs-folder copy must
+  // stay visible (the dock row says it too, but the dock can be
+  // hidden while this row stays on screen).
+  const copyFailedNote =
+    latest?.status === 'done' && latest.copied === 'failed'
+      ? 'Browser download started — the Songs-folder copy failed. Check Settings.'
+      : null
 
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-1.5 relative">
         <button
-          className={`w-9 h-9 rounded-full ${downloaded || state.kind === 'done' ? 'bg-surface-container-highest text-tertiary' : state.kind === 'downloading' ? 'bg-primary text-on-primary' : 'bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface'} flex items-center justify-center transition-all shadow-sm`}
+          className={`w-9 h-9 rounded-full ${isDone ? 'bg-surface-container-highest text-tertiary' : inFlight ? 'bg-primary text-on-primary' : 'bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface'} flex items-center justify-center transition-all shadow-sm`}
           aria-label={
-            state.kind === 'downloading'
-              ? `Download handed to your browser via ${mirrorById(state.mirrorId).name}`
-              : state.kind === 'done'
-                ? `Download requested via ${mirrorById(state.mirrorId).name} — check your browser downloads`
+            inFlight
+              ? 'Download queued — see the download window for progress'
+              : isDone
+                ? 'Download requested — check your browser downloads'
                 : downloaded
                   ? 'Downloaded — click to download again'
                   : 'Download .osz'
           }
           title={
-            state.kind === 'downloading'
-              ? 'Download handed to your browser'
-              : state.kind === 'done'
+            inFlight
+              ? 'Downloading — progress is in the download window'
+              : isDone
                 ? 'Downloaded — open the mirror menu to download again'
                 : downloaded
                   ? 'Downloaded — click to download again'
@@ -174,11 +122,7 @@ export default function DownloadButton({
           onClick={() => start()}
         >
           <span className="material-symbols-outlined text-[18px]">
-            {downloaded || state.kind === 'done'
-              ? 'check_circle'
-              : state.kind === 'downloading'
-                ? 'downloading'
-                : 'download'}
+            {isDone ? 'check_circle' : inFlight ? 'downloading' : 'download'}
           </span>
         </button>
         <button
@@ -226,8 +170,8 @@ export default function DownloadButton({
           </div>
         )}
       </div>
-      {statusNote && (
-        <span className="font-label-sm text-[10px] text-on-surface-variant text-right max-w-48">{statusNote}</span>
+      {copyFailedNote && (
+        <span className="font-label-sm text-[10px] text-on-surface-variant text-right max-w-48">{copyFailedNote}</span>
       )}
       {showFullFileRetry && (
         <button

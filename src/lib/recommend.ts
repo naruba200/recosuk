@@ -182,10 +182,21 @@ export function buildCandidateQueries(
  * training edge (just above the comfort band). Returns null when the
  * set has no difficulty in the mode.
  */
+/** SR/BPM/length window a picked difficulty should satisfy when one exists. */
+export interface DifficultyBounds {
+  srMin: number
+  srMax: number
+  bpmMin: number
+  bpmMax: number
+  lenMinSec: number
+  lenMaxSec: number
+}
+
 export function pickDifficulty(
   set: SearchBeatmapset,
   mode: GameMode,
   profile: SkillProfile,
+  bounds?: DifficultyBounds,
 ): SearchDifficulty | null {
   // A difficulty without a finite star rating cannot be ranked: drop
   // it instead of letting NaN through the sort (NaN bands downstream
@@ -199,11 +210,31 @@ export function pickDifficulty(
   )
   if (inMode.length === 0) return null
   const target = profile.comfortSrMax + 0.2
-  return [...inMode].sort(
-    (a, b) =>
-      Math.abs(a.difficulty_rating - target) - Math.abs(b.difficulty_rating - target) ||
-      b.difficulty_rating - a.difficulty_rating,
-  )[0]
+  const byCloseness = (list: SearchDifficulty[]) =>
+    [...list].sort(
+      (a, b) =>
+        Math.abs(a.difficulty_rating - target) - Math.abs(b.difficulty_rating - target) ||
+        b.difficulty_rating - a.difficulty_rating,
+    )
+  if (!bounds) return byCloseness(inMode)[0]
+  // Prefer a difficulty the player can actually play under the active
+  // filters. The upstream stars/bpm query matches a SET when ANY
+  // difficulty fits, but picking the closest-to-target difficulty
+  // regardless of BPM/length used to nominate an unplayable one and
+  // let applyFilters drop the whole set — entire windows emptied
+  // even though a playable difficulty existed in the same set.
+  // Unknown BPM/length (0/missing) passes, matching the filter rule.
+  const inBounds = (b: SearchDifficulty) => {
+    if (b.difficulty_rating < bounds.srMin || b.difficulty_rating > bounds.srMax) return false
+    const bpm = typeof b.bpm === 'number' && Number.isFinite(b.bpm) ? b.bpm : 0
+    if (bpm > 0 && (bpm < bounds.bpmMin || bpm > bounds.bpmMax)) return false
+    const len =
+      typeof b.total_length === 'number' && Number.isFinite(b.total_length) ? b.total_length : 0
+    if (len > 0 && (len < bounds.lenMinSec || len > bounds.lenMaxSec)) return false
+    return true
+  }
+  const fitting = inMode.filter(inBounds)
+  return byCloseness(fitting.length > 0 ? fitting : inMode)[0]
 }
 
 export function splitTags(raw: string | undefined): string[] {
@@ -219,11 +250,12 @@ export function setToCandidate(
   set: SearchBeatmapset,
   mode: GameMode,
   profile: SkillProfile,
+  bounds?: DifficultyBounds,
 ): RecCandidate | null {
   // Malformed search entries (null set, missing id) are skipped, not
   // dereferenced: a single bad entry used to take down the whole list.
   if (!set || typeof set.id !== 'number') return null
-  const diff = pickDifficulty(set, mode, profile)
+  const diff = pickDifficulty(set, mode, profile, bounds)
   if (!diff) return null
   return {
     beatmapsetId: set.id,
@@ -248,6 +280,29 @@ export function setToCandidate(
     ppPotential: 0,
     reason: '',
   }
+}
+
+/**
+ * One-tap escape from the filtered-out empty state: widen the numeric
+ * ranges (SR ±1★, BPM ±30, length dropped) and regenerate. The tag
+ * and status settings are kept — loosening the ranges is the change
+ * the diagnostic message itself suggests.
+ */
+export function widenRecFilters(filters: RecFilters): RecFilters {
+  return {
+    ...filters,
+    srMin: Math.max(0, Math.round((filters.srMin - 1) * 10) / 10),
+    srMax: Math.round((filters.srMax + 1) * 10) / 10,
+    bpmMin: Math.max(60, filters.bpmMin - 30),
+    bpmMax: filters.bpmMax + 30,
+    lenMinSec: 0,
+    lenMaxSec: 3600,
+  }
+}
+
+/** One-tap escape from the filtered-out empty state: drop only the tag. */
+export function clearRecTag(filters: RecFilters): RecFilters {
+  return { ...filters, tagText: '' }
 }
 
 /** Filters narrow the pool BEFORE scoring (§3) — they never re-sort. */
@@ -515,6 +570,10 @@ export async function generateRecommendations(
     enrichTop?: number
     /** Bypass the search-page cache (explicit Regenerate). */
     fresh?: boolean
+    /** Regenerate once with the seen-set exclusion disabled (the
+     * "Generate anyway" action on the all-seen empty state). The
+     * seen store itself is never touched — this run only. */
+    ignoreSeen?: boolean
   },
 ): Promise<GenerateResult> {
   const queries = buildCandidateQueries(profile, mode, opts.filters)
@@ -540,12 +599,12 @@ export async function generateRecommendations(
 
   const rawSets = bySet.size
   let candidates = [...bySet.values()]
-    .map((set) => setToCandidate(set, mode, profile))
+    .map((set) => setToCandidate(set, mode, profile, opts.filters))
     .filter((c): c is RecCandidate => c !== null)
   const afterPick = candidates.length
   candidates = applyFilters(candidates, opts.filters, mode)
   const afterFilters = candidates.length
-  if (opts.seen) {
+  if (opts.seen && !opts.ignoreSeen) {
     const seen = opts.seen
     candidates = candidates.filter((c) => !isHardSeen(seen, c.beatmapsetId))
   }
@@ -676,7 +735,7 @@ export class FeedSession {
           if (this.servedIds.has(set.id)) continue
           if (isHardSeen(this.seen, set.id) && !this.seen.served.includes(set.id)) continue
           if (this.seen.served.includes(set.id)) continue
-          const candidate = setToCandidate(set, this.mode, this.profile)
+          const candidate = setToCandidate(set, this.mode, this.profile, this.filters)
           if (candidate) fresh.push(candidate)
         }
         this.cursor = result.cursor_string

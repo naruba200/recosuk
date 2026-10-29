@@ -13,9 +13,11 @@ import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profile
 import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import {
+  clearRecTag,
   defaultFiltersFor,
   emptyPoolReason,
   generateRecommendations,
+  widenRecFilters,
   type GenerationDiagnostics,
   type RecCandidate,
   type RecFilters,
@@ -819,7 +821,11 @@ function RecommendationsReal({
   }, [key, data.user.id, mode])
 
   const generate = useCallback(
-    async (nextFilters: RecFilters, nextCount: number, opts: { fresh?: boolean } = {}) => {
+    async (
+      nextFilters: RecFilters,
+      nextCount: number,
+      opts: { fresh?: boolean; includeSeen?: boolean } = {},
+    ) => {
       const run = ++runRef.current
       setBusy(true)
       setError(null)
@@ -830,6 +836,10 @@ function RecommendationsReal({
           filters: nextFilters,
           seen,
           fresh: opts.fresh,
+          // "Generate anyway": this run only — the seen store is
+          // never wiped, so the next normal generation excludes
+          // seen maps again.
+          ignoreSeen: opts.includeSeen,
         })
         if (runRef.current !== run) return
         setItems(result.items)
@@ -957,7 +967,49 @@ function RecommendationsReal({
                   ? emptyPoolReason(diagnostics, filters)
                   : 'No maps in the fetched window match these filters. Loosen the SR/BPM ranges or clear the tag and apply again.'}
               </p>
-              <div className="flex items-center gap-space-sm flex-shrink-0">
+              <div className="flex flex-wrap items-center gap-space-sm flex-shrink-0">
+                {diagnostics && diagnostics.afterPick > 0 && diagnostics.afterFilters === 0 && (
+                  <>
+                    <button
+                      className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
+                      type="button"
+                      title="Widen the SR/BPM/length ranges and generate again with the same tag"
+                      onClick={() => {
+                        const next = widenRecFilters(filters)
+                        setFilters(next)
+                        setDraft(next)
+                        void generate(next, count, { fresh: true })
+                      }}
+                    >
+                      Loosen ranges
+                    </button>
+                    {filters.tagText.trim() && (
+                      <button
+                        className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
+                        type="button"
+                        title="Drop the tag filter and generate again with the same ranges"
+                        onClick={() => {
+                          const next = clearRecTag(filters)
+                          setFilters(next)
+                          setDraft(next)
+                          void generate(next, count, { fresh: true })
+                        }}
+                      >
+                        Clear tag
+                      </button>
+                    )}
+                  </>
+                )}
+                {diagnostics && diagnostics.afterSeen === 0 && diagnostics.afterFilters > 0 && (
+                  <button
+                    className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
+                    type="button"
+                    title="Generate once more including maps you have already seen, downloaded, or skipped — the seen history itself is kept"
+                    onClick={() => void generate(filters, count, { fresh: true, includeSeen: true })}
+                  >
+                    Generate anyway (include seen maps)
+                  </button>
+                )}
                 <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count, { fresh: true })}>Retry</button>
                 <button className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md" type="button" onClick={onBrowseSamples}>Browse sample picks</button>
               </div>

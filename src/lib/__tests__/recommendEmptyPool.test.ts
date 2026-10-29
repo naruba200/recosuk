@@ -32,10 +32,15 @@ vi.mock('../osu', () => ({
 
 import {
   FeedSession,
+  applyFilters,
+  clearRecTag,
   defaultFiltersFor,
   emptyPoolReason,
   generateRecommendations,
   hasKnownBpm,
+  pickDifficulty,
+  setToCandidate,
+  widenRecFilters,
   type SearchBeatmapset,
   type SearchPage,
 } from '../recommend'
@@ -280,5 +285,159 @@ describe('empty-pool diagnostics (item A, WHY reporting)', () => {
     expect(emptyPoolReason(result.diagnostics, defaultFiltersFor(profile))).toContain(
       'already served',
     )
+  })
+})
+
+describe('all-seen pool: "Generate anyway" (item E2)', () => {
+  it('regenerates with seen-filtering disabled for that run only', async () => {
+    mockSearch([testSet({ id: 7 })])
+    const profile = bpmLessProfile()
+    const seen: SeenState = { ...EMPTY_SEEN, served: [7], downloaded: [7], skipped: [7] }
+    const filters = defaultFiltersFor(profile)
+
+    // Normal generation: the all-seen pool stays empty.
+    const normal = await generateRecommendations(profile, 'mania', { count: 20, filters, seen })
+    expect(normal.items).toEqual([])
+    expect(normal.diagnostics.afterSeen).toBe(0)
+
+    // The "Generate anyway" run: same seen state passed in, but the
+    // exclusion is skipped — candidates come back.
+    const anyway = await generateRecommendations(profile, 'mania', {
+      count: 20,
+      filters,
+      seen,
+      ignoreSeen: true,
+    })
+    expect(anyway.items.map((c) => c.beatmapsetId)).toEqual([7])
+    expect(anyway.diagnostics.afterSeen).toBe(1)
+
+    // The seen state itself was never mutated by either run.
+    expect(seen.served).toEqual([7])
+  })
+
+  it('still excludes seen maps on normal generations (no leakage from the anyway run)', async () => {
+    mockSearch([testSet({ id: 7 }), testSet({ id: 8 })])
+    const profile = bpmLessProfile()
+    const seen: SeenState = { ...EMPTY_SEEN, served: [7] }
+    const filters = defaultFiltersFor(profile)
+
+    await generateRecommendations(profile, 'mania', { count: 20, filters, seen, ignoreSeen: true })
+    const normal = await generateRecommendations(profile, 'mania', { count: 20, filters, seen })
+    expect(normal.items.map((c) => c.beatmapsetId)).toEqual([8])
+  })
+})
+
+describe('filter-aware difficulty pick (Retry-loop fix)', () => {
+  // A set whose closest-to-target difficulty is unplayable under the
+  // active BPM window while another difficulty in the same set fits.
+  // Picking blindly nominated the unplayable one and applyFilters
+  // dropped the whole set — "101 sets came back, every one filtered
+  // out", and Retry (same deterministic queries) looped forever.
+  function twoDiffSet(): SearchBeatmapset {
+    return testSet({
+      beatmaps: [
+        {
+          id: 10,
+          mode: 'mania',
+          version: '7K',
+          difficulty_rating: 4.6,
+          bpm: 250,
+          total_length: 120,
+          cs: 7,
+          ar: 9,
+          od: 8,
+        },
+        {
+          id: 11,
+          mode: 'mania',
+          version: '7K EX',
+          difficulty_rating: 5.4,
+          bpm: 150,
+          total_length: 120,
+          cs: 7,
+          ar: 9,
+          od: 8,
+        },
+      ],
+    })
+  }
+
+  const BOUNDS = { srMin: 3, srMax: 6, bpmMin: 60, bpmMax: 180, lenMinSec: 0, lenMaxSec: 600 }
+
+  it('prefers a difficulty inside the BPM window over a closer-SR one outside it', () => {
+    const profile = bpmLessProfile()
+    expect(pickDifficulty(twoDiffSet(), 'mania', profile)?.id).toBe(10)
+    expect(pickDifficulty(twoDiffSet(), 'mania', profile, BOUNDS)?.id).toBe(11)
+  })
+
+  it('falls back to the closest difficulty when none fits the window', () => {
+    const profile = bpmLessProfile()
+    const narrow = { ...BOUNDS, bpmMin: 60, bpmMax: 100 }
+    expect(pickDifficulty(twoDiffSet(), 'mania', profile, narrow)?.id).toBe(10)
+  })
+
+  it('nominates the in-window difficulty so the set survives filtering', async () => {
+    const profile = bpmLessProfile()
+    const filters = {
+      ...defaultFiltersFor(profile),
+      srMin: 3,
+      srMax: 6,
+      bpmMin: 60,
+      bpmMax: 180,
+      lenMinSec: 0,
+      lenMaxSec: 600,
+      tagText: '',
+    }
+    const blind = setToCandidate(twoDiffSet(), 'mania', profile)
+    expect(blind?.bpm).toBe(250)
+    expect(applyFilters(blind ? [blind] : [], filters, 'mania')).toEqual([])
+    const picked = setToCandidate(twoDiffSet(), 'mania', profile, filters)
+    expect(picked?.bpm).toBe(150)
+    expect(applyFilters(picked ? [picked] : [], filters, 'mania')).toHaveLength(1)
+  })
+
+  it('generates the set end-to-end when a playable difficulty exists in-window', async () => {
+    mockSearch([twoDiffSet()])
+    const profile = bpmLessProfile()
+    const filters = {
+      ...defaultFiltersFor(profile),
+      srMin: 3,
+      srMax: 6,
+      bpmMin: 60,
+      bpmMax: 180,
+      lenMinSec: 0,
+      lenMaxSec: 600,
+      tagText: '',
+    }
+    const result = await generateRecommendations(profile, 'mania', {
+      count: 20,
+      filters,
+      seen: EMPTY_SEEN,
+    })
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0].bpm).toBe(150)
+  })
+
+  it('widenRecFilters widens ranges and keeps the tag; clearRecTag drops only the tag', () => {
+    const base = {
+      ...defaultFiltersFor(bpmLessProfile()),
+      srMin: 4,
+      srMax: 5,
+      bpmMin: 150,
+      bpmMax: 190,
+      lenMinSec: 60,
+      lenMaxSec: 300,
+      tagText: 'piano',
+    }
+    const widened = widenRecFilters(base)
+    expect(widened.srMin).toBe(3)
+    expect(widened.srMax).toBe(6)
+    expect(widened.bpmMin).toBe(120)
+    expect(widened.bpmMax).toBe(220)
+    expect(widened.lenMinSec).toBe(0)
+    expect(widened.lenMaxSec).toBe(3600)
+    expect(widened.tagText).toBe('piano')
+    expect(clearRecTag(base).tagText).toBe('')
+    expect(clearRecTag(base).srMin).toBe(4)
   })
 })
