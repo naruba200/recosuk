@@ -15,13 +15,16 @@ import { MODE_LABELS } from '../lib/mode'
 import {
   clearRecTag,
   defaultFiltersFor,
+  emptyGenerationResume,
   emptyPoolReason,
   generateRecommendations,
   widenRecFilters,
   type GenerationDiagnostics,
+  type GenerationResume,
   type RecCandidate,
   type RecFilters,
 } from '../lib/recommend'
+import { FeedReal } from './RecommendationsUnlimited'
 import { seenKey, seenStore } from '../lib/seenStore'
 import { useAuth } from '../lib/auth'
 
@@ -796,17 +799,27 @@ function RecommendationsDemo() {
 function RecommendationsReal({
   data,
   onBrowseSamples,
+  filters,
+  draft,
+  onFiltersChange,
+  onDraftChange,
+  resumeRef,
 }: {
   data: ProfileData
   onBrowseSamples: () => void
+  filters: RecFilters
+  draft: RecFilters
+  onFiltersChange: (next: RecFilters) => void
+  onDraftChange: (next: RecFilters) => void
+  /** Resume state owned by the page gate, so switching to the
+   * Endless view and back does not restart the Generated window. */
+  resumeRef: { current: { sig: string; resume: GenerationResume } | null }
 }) {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
   const [count, setCount] = useState(30)
-  const [filters, setFilters] = useState<RecFilters>(() => defaultFiltersFor(profile))
-  const [draft, setDraft] = useState<RecFilters>(filters)
   const [items, setItems] = useState<RecCandidate[]>([])
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null)
@@ -829,6 +842,16 @@ function RecommendationsReal({
       const run = ++runRef.current
       setBusy(true)
       setError(null)
+      // Resume key: mode + profile identity + the applied filters.
+      // A changed key (mode/profile/filter change, Loosen/Clear)
+      // restarts from page 1; a matching key continues through the
+      // next search window instead of re-querying page 1 (batch 5,
+      // item A). `fresh` restarts too — the engine ignores the
+      // resume on a fresh run.
+      const sig = `${key}:${mode}:${profile.pp}:${profile.comfortSrMin}:${profile.comfortSrMax}:${profile.srCeiling}:${profile.bpmSweetMin}:${profile.bpmSweetMax}:${(profile.playstyleTags ?? []).join(',')}:${JSON.stringify(nextFilters)}`
+      if (resumeRef.current?.sig !== sig) {
+        resumeRef.current = { sig, resume: emptyGenerationResume() }
+      }
       try {
         const seen = seenStore.load(key)
         const result = await generateRecommendations(profile, mode, {
@@ -836,12 +859,14 @@ function RecommendationsReal({
           filters: nextFilters,
           seen,
           fresh: opts.fresh,
+          resume: resumeRef.current.resume,
           // "Generate anyway": this run only — the seen store is
           // never wiped, so the next normal generation excludes
           // seen maps again.
           ignoreSeen: opts.includeSeen,
         })
         if (runRef.current !== run) return
+        resumeRef.current = { sig, resume: result.nextResume }
         setItems(result.items)
         setTotalMatched(result.totalMatched)
         setDiagnostics(result.diagnostics)
@@ -863,13 +888,23 @@ function RecommendationsReal({
   // (Re)generate when the profile/mode lands or changes. The old
   // mode's rows are cleared first (item 5): showing them as if
   // current while the new mode generates would be stale data.
+  // On first mount the shared filters are adopted as-is (they may
+  // already carry the user's choices from the Endless feed view) —
+  // only a real profile/mode change resets them to the defaults.
+  const genSigRef = useRef<string | null>(null)
   useEffect(() => {
-    const fresh = defaultFiltersFor(profile)
-    setFilters(fresh)
-    setDraft(fresh)
+    const sig = `${data.user.id}:${mode}:${profile.pp}:${profile.comfortSrMin}:${profile.comfortSrMax}`
+    if (genSigRef.current === sig) return
+    const firstMount = genSigRef.current === null
+    genSigRef.current = sig
+    const start = firstMount ? filters : defaultFiltersFor(profile)
+    if (!firstMount) {
+      onFiltersChange(start)
+      onDraftChange(start)
+    }
     setItems([])
     setTotalMatched(null)
-    void generate(fresh, count)
+    void generate(start, count)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, mode])
 
@@ -924,8 +959,8 @@ function RecommendationsReal({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start mt-space-sm">
         <RecFiltersPanel
           draft={draft}
-          onDraftChange={setDraft}
-          onApply={() => { setFilters(draft); void generate(draft, count) }}
+          onDraftChange={onDraftChange}
+          onApply={() => { onFiltersChange(draft); void generate(draft, count) }}
           profile={profile}
           mode={mode}
           appliedCount={items.length}
@@ -976,8 +1011,8 @@ function RecommendationsReal({
                       title="Widen the SR/BPM/length ranges and generate again with the same tag"
                       onClick={() => {
                         const next = widenRecFilters(filters)
-                        setFilters(next)
-                        setDraft(next)
+                        onFiltersChange(next)
+                        onDraftChange(next)
                         void generate(next, count, { fresh: true })
                       }}
                     >
@@ -990,8 +1025,8 @@ function RecommendationsReal({
                         title="Drop the tag filter and generate again with the same ranges"
                         onClick={() => {
                           const next = clearRecTag(filters)
-                          setFilters(next)
-                          setDraft(next)
+                          onFiltersChange(next)
+                          onDraftChange(next)
                           void generate(next, count, { fresh: true })
                         }}
                       >
@@ -1008,6 +1043,19 @@ function RecommendationsReal({
                     onClick={() => void generate(filters, count, { fresh: true, includeSeen: true })}
                   >
                     Generate anyway (include seen maps)
+                  </button>
+                )}
+                {diagnostics?.windowExhausted && (
+                  <button
+                    className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md"
+                    type="button"
+                    title="You have paged through every window these filters return — start again from the first window"
+                    onClick={() => {
+                      resumeRef.current = null
+                      void generate(filters, count, { fresh: true })
+                    }}
+                  >
+                    Start over from the beginning
                   </button>
                 )}
                 <button className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={() => void generate(filters, count, { fresh: true })}>Retry</button>
@@ -1039,6 +1087,17 @@ export default function Recommendations() {
   // "Continue with demo": when generation itself fails, the user can
   // still browse the sample picks instead of staring at an error.
   const [showDemo, setShowDemo] = useState(false)
+  // Batch 5, item B: the feed switch lives ON this page, not in a
+  // floating toggle — "Batches" (Generated, fixed top-N per window)
+  // vs "Endless feed" (FeedSession, loads more as you scroll). Both
+  // views share the same mode + filters state, lifted here.
+  const [view, setView] = useState<'generated' | 'endless'>('generated')
+  const [filtersState, setFiltersState] = useState<RecFilters | null>(null)
+  const [draftState, setDraftState] = useState<RecFilters | null>(null)
+  // Generated-mode resume state (batch 5, item A), owned here so
+  // switching views does not restart the window: keyed by mode +
+  // profile identity + applied filters inside generate().
+  const generationResumeRef = useRef<{ sig: string; resume: GenerationResume } | null>(null)
 
   if (showDemo) {
     return (
@@ -1068,6 +1127,9 @@ export default function Recommendations() {
   }
   if ((status !== 'ready' && status !== 'empty') || !data) return <RecommendationsDemo />
 
+  const sharedFilters = filtersState ?? defaultFiltersFor(data.skillProfile)
+  const sharedDraft = draftState ?? sharedFilters
+
   return (
     <AppShell
       identity={{
@@ -1078,7 +1140,57 @@ export default function Recommendations() {
         tierLabel: tier === 'account' ? 'account' : 'guest',
       }}
     >
-      <RecommendationsReal data={data} onBrowseSamples={() => setShowDemo(true)} />
+      <div className="flex items-center gap-space-sm px-space-xl pt-space-md">
+        <div className="flex items-center bg-surface-container-high rounded-full p-0.5" role="tablist" aria-label="Recommendation view">
+          <button
+            role="tab"
+            aria-selected={view === 'generated'}
+            className={view === 'generated'
+              ? 'px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all'
+              : 'px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors'}
+            type="button"
+            onClick={() => setView('generated')}
+          >
+            Batches
+          </button>
+          <button
+            role="tab"
+            aria-selected={view === 'endless'}
+            className={view === 'endless'
+              ? 'px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all'
+              : 'px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors'}
+            type="button"
+            onClick={() => setView('endless')}
+          >
+            Endless feed
+          </button>
+        </div>
+        <span className="font-label-sm text-label-sm text-on-surface-variant">
+          {view === 'generated'
+            ? 'A fixed batch from each search window — Generate again for the next window.'
+            : 'Loads more as you scroll — ordered for you as it loads.'}
+        </span>
+      </div>
+      {view === 'generated' ? (
+        <RecommendationsReal
+          data={data}
+          onBrowseSamples={() => setShowDemo(true)}
+          filters={sharedFilters}
+          draft={sharedDraft}
+          onFiltersChange={setFiltersState}
+          onDraftChange={setDraftState}
+          resumeRef={generationResumeRef}
+        />
+      ) : (
+        <FeedReal
+          data={data}
+          onBrowseSamples={() => setShowDemo(true)}
+          filters={sharedFilters}
+          draft={sharedDraft}
+          onFiltersChange={setFiltersState}
+          onDraftChange={setDraftState}
+        />
+      )}
     </AppShell>
   )
 }

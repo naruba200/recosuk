@@ -70,6 +70,9 @@ export interface RecCandidate {
   version: string
   cover?: string
   sr: number
+  /** Lowest/highest star rating across the set's in-mode difficulties. */
+  srMin: number
+  srMax: number
   bpm: number
   lengthSec: number
   cs: number
@@ -246,6 +249,41 @@ export function splitTags(raw: string | undefined): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Skillset-vocabulary tags only, for the row chips (batch 5, item C).
+ * Whole-token, case-insensitive match against a fixed vocabulary —
+ * a tag not in this list is simply not shown, and no meaning is
+ * invented for unknown tags. Compound forms jumpstream/chordjack
+ * are included because they ARE the skillset names mappers use
+ * (a stream of jumps / a jack of chords), alongside the plain
+ * stream/jump/jack/chord forms. Order is the set's tag order,
+ * capped at 4, duplicates dropped.
+ */
+const SKILLSET_TAG_VOCABULARY = new Set([
+  'stream', 'streams', 'jump', 'jumps', 'jumpstream',
+  'aim', 'tech', 'technical', 'stamina', 'speed', 'precision',
+  'reading', 'burst', 'bursts', 'slider', 'sliders',
+  'jack', 'jacks', 'chordjack', 'chord', 'chords',
+  'ln', 'longnote', 'longnotes', 'rice', 'hybrid', 'swing',
+  'flow', 'snap', 'alt', 'alternate', 'singletap', 'singletaps',
+  'accuracy', 'control', 'movement', 'fingercontrol',
+])
+
+export function essentialTags(tags: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of tags) {
+    // Normalise separators so finger-control / single-tap / long-note
+    // match the same vocabulary entries as their joined forms.
+    const tag = raw.toLowerCase().replace(/[-_]/g, '').trim()
+    if (!SKILLSET_TAG_VOCABULARY.has(tag) || seen.has(tag)) continue
+    seen.add(tag)
+    out.push(tag)
+    if (out.length >= 4) break
+  }
+  return out
+}
+
 export function setToCandidate(
   set: SearchBeatmapset,
   mode: GameMode,
@@ -257,6 +295,19 @@ export function setToCandidate(
   if (!set || typeof set.id !== 'number') return null
   const diff = pickDifficulty(set, mode, profile, bounds)
   if (!diff) return null
+  // SR range across the set's in-mode difficulties (same in-mode
+  // list pickDifficulty uses, independent of the picked difficulty
+  // and of any bounds): a set with 2.1★–6.8★ diffs must not be
+  // presented as a single SR value.
+  const inModeSrs = (set.beatmaps ?? [])
+    .filter(
+      (b) =>
+        b &&
+        b.mode === mode &&
+        typeof b.difficulty_rating === 'number' &&
+        Number.isFinite(b.difficulty_rating),
+    )
+    .map((b) => b.difficulty_rating)
   return {
     beatmapsetId: set.id,
     beatmapId: diff.id,
@@ -266,6 +317,8 @@ export function setToCandidate(
     version: diff.version ?? '',
     cover: set.covers?.card ?? set.covers?.cover,
     sr: diff.difficulty_rating,
+    srMin: inModeSrs.length > 0 ? Math.min(...inModeSrs) : diff.difficulty_rating,
+    srMax: inModeSrs.length > 0 ? Math.max(...inModeSrs) : diff.difficulty_rating,
     bpm: diff.bpm ?? set.beatmaps?.[0]?.bpm ?? 0,
     lengthSec: diff.total_length ?? 0,
     cs: diff.cs ?? 0,
@@ -523,6 +576,8 @@ export interface GenerationDiagnostics {
   afterFilters: number
   afterSeen: number
   bpmUnknown: boolean
+  /** True when every query's cursor is spent — no further window exists. */
+  windowExhausted: boolean
 }
 
 export interface GenerateResult {
@@ -530,6 +585,24 @@ export interface GenerateResult {
   totalMatched: number | null
   poolSize: number
   diagnostics: GenerationDiagnostics
+  /** Resume state for the NEXT window: pass back as `resume` to continue. */
+  nextResume: GenerationResume
+}
+
+/**
+ * Explicit, testable resume state for Generated-mode paging (batch 5,
+ * item A). Per-query cursors: an absent key means the query was never
+ * fetched, a null value means its cursor is spent. Deliberately NOT
+ * module-global mutable state — the caller owns it in a ref keyed by
+ * the profile+mode+filters signature, so a signature change restarts
+ * from page 1 and tests can drive successive windows directly.
+ */
+export interface GenerationResume {
+  cursors: Record<string, string | null>
+}
+
+export function emptyGenerationResume(): GenerationResume {
+  return { cursors: {} }
 }
 
 /**
@@ -574,15 +647,30 @@ export async function generateRecommendations(
      * "Generate anyway" action on the all-seen empty state). The
      * seen store itself is never touched — this run only. */
     ignoreSeen?: boolean
+    /** Resume state from the previous window (see GenerationResume).
+     * Ignored when `fresh` is set — a fresh run always restarts
+     * from page 1. */
+    resume?: GenerationResume
   },
 ): Promise<GenerateResult> {
   const queries = buildCandidateQueries(profile, mode, opts.filters)
   const bySet = new Map<number, SearchBeatmapset>()
   let totalMatched: number | null = null
 
+  // Resume from the previous window's cursors; `fresh` restarts.
+  const startCursors: Record<string, string | null> = opts.fresh
+    ? {}
+    : { ...(opts.resume?.cursors ?? {}) }
+  const nextCursors: Record<string, string | null> = { ...startCursors }
   for (const query of queries) {
     if (bySet.size >= 150) break
-    let cursor: string | null | undefined = undefined
+    // NB: `?? undefined` would collapse a stored null (spent query)
+    // back to undefined and re-fetch page 1 — read the key directly.
+    const stored = startCursors[query]
+    let cursor: string | null | undefined = stored === undefined ? undefined : stored
+    // A null cursor means this query's pages are spent: skip it so a
+    // later window never re-fetches (and re-serves) the first pages.
+    if (cursor === null) continue
     for (let page = 0; page < 2; page++) {
       const result = await fetchSearchPage(query, mode, cursor, { fresh: opts.fresh })
       if (totalMatched === null && typeof result.total === 'number') {
@@ -595,7 +683,9 @@ export async function generateRecommendations(
       cursor = result.cursor_string
       if (!cursor) break
     }
+    nextCursors[query] = cursor ?? null
   }
+  const windowExhausted = queries.every((q) => nextCursors[q] === null)
 
   const rawSets = bySet.size
   let candidates = [...bySet.values()]
@@ -616,6 +706,7 @@ export async function generateRecommendations(
     afterFilters,
     afterSeen: poolSize,
     bpmUnknown: !hasKnownBpm(profile),
+    windowExhausted,
   }
 
   const playedSetIds = new Set(opts.seen?.played ?? [])
@@ -647,7 +738,13 @@ export async function generateRecommendations(
     ranked = [...enriched, ...ranked.slice(enrichN)]
   }
 
-  return { items: ranked.slice(0, opts.count), totalMatched, poolSize, diagnostics }
+  return {
+    items: ranked.slice(0, opts.count),
+    totalMatched,
+    poolSize,
+    diagnostics,
+    nextResume: { cursors: nextCursors },
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { GameMode } from '../lib/mode'
 import type { RecCandidate } from '../lib/recommend'
-import { formatLength, modeTagLabel } from '../lib/recommend'
+import { essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
 import { usePreviewPlayer } from '../lib/previewPlayer'
 import { useCapabilities } from '../lib/capabilities'
 import LockedButton from './LockedButton'
@@ -83,7 +83,12 @@ export default function BeatmapRow({
           <div className="flex flex-wrap items-center gap-space-xs mb-0.5">
             <span className="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
               <span className="material-symbols-outlined text-[13px] leading-none">star</span>
-              {c.sr.toFixed(2)}★
+              {/* SR range across the set's in-mode difficulties
+                  (batch 5, item C): a set is not one difficulty.
+                  Single value when every in-mode diff shares one SR. */}
+              {c.srMin < c.srMax
+                ? `${c.srMin.toFixed(2)}★ – ${c.srMax.toFixed(2)}★`
+                : `${c.sr.toFixed(2)}★`}
             </span>
             <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">{c.title}</h3>
             <span className="text-on-surface-variant font-body-sm text-body-sm">by {c.artist}</span>
@@ -110,7 +115,10 @@ export default function BeatmapRow({
               <span className="material-symbols-outlined text-[14px]">person</span>
               <span>mapped by {c.creator}</span>
             </div>
-            {c.tags.slice(0, 3).map((tag) => (
+            {/* Skillset-vocabulary tags only (batch 5, item C) —
+                raw mapper tags (song/series/meme tags) are not
+                shown; no chips at all when none match. */}
+            {essentialTags(c.tags).map((tag) => (
               <span key={tag} className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px]">{tag}</span>
             ))}
           </div>

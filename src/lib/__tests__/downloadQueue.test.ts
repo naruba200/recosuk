@@ -5,6 +5,7 @@ import {
   useDownloadQueue,
 } from '../downloadQueue'
 import { useDownloadSettings } from '../downloadSettings'
+import { CHUNKED_MIN_BYTES } from '../songCopy'
 
 function chunkResponse(chunks: Uint8Array[], total?: number): Response {
   const headers = {
@@ -99,7 +100,7 @@ afterEach(() => {
 
 describe('download queue (batch 4, item C)', () => {
   it('fetches in mirror order, reports progress + rate, and saves the blob on completion', async () => {
-    const fetchFn = vi.fn(async (_url: string) => chunkResponse([new Uint8Array([1, 2]), new Uint8Array([3])], 3))
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => chunkResponse([new Uint8Array([1, 2]), new Uint8Array([3])], 3))
     const saveFile = vi.fn()
     configureDownloadQueue({
       fetchFn: fetchFn as unknown as typeof fetch,
@@ -115,8 +116,13 @@ describe('download queue (batch 4, item C)', () => {
     expect(item.downloadedBytes).toBe(3)
     expect(item.totalBytes).toBe(3)
     expect(item.mirrorIdUsed).toBe('beatconnect')
-    expect(fetchFn).toHaveBeenCalledTimes(1)
+    // Batch 5, item D: the chunked probe adds one HEAD before the
+    // GET of the same attempt URL (the mock answers no ranges, so
+    // the plain single-stream fetch runs).
+    expect(fetchFn).toHaveBeenCalledTimes(2)
     expect(fetchFn.mock.calls[0][0]).toBe('https://beatconnect.io/b/42')
+    expect(fetchFn.mock.calls[0][1]).toMatchObject({ method: 'HEAD' })
+    expect(fetchFn.mock.calls[1][0]).toBe('https://beatconnect.io/b/42')
     expect(saveFile).toHaveBeenCalledTimes(1)
     expect((saveFile.mock.calls[0][0] as Blob).size).toBe(3)
     expect(saveFile.mock.calls[0][1]).toBe('42 Camellia - Exit This Earth.osz')
@@ -124,9 +130,13 @@ describe('download queue (batch 4, item C)', () => {
 
   it('processes items sequentially, in enqueue order', async () => {
     const order: number[] = []
-    const fetchFn = vi.fn(async (url: string) => {
-      const id = Number(/\/b\/(\d+)/.exec(url)?.[1] ?? /\/d\/(\d+)/.exec(url)?.[1])
-      order.push(id)
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      // Count GETs only: the batch-5 chunked HEAD probe precedes
+      // each attempt's GET with the same URL.
+      if ((init?.method ?? 'GET') === 'GET') {
+        const id = Number(/\/b\/(\d+)/.exec(url)?.[1] ?? /\/d\/(\d+)/.exec(url)?.[1])
+        order.push(id)
+      }
       return chunkResponse([new Uint8Array([1])], 1)
     })
     configureDownloadQueue({
@@ -146,8 +156,10 @@ describe('download queue (batch 4, item C)', () => {
 
   it('falls through no-video → full file → next mirror on 425/throws, in the shared order', async () => {
     const seen: string[] = []
-    const fetchFn = vi.fn(async (url: string) => {
-      seen.push(url)
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      // Record GETs only: the batch-5 chunked HEAD probe precedes
+      // each attempt with the same URL.
+      if ((init?.method ?? 'GET') === 'GET') seen.push(url)
       if (url.endsWith('/d/42n')) return { ok: false, status: 425 } as unknown as Response
       if (url.includes('sayobot')) return chunkResponse([new Uint8Array([7])], 1)
       throw new Error('CORS blocked')
@@ -193,7 +205,7 @@ describe('download queue (batch 4, item C)', () => {
   })
 
   it('cancelling a queued item skips it without fetching', async () => {
-    const fetchFn = vi.fn(async (_url: string) => chunkResponse([new Uint8Array([1])], 1))
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => chunkResponse([new Uint8Array([1])], 1))
     configureDownloadQueue({
       fetchFn: fetchFn as unknown as typeof fetch,
       saveFile: () => {},
@@ -206,12 +218,17 @@ describe('download queue (batch 4, item C)', () => {
 
     expect(useDownloadQueue.getState().items.find((i) => i.id === second)?.status).toBe('cancelled')
     expect(useDownloadQueue.getState().items.find((i) => i.id === first)?.status).toBe('done')
-    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['https://beatconnect.io/b/1'])
+    // GETs only: the batch-5 chunked HEAD probe precedes the GET.
+    expect(
+      fetchFn.mock.calls
+        .filter((c) => ((c[1] as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+        .map((c) => c[0]),
+    ).toEqual(['https://beatconnect.io/b/1'])
   })
 
   it('writes the Songs-folder copy from the SAME fetched bytes (one fetch) when auto-copy is on', async () => {
     const { handle, written } = mockHandle()
-    const fetchFn = vi.fn(async () => chunkResponse([new Uint8Array([9, 9])], 2))
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => chunkResponse([new Uint8Array([9, 9])], 2))
     const g = globalThis as unknown as Record<string, unknown>
     g.showDirectoryPicker = () => {}
     useDownloadSettings.setState({ autoCopy: true })
@@ -229,7 +246,12 @@ describe('download queue (batch 4, item C)', () => {
     await waitForIdle()
 
     const [item] = useDownloadQueue.getState().items
-    expect(fetchFn).toHaveBeenCalledTimes(1)
+    // One mirror attempt: the batch-5 chunked HEAD probe plus the
+    // one GET whose body feeds BOTH the save and the folder copy.
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(
+      fetchFn.mock.calls.filter((c) => ((c[1] as RequestInit | undefined)?.method ?? 'GET') === 'GET'),
+    ).toHaveLength(1)
     expect(item.status).toBe('done')
     expect(item.copied).toBe('copied')
     expect(written.length).toBeGreaterThan(0)
@@ -241,8 +263,10 @@ describe('download queue (batch 4, item C)', () => {
     const fetchFn = vi.fn(async () => {
       attempts += 1
       // The first item tries every mirror (5 attempts) and fails;
-      // the retried item succeeds on the first mirror.
-      if (attempts <= 5) throw new Error('CORS blocked')
+      // the retried item succeeds on the first mirror. Batch 5,
+      // item D: each attempt costs 2 calls (chunked HEAD probe +
+      // GET), so 5 attempts = 10 calls.
+      if (attempts <= 10) throw new Error('CORS blocked')
       return chunkResponse([new Uint8Array([1])], 1)
     })
     configureDownloadQueue({
@@ -259,5 +283,86 @@ describe('download queue (batch 4, item C)', () => {
     useDownloadQueue.getState().retry(id)
     await waitForIdle()
     expect(useDownloadQueue.getState().items[0].status).toBe('done')
+  })
+})
+
+describe('download queue chunked fetch (batch 5, item D)', () => {
+  it('downloads via parallel Range requests with live progress + rate, saving the assembled bytes once', async () => {
+    const total = CHUNKED_MIN_BYTES
+    const file = new Uint8Array(total)
+    for (let i = 0; i < total; i++) file[i] = i % 251
+    let nowMs = 0
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (method === 'HEAD') {
+        return new Response(null, {
+          status: 200,
+          headers: { 'accept-ranges': 'bytes', 'content-length': String(total) },
+        })
+      }
+      const range = new Headers(init?.headers as HeadersInit | undefined).get('Range')
+      const m = range ? /bytes=(\d+)-(\d+)/.exec(range) : null
+      if (!m) throw new Error('expected a Range request')
+      const slice = file.slice(Number(m[1]), Number(m[2]) + 1)
+      // Two pulls, each advancing the clock, so the chunked
+      // progress reports span time and a real rate is observable.
+      const half = Math.ceil(slice.byteLength / 2)
+      const parts = [slice.slice(0, half), slice.slice(half)]
+      let i = 0
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          nowMs += 500
+          if (i < parts.length) controller.enqueue(parts[i++])
+          if (i >= parts.length) controller.close()
+        },
+      })
+      return new Response(body, { status: 206 })
+    })
+    const saved: Blob[] = []
+    configureDownloadQueue({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      saveFile: (blob: Blob) => {
+        saved.push(blob)
+      },
+      record: () => {},
+      now: () => nowMs,
+    })
+    // Observe intermediate states: the rate must be reported live
+    // (the final 'done' state resets rateBps to 0).
+    const seenRates: number[] = []
+    const unsub = useDownloadQueue.subscribe((s) => {
+      for (const item of s.items) {
+        if (item.status === 'downloading' && item.rateBps > 0) seenRates.push(item.rateBps)
+      }
+    })
+    useDownloadQueue.getState().enqueue(REQ)
+    await waitForIdle()
+    unsub()
+
+    const [item] = useDownloadQueue.getState().items
+    expect(item.status).toBe('done')
+    expect(item.downloadedBytes).toBe(total)
+    expect(item.totalBytes).toBe(total)
+    expect(item.mirrorIdUsed).toBe('beatconnect')
+    // 1 HEAD + 4 Range requests, no plain GET.
+    expect(calls.filter((c) => (c.init?.method ?? 'GET') === 'HEAD')).toHaveLength(1)
+    expect(
+      calls.filter((c) => new Headers(c.init?.headers as HeadersInit | undefined).get('Range')),
+    ).toHaveLength(4)
+    expect(
+      calls.filter(
+        (c) =>
+          (c.init?.method ?? 'GET') === 'GET' &&
+          !new Headers(c.init?.headers as HeadersInit | undefined).get('Range'),
+      ),
+    ).toHaveLength(0)
+    // The saved blob is the assembled file, downloaded exactly once.
+    expect(saved).toHaveLength(1)
+    expect(new Uint8Array(await saved[0]!.arrayBuffer())).toEqual(file)
+    // A real, finite rate was reported while downloading.
+    expect(seenRates.length).toBeGreaterThan(0)
+    expect(seenRates.every((r) => Number.isFinite(r) && r > 0)).toBe(true)
   })
 })

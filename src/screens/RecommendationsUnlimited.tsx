@@ -883,19 +883,32 @@ function RecommendationsUnlimitedDemo() {
 
 const PAGE_TAKE = 20
 
-function FeedReal({
+/**
+ * The endless feed, usable standalone (via the default export's gate)
+ * or embedded in the Recommendations page's Batches/Endless switch
+ * (batch 5, item B). Filters/draft are lifted state owned by the
+ * parent, so both views share the same mode + filters: changing
+ * filters or mode restarts the feed session, as before.
+ */
+export function FeedReal({
   data,
   onBrowseSamples,
+  filters,
+  draft,
+  onFiltersChange,
+  onDraftChange,
 }: {
   data: ProfileData
   onBrowseSamples: () => void
+  filters: RecFilters
+  draft: RecFilters
+  onFiltersChange: (next: RecFilters) => void
+  onDraftChange: (next: RecFilters) => void
 }) {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
   const profile = data.skillProfile
   const key = seenKey(tier, data.user.username)
-  const [filters, setFilters] = useState<RecFilters>(() => defaultFiltersFor(profile))
-  const [draft, setDraft] = useState<RecFilters>(filters)
   const [items, setItems] = useState<RecCandidate[]>([])
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
   const [feedStats, setFeedStats] = useState({ examined: 0, produced: 0 })
@@ -946,13 +959,23 @@ function FeedReal({
     [key, mode, profile],
   )
 
-  // New session whenever profile/mode changes (§13.2.3).
+  // New session whenever profile/mode changes (§13.2.3). On first
+  // mount the shared filters are adopted as-is (they may already
+  // carry the user's choices from the Batches view) — only a real
+  // profile/mode change resets them to the profile defaults.
+  const feedSigRef = useRef<string | null>(null)
   useEffect(() => {
-    const fresh = defaultFiltersFor(profile)
-    setFilters(fresh)
-    setDraft(fresh)
+    const sig = `${data.user.id}:${mode}:${profile.pp}:${profile.comfortSrMin}:${profile.comfortSrMax}`
+    if (feedSigRef.current === sig) return
+    const firstMount = feedSigRef.current === null
+    feedSigRef.current = sig
+    const start = firstMount ? filters : defaultFiltersFor(profile)
+    if (!firstMount) {
+      onFiltersChange(start)
+      onDraftChange(start)
+    }
     setRestarted(false)
-    void startSession(fresh)
+    void startSession(start)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, mode])
 
@@ -998,7 +1021,7 @@ function FeedReal({
   }
 
   const applyFilters = () => {
-    setFilters(draft)
+    onFiltersChange(draft)
     setRestarted(true)
     void startSession(draft)
   }
@@ -1011,8 +1034,8 @@ function FeedReal({
       tagText: '',
       keyCount: null,
     }
-    setFilters(looser)
-    setDraft(looser)
+    onFiltersChange(looser)
+    onDraftChange(looser)
     setRestarted(true)
     void startSession(looser)
   }
@@ -1046,7 +1069,7 @@ function FeedReal({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start mt-space-sm">
         <RecFiltersPanel
           draft={draft}
-          onDraftChange={setDraft}
+          onDraftChange={onDraftChange}
           onApply={applyFilters}
           profile={profile}
           mode={mode}
@@ -1145,6 +1168,10 @@ export default function RecommendationsUnlimited() {
   // Same "continue with demo" escape hatch as Generated mode: a failed
   // feed load still leaves the sample picks one tap away.
   const [showDemo, setShowDemo] = useState(false)
+  // Standalone gate owns the filter state FeedReal needs (the
+  // Recommendations page owns it itself when embedding the feed).
+  const [filtersState, setFiltersState] = useState<RecFilters | null>(null)
+  const [draftState, setDraftState] = useState<RecFilters | null>(null)
 
   if (showDemo) {
     return (
@@ -1184,7 +1211,14 @@ export default function RecommendationsUnlimited() {
         tierLabel: tier === 'account' ? 'account' : 'guest',
       }}
     >
-      <FeedReal data={data} onBrowseSamples={() => setShowDemo(true)} />
+      <FeedReal
+        data={data}
+        onBrowseSamples={() => setShowDemo(true)}
+        filters={filtersState ?? defaultFiltersFor(data.skillProfile)}
+        draft={draftState ?? filtersState ?? defaultFiltersFor(data.skillProfile)}
+        onFiltersChange={setFiltersState}
+        onDraftChange={setDraftState}
+      />
     </AppShell>
   )
 }

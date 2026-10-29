@@ -23,6 +23,8 @@ function candidate(patch: Partial<RecCandidate> = {}): RecCandidate {
     creator: 'mapper',
     version: '7K',
     sr: 4.5,
+    srMin: 4.5,
+    srMax: 4.5,
     bpm: 180,
     lengthSec: 150,
     cs: 7,

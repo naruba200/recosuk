@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { useGuestStore } from './lib/guestStore'
@@ -13,7 +13,6 @@ import WelcomeRecs from './screens/WelcomeRecs'
 import Dashboard from './screens/Dashboard'
 import Stats from './screens/Stats'
 import Recommendations from './screens/Recommendations'
-import RecommendationsUnlimited from './screens/RecommendationsUnlimited'
 import Mirror from './screens/Mirror'
 import Collections from './screens/Collections'
 import Lists from './screens/Lists'
@@ -71,62 +70,11 @@ function RequireSession({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** The two Stitch Recommendations variants wired together with a toggle. */
+/** Recommendations route: the Batches/Endless switch lives ON the
+ *  page itself (batch 5, item B) — the route renders the page,
+ *  which owns the switch and the shared mode + filters state. */
 function RecommendationsPage() {
-  const [mode, setMode] = useState<'generated' | 'unlimited'>('generated')
-  return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          padding: '0.75rem 1.25rem',
-          backgroundColor: '#221832',
-          color: '#F5F1FA',
-          fontFamily: 'Inter, sans-serif',
-          fontSize: '14px',
-        }}
-      >
-        <span style={{ fontWeight: 600 }}>Unlimited beatmaps</span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={mode === 'unlimited'}
-          onClick={() => setMode(mode === 'generated' ? 'unlimited' : 'generated')}
-          style={{
-            width: '44px',
-            height: '24px',
-            borderRadius: '9999px',
-            border: 'none',
-            cursor: 'pointer',
-            position: 'relative',
-            backgroundColor: mode === 'unlimited' ? '#FF66AA' : '#4a4454',
-            transition: 'background-color 0.2s',
-          }}
-        >
-          <span
-            style={{
-              position: 'absolute',
-              top: '3px',
-              left: mode === 'unlimited' ? '23px' : '3px',
-              width: '18px',
-              height: '18px',
-              borderRadius: '9999px',
-              backgroundColor: '#F5F1FA',
-              transition: 'left 0.2s',
-            }}
-          />
-        </button>
-        <span style={{ opacity: 0.75 }}>
-          {mode === 'unlimited'
-            ? 'On — endless feed, ordered as it loads'
-            : 'Off — Generated mode (pick a count, fixed list)'}
-        </span>
-      </div>
-      {mode === 'unlimited' ? <RecommendationsUnlimited /> : <Recommendations />}
-    </div>
-  )
+  return <Recommendations />
 }
 
 /**

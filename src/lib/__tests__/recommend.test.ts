@@ -50,6 +50,8 @@ function candidate(overrides: Partial<RecCandidate> = {}): RecCandidate {
     creator: 'mapper',
     version: '7K',
     sr: 4.9,
+    srMin: 4.9,
+    srMax: 4.9,
     bpm: 182,
     lengthSec: 150,
     cs: 7,

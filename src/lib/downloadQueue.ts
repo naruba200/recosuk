@@ -3,7 +3,7 @@ import { startBrowserDownload } from './downloadManager'
 import { getNoVideo } from './downloadSettings'
 import { MIRRORS, recordDownload } from './mirrors'
 import {
-  fetchSetResponse,
+  fetchSetResponseChunked,
   mirrorAttemptUrls,
   songsFolderFilename,
   writeFetchedSetToFolder,
@@ -232,7 +232,27 @@ async function processItem(item: DownloadQueueItem): Promise<void> {
   }
   patchItem(item.id, { status: 'downloading', mirrorIdUsed: firstAttemptMirrorId(request) })
 
-  const { fetched } = await fetchSetResponse(request, { fetchFn })
+  // Chunked-path progress/rate (batch 5, item D): real bytes
+  // received across the parallel Range requests, throttled to the
+  // same 150ms emit cadence as the single-stream loop below. The
+  // single-stream path keeps its own reader-loop reporting; a
+  // failed chunked attempt restarts progress from 0 on the plain
+  // fetch, which is honest — those bytes were never kept.
+  let chunkedRateBps = 0
+  let chunkedLastAt = now()
+  let chunkedLastBytes = 0
+  const { fetched } = await fetchSetResponseChunked(request, {
+    fetchFn,
+    onProgress: (received, total) => {
+      const at = now()
+      if (at - chunkedLastAt >= 150) {
+        chunkedRateBps = (received - chunkedLastBytes) / Math.max((at - chunkedLastAt) / 1000, 0.001)
+        chunkedLastAt = at
+        chunkedLastBytes = received
+        patchItem(item.id, { downloadedBytes: received, totalBytes: total, rateBps: chunkedRateBps })
+      }
+    },
+  })
   if (isCancelled(item.id)) return
   if (!fetched) {
     // CORS/network blocked every mirror: hand the first attempt URL
@@ -268,8 +288,19 @@ async function processItem(item: DownloadQueueItem): Promise<void> {
   let rateBps = 0
   patchItem(item.id, { totalBytes })
   try {
-    const body = fetched.response.body
-    if (body && typeof body.getReader === 'function') {
+    if (fetched.chunked) {
+      // Bytes already fully received — progress/rate were reported
+      // live during the parallel fetch above. Take the assembled
+      // body without re-reading it through the rate loop (that
+      // would report a meaningless instant rate for in-memory
+      // bytes). The Songs-folder clone above already holds the
+      // same assembled bytes: still one fetch, no double download.
+      const buffer = await fetched.response.arrayBuffer()
+      downloadedBytes = buffer.byteLength
+      chunks.push(new Uint8Array(buffer))
+      patchItem(item.id, { downloadedBytes, totalBytes: buffer.byteLength, rateBps: chunkedRateBps })
+    } else if (fetched.response.body && typeof fetched.response.body.getReader === 'function') {
+      const body = fetched.response.body
       const reader = body.getReader()
       for (;;) {
         if (isCancelled(item.id)) {
