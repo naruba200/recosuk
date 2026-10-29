@@ -15,8 +15,10 @@ import {
   isOsuAuthExpiredError,
   newOsuAuthState,
   osuCallbackUri,
+  osuConnectedSettingsTarget,
   parseOsuCallback,
   probeOsuDownload,
+  readOsuConnectedParam,
   type ProxyCaller,
 } from '../osuAuth'
 
@@ -120,6 +122,31 @@ describe('parseOsuCallback', () => {
       error: null,
       errorDescription: null,
     })
+  })
+})
+
+describe('osuConnected param (batch 16: callback → Settings banner)', () => {
+  it('builds the Settings target carrying the username', () => {
+    expect(osuConnectedSettingsTarget('sora_playz')).toBe('/settings?osuConnected=sora_playz')
+  })
+
+  it('URL-encodes the username and keeps the param when the name is unknown', () => {
+    expect(osuConnectedSettingsTarget('a b&c')).toBe('/settings?osuConnected=a+b%26c')
+    expect(osuConnectedSettingsTarget(null)).toBe('/settings?osuConnected=')
+  })
+
+  it('reads the param back, and returns null when it is absent', () => {
+    expect(readOsuConnectedParam('?osuConnected=sora_playz')).toBe('sora_playz')
+    expect(readOsuConnectedParam('?osuConnected=')).toBe('')
+    expect(readOsuConnectedParam('?foo=1&osuConnected=a+b%26c')).toBe('a b&c')
+    expect(readOsuConnectedParam('')).toBeNull()
+    expect(readOsuConnectedParam('?foo=1')).toBeNull()
+  })
+
+  it('round-trips through the target builder', () => {
+    const target = osuConnectedSettingsTarget('sora_playz')
+    expect(readOsuConnectedParam(target.slice('/settings'.length))).toBe('sora_playz')
+    expect(readOsuConnectedParam(osuConnectedSettingsTarget(null).slice('/settings'.length))).toBe('')
   })
 })
 

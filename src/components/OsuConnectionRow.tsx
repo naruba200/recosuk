@@ -1,15 +1,19 @@
 // RecOsuk batch 15, Phase A — Settings row: "osu! account connection".
+// (Batch 16: one-time "connected" banner from the callback's
+// `osuConnected` param; diagnostic probe output incl. an HTML snippet
+// rendered as plain text; beatmapset-id input for the probe.)
 //
 // Account users only. Guests see the row locked (LockedButton pattern,
 // same as M5): no guest token storage, no anonymous auth. The row never
 // displays a token value — only the connected username, expiry, and
-// the header-only probe result.
+// the probe diagnostics.
 
-import { useEffect, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import LockedButton from './LockedButton'
 import { useAuth } from '../lib/auth'
 import {
+  OSU_CONNECTED_PARAM,
   PROBE_BEATMAPSET_ID,
   beginOsuSignIn,
   disconnectOsu,
@@ -17,29 +21,49 @@ import {
   getOsuRedirectUri,
   isOsuAuthExpiredError,
   probeOsuDownload,
+  readOsuConnectedParam,
   type OsuAuthStatus,
+  type ProbeDiagnosis,
   type ProbeOsuDownloadResult,
+  type ProbeVariantResult,
 } from '../lib/osuAuth'
 
-function probeLine(label: string, variant: {
-  status: number
-  contentType: string | null
-  contentLength: string | null
-  contentDisposition: string | null
-  pass: boolean
-}): ReactNode {
+function diagnosisText(diagnosis: ProbeDiagnosis): string {
+  switch (diagnosis) {
+    case 'archive':
+      return 'osu! answered with a file download.'
+    case 'login-redirect':
+      return 'osu! sent the request to a login page — the sign-in token was not accepted for downloads.'
+    case 'html-page':
+      return 'osu! returned a web page instead of a file — try a set id you know downloads on the website.'
+    case 'other':
+      return 'Unexpected response — neither a file nor a recognisable login/web page.'
+  }
+}
+
+function probeLine(label: string, variant: ProbeVariantResult): ReactNode {
   return (
-    <div className="text-left">
-      <span className={variant.pass ? 'text-hitgreen font-semibold' : 'text-error font-semibold'}>
-        {variant.pass ? 'PASS' : 'FAIL'}
-      </span>
-      <span className="text-on-surface-variant"> — {label}: </span>
-      <span className="break-all">
-        HTTP {variant.status}
-        {variant.contentType ? ` · ${variant.contentType}` : ''}
-        {variant.contentLength ? ` · ${variant.contentLength} bytes` : ''}
-        {variant.contentDisposition ? ` · ${variant.contentDisposition}` : ''}
-      </span>
+    <div className="text-left space-y-0.5">
+      <div>
+        <span className={variant.pass ? 'text-hitgreen font-semibold' : 'text-error font-semibold'}>
+          {variant.pass ? 'PASS' : 'FAIL'}
+        </span>
+        <span className="text-on-surface-variant"> — {label}: </span>
+        <span className="break-all">
+          HTTP {variant.status}
+          {variant.contentType ? ` · ${variant.contentType}` : ''}
+          {variant.contentLength ? ` · ${variant.contentLength} bytes` : ''}
+          {variant.contentDisposition ? ` · ${variant.contentDisposition}` : ''}
+        </span>
+      </div>
+      <p className="text-on-surface-variant">{diagnosisText(variant.diagnosis)}</p>
+      {variant.redirected && variant.location && (
+        <p className="break-all text-on-surface-variant">Redirects to: {variant.location}</p>
+      )}
+      {/* The snippet is rendered as TEXT (React escapes it) — never parsed as HTML. */}
+      {variant.snippet ? (
+        <pre className="whitespace-pre-wrap break-all rounded bg-surface-container-highest px-2 py-1 text-xs text-on-surface-variant overflow-x-auto">{variant.snippet}</pre>
+      ) : null}
     </div>
   )
 }
@@ -47,13 +71,19 @@ function probeLine(label: string, variant: {
 export default function OsuConnectionRow() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [status, setStatus] = useState<OsuAuthStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<'connect' | 'disconnect' | 'probe' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [probe, setProbe] = useState<ProbeOsuDownloadResult | null>(null)
+  const [probeIdInput, setProbeIdInput] = useState(String(PROBE_BEATMAPSET_ID))
   const [copied, setCopied] = useState(false)
+  // One-time banner from the callback's `osuConnected` param. The name
+  // is kept in state so the banner survives the param being cleared.
+  const [justConnected, setJustConnected] = useState<string | null>(null)
+  const justConnectedRef = useRef(false)
 
   const redirectUri = getOsuRedirectUri()
 
@@ -77,6 +107,20 @@ export default function OsuConnectionRow() {
       cancelled = true
     }
   }, [user])
+
+  // One-time banner: read `?osuConnected=<name>` once on mount, then
+  // clear the param with a replace-navigation so refresh/Back never
+  // re-show it. The ref guard covers StrictMode's double-effect.
+  useEffect(() => {
+    if (justConnectedRef.current) return
+    justConnectedRef.current = true
+    const name = readOsuConnectedParam(searchParams.toString())
+    if (name === null) return
+    setJustConnected(name)
+    const next = new URLSearchParams(searchParams)
+    next.delete(OSU_CONNECTED_PARAM)
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   // Guests: locked row, account prompt on click. No token storage, no
   // anonymous auth — the M5 gating pattern.
@@ -131,12 +175,16 @@ export default function OsuConnectionRow() {
     }
   }
 
+  const probeId = Number(probeIdInput)
+  const probeIdValid = Number.isInteger(probeId) && probeId > 0
+
   const handleProbe = async () => {
+    if (!probeIdValid) return
     setBusy('probe')
     setActionError(null)
     setProbe(null)
     try {
-      setProbe(await probeOsuDownload(PROBE_BEATMAPSET_ID))
+      setProbe(await probeOsuDownload(probeId))
     } catch (err) {
       if (isOsuAuthExpiredError(err)) {
         setActionError('The osu! connection has expired. Reconnect to run the download test.')
@@ -162,6 +210,12 @@ export default function OsuConnectionRow() {
 
   return (
     <div className="py-space-md flex flex-col gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
+      {justConnected !== null && (
+        <p className="rounded-lg bg-hitgreen/15 px-3 py-2 font-body-sm text-body-sm text-on-surface" role="status">
+          Connected{justConnected ? ` as ${justConnected}` : ' to osu!'} — now run “Test official download” below
+          to check whether osu! accepts this sign-in for in-page downloads.
+        </p>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm">
         <div className="flex flex-col">
           <span className="font-label-md text-label-md text-on-surface">osu! account connection</span>
@@ -199,10 +253,24 @@ export default function OsuConnectionRow() {
                   {busy === 'connect' ? 'Starting…' : 'Reconnect'}
                 </button>
               )}
+              <label className="flex items-center gap-1.5 font-body-sm text-body-sm text-on-surface-variant">
+                Beatmapset id
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  value={probeIdInput}
+                  onChange={(e) => setProbeIdInput(e.target.value)}
+                  disabled={busy !== null}
+                  aria-label="Beatmapset id to probe"
+                  className="w-24 rounded-full bg-surface-container px-2.5 py-1.5 text-on-surface outline-none disabled:opacity-50"
+                />
+              </label>
               <button
                 type="button"
                 onClick={handleProbe}
-                disabled={busy !== null}
+                disabled={busy !== null || !probeIdValid}
                 className="px-3 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-colors disabled:opacity-50 cursor-pointer"
               >
                 {busy === 'probe' ? 'Testing…' : 'Test official download'}
@@ -221,6 +289,12 @@ export default function OsuConnectionRow() {
         </div>
       </div>
 
+      {connected && (
+        <p className="font-body-sm text-body-sm text-on-surface-variant">
+          Try a set you know downloads on the osu! website if id {PROBE_BEATMAPSET_ID} fails — the probe only checks that one set.
+        </p>
+      )}
+
       {actionError && (
         <p className="font-body-sm text-body-sm text-error">{actionError}</p>
       )}
@@ -230,7 +304,7 @@ export default function OsuConnectionRow() {
           <p className="font-semibold">
             {probe.pass
               ? 'Download test passed — osu! accepted your sign-in for official downloads.'
-              : 'Download test did not pass — in-page official downloads stay off until this passes. (The probe never downloads a file; it only reads status + headers.)'}
+              : 'Download test did not pass — in-page official downloads stay off until this passes. (The probe never downloads a file; for web pages it reads at most the first 300 characters, shown as plain text, to tell a login page from another page.)'}
           </p>
           {probeLine(`beatmapset ${probe.beatmapsetId}`, probe)}
           {probeLine(`beatmapset ${probe.beatmapsetId} (no video)`, probe.noVideoVariant)}

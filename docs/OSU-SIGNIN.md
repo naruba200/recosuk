@@ -17,12 +17,20 @@ Settings → **osu! account connection** (SECTION 1: ACCOUNT):
   without it."
 - **Connected:** the osu! username, the token expiry, a **Disconnect**
   button, and a **Test official download** button showing the probe
-  result verbatim (PASS/FAIL + status/headers for the full and
-  no-video variants).
+  result verbatim (PASS/FAIL + status/headers/diagnosis for the full
+  and no-video variants, plus the first 300 characters of an HTML
+  page as plain text). The probe takes a **beatmapset id** (default
+  1) — try a set you know downloads on the website if id 1 fails.
 - **Expired:** a **Reconnect** button.
 - **Guests:** the row is locked with the account prompt (same
   LockedButton pattern as M5). No guest token storage, no anonymous
   auth.
+
+After approving on osu!, the callback page navigates **immediately**
+to Settings (no success screen, no timer — the spinner phase says
+plainly not to go back while the connection is being saved) and
+Settings shows a one-time "Connected as …" banner, cleared on
+refresh/Back so it never re-appears.
 
 ## Setup — 4 steps, in order
 
@@ -135,19 +143,33 @@ is deleted and the UI prompts a re-sign-in.
 ## The probe — what PASS and FAIL mean
 
 Settings → **Test official download** (connected users only) probes
-`https://osu.ppy.sh/beatmapsets/1/download` (and the `?noVideo=1`
-variant) with the stored user token, reading **only status +
-headers** and cancelling the body — no bytes are downloaded, and no
-bytes are ever streamed to the browser in Phase A.
+`https://osu.ppy.sh/beatmapsets/<id>/download` (and the `?noVideo=1`
+variant) with the stored user token, fetching with **manual
+redirects** — a 302 to the login page is reported as a redirect
+(with its `Location` header), not silently followed — and reading
+status + headers. For HTML pages only, it reads **at most the first
+300 characters** of the body as a diagnostic snippet (shown as plain
+text, never parsed as HTML); archive bodies are cancelled unread. No
+bytes are downloaded, and no bytes are ever streamed to the browser
+in Phase A.
 
 - **PASS** = HTTP 200 + an archive content-type
   (`application/octet-stream` / `application/zip`) + an `attachment`
   content-disposition. osu! accepted the user token for downloads.
-- **FAIL** = anything else, shown with the exact status/headers:
-  `401`/`403` = osu! refused the token; `200` + `text/html` = a
-  redirect to the login page (the token wasn't accepted); `404` =
-  the probe beatmapset id is gone (re-probe with another id — a 404
-  is not an auth failure).
+- **FAIL** = anything else, shown with the exact status/headers plus
+  a diagnosis:
+  - `login-redirect` — osu! sent the request to a login page (a 3xx
+    to a login/oauth/authorize URL, or an HTML page whose snippet
+    mentions "login" — the snippet match is a heuristic, page copy
+    can change). The token was not accepted: report this result.
+  - `html-page` — HTTP 200 + HTML, no login signal. osu! served a
+    page instead of a file; try a set id you know downloads on the
+    website (id 1 may simply not be downloadable).
+  - `archive` — the passing case (see PASS above).
+  - `other` — anything else (e.g. 401/403, a redirect elsewhere, a
+    404: the probe id is gone — a 404 is not an auth failure).
+
+The diagnosis only *labels* the result — the PASS rule is unchanged.
 
 **Phase-B gate: the probe must PASS live before in-page official
 downloads are built.** If it FAILs with 401/403, osu! does not accept
@@ -164,4 +186,7 @@ download + mirrors remain the way official files are fetched.
 | Status shows "connected (name unknown)" | The `/me` lookup failed at exchange time | Harmless — the connection works; the name just wasn't fetched |
 | 500 naming `OSU_TOKEN_ENCRYPTION_KEY` | Secret not set | Step 2, then redeploy |
 | 400 naming an unknown action | Old function deployed | Step 4 — redeploy |
-| Probe FAILs 401/403 | osu! refuses the token | Phase B is off the table; mirrors + tab-first official stay |
+| Probe shows `login-redirect` | Token rejected — osu! sent the request to a login page | Report the exact status/Location; Phase B stays off |
+| Probe shows `html-page` | osu! served a page for that set id | Re-probe with a set id you know downloads on the website |
+| Probe FAILs 401/403 (`other`) | osu! refuses the token | Phase B is off the table; mirrors + tab-first official stay |
+| Callback page feels stuck / pressed Back | Old behaviour: the success screen lingered 1.5s | Fixed (batch 16): the callback now navigates immediately on success; if you pressed Back, check Settings — the connection may already be saved |

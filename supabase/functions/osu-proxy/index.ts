@@ -547,11 +547,13 @@ async function runAuthAction(action: string, params: Params, req: Request): Prom
       await supabaseTokenStore(service).remove(userId)
       return { ok: true }
     }
-    // Header-only probe: does osu! accept this user token for the
-    // official download endpoint? Reads status + headers only and
-    // cancels the body — no bytes are downloaded, no bytes are
-    // streamed to the browser. No retry, no mirror fallback: the
-    // probe answers exactly one question, and Phase B is gated on it.
+    // Diagnostic probe: does osu! accept this user token for the
+    // official download endpoint? Manual redirects (a 302-to-login is
+    // reported, not followed), status + headers, and — for HTML pages
+    // only — at most 300 chars of body as a diagnostic snippet. No
+    // bytes are downloaded, no bytes are streamed to the browser. No
+    // retry, no mirror fallback: the probe answers exactly one
+    // question, and Phase B is gated on it.
     case 'probeOsuDownload': {
       const { userId, service } = await requireUserId(req)
       const env = requireUserAuthEnv()
@@ -583,6 +585,10 @@ async function runAuthAction(action: string, params: Params, req: Request): Prom
         contentType: full.contentType,
         contentLength: full.contentLength,
         contentDisposition: full.contentDisposition,
+        location: full.location,
+        redirected: full.redirected,
+        snippet: full.snippet,
+        diagnosis: full.diagnosis,
         pass: full.pass,
         noVideoVariant: noVideo,
       }

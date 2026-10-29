@@ -1,10 +1,13 @@
-// RecOsuk batch 15, Phase A — osu! OAuth callback page.
+// RecOsuk batch 15, Phase A (batch 16: immediate navigation) — osu!
+// OAuth callback page.
 //
 // Transient page: osu! redirects here after the user authorises.
 // Validates `state`, exchanges the code server-side (once — a ref guard
 // stops React 19 StrictMode's double-effect from exchanging twice; a
 // reused code fails server-side and surfaces as "already used, try
-// signing in again"), then lands on Settings. No tokens ever reach
+// signing in again"), then navigates IMMEDIATELY to Settings with the
+// `osuConnected` param (no success screen, no timer — the user
+// previously felt stuck here and pressed Back). No tokens ever reach
 // this page: the exchange response carries only username/id/expiry.
 
 import { useEffect, useRef, useState } from 'react'
@@ -12,18 +15,18 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   OSU_AUTH_STATE_KEY,
   exchangeOsuCode,
+  osuConnectedSettingsTarget,
   parseOsuCallback,
 } from '../lib/osuAuth'
 import { OsuServiceError } from '../lib/osu'
 
-type Phase = 'working' | 'success' | 'error'
+type Phase = 'working' | 'error'
 
 export default function OsuCallback() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('working')
   const [detail, setDetail] = useState('')
-  const [username, setUsername] = useState<string | null>(null)
   // StrictMode double-invokes effects in dev: exchange exactly once.
   const ranRef = useRef(false)
 
@@ -66,8 +69,9 @@ export default function OsuCallback() {
     exchangeOsuCode(parsed.code, parsed.state, storedState)
       .then((result) => {
         if (cancelled) return
-        setUsername(result.osuUsername)
-        setPhase('success')
+        // Success: leave immediately — no success screen, no timer.
+        // Settings shows the one-time confirmation banner from the param.
+        navigate(osuConnectedSettingsTarget(result.osuUsername), { replace: true })
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -88,15 +92,7 @@ export default function OsuCallback() {
     return () => {
       cancelled = true
     }
-  }, [searchParams])
-
-  // Success lands on Settings shortly after, so the connection row is
-  // visible in its connected state.
-  useEffect(() => {
-    if (phase !== 'success') return
-    const t = setTimeout(() => navigate('/settings'), 1500)
-    return () => clearTimeout(t)
-  }, [phase, navigate])
+  }, [searchParams, navigate])
 
   return (
     <div className="min-h-screen bg-background text-on-background flex items-center justify-center px-4">
@@ -106,22 +102,7 @@ export default function OsuCallback() {
           <>
             <div className="mx-auto my-4 h-8 w-8 rounded-full border-2 border-outline-variant border-t-primary animate-spin" aria-label="Working" />
             <p className="text-sm text-on-surface-variant">Finishing the connection to your osu! account…</p>
-          </>
-        )}
-        {phase === 'success' && (
-          <>
-            <p className="text-2xl mb-2" aria-hidden>✓</p>
-            <p className="font-semibold">
-              Connected{username ? ` as ${username}` : ''}.
-            </p>
-            <p className="text-sm text-on-surface-variant mt-1">Taking you back to Settings…</p>
-            <button
-              type="button"
-              onClick={() => navigate('/settings')}
-              className="mt-4 px-4 py-2 rounded-full bg-primary text-on-primary font-semibold text-sm cursor-pointer"
-            >
-              Go to Settings now
-            </button>
+            <p className="text-sm text-on-surface-variant mt-1">This can take a few seconds — please don&apos;t go back, the connection is being saved.</p>
           </>
         )}
         {phase === 'error' && (

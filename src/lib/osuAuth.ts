@@ -2,7 +2,8 @@
 //
 // The browser NEVER sees a token value: the Edge Function returns only
 // {osuUsername, osuUserId, expiresAt} at exchange time, {connected,
-// osuUsername, expiresAt, expired} for status, and probe headers. All
+// osuUsername, expiresAt, expired} for status, and probe diagnostics
+// (status/headers/diagnosis/snippet). All
 // calls go through the existing proxyCall (which sends the Supabase
 // session JWT as the Bearer token when signed in — the server verifies
 // it before touching the token table).
@@ -78,6 +79,30 @@ export function isCallbackStateValid(returned: string | null, stored: string | n
   return returned !== null && stored !== null && returned !== '' && returned === stored
 }
 
+/** Query param the callback sets on Settings so it can show a one-time "connected" banner. */
+export const OSU_CONNECTED_PARAM = 'osuConnected'
+
+/**
+ * Settings target the callback navigates to on exchange success.
+ * Carries the osu! username (empty when unknown) so Settings can show
+ * the one-time confirmation banner, then clears the param.
+ */
+export function osuConnectedSettingsTarget(osuUsername: string | null): string {
+  const q = new URLSearchParams()
+  q.set(OSU_CONNECTED_PARAM, osuUsername ?? '')
+  return `/settings?${q.toString()}`
+}
+
+/**
+ * Reads the one-time `osuConnected` param from a query string. Returns
+ * the username (possibly '' when unknown), or null when the param is
+ * absent — so a bare `/settings` never shows the banner.
+ */
+export function readOsuConnectedParam(search: string): string | null {
+  const q = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+  return q.has(OSU_CONNECTED_PARAM) ? (q.get(OSU_CONNECTED_PARAM) ?? '') : null
+}
+
 // ---------------------------------------------------------------------------
 // Server calls
 // ---------------------------------------------------------------------------
@@ -91,11 +116,19 @@ export interface OsuAuthStatus {
   expired: boolean
 }
 
+/** Diagnosis of one probe variant, mirroring the server's probeDiagnosis. */
+export type ProbeDiagnosis = 'login-redirect' | 'html-page' | 'archive' | 'other'
+
 export interface ProbeVariantResult {
   status: number
   contentType: string | null
   contentLength: string | null
   contentDisposition: string | null
+  location: string | null
+  redirected: boolean
+  /** First ≤300 chars of an HTML body, rendered as plain text only. Null for archives/redirects. */
+  snippet: string | null
+  diagnosis: ProbeDiagnosis
   pass: boolean
 }
 
@@ -106,6 +139,10 @@ export interface ProbeOsuDownloadResult {
   contentType: string | null
   contentLength: string | null
   contentDisposition: string | null
+  location: string | null
+  redirected: boolean
+  snippet: string | null
+  diagnosis: ProbeDiagnosis
   pass: boolean
   noVideoVariant: ProbeVariantResult
 }

@@ -406,7 +406,8 @@ export async function getValidAccessToken(deps: {
 }
 
 // ---------------------------------------------------------------------------
-// Download probe (header-only — the body is cancelled, never read)
+// Download probe (diagnostic — manual redirects, HTML snippet ≤300
+// chars, archive bodies cancelled unread)
 // ---------------------------------------------------------------------------
 
 /** Client-side twin: src/lib/mirrors.ts builds the same official URL. */
@@ -415,11 +416,34 @@ export function officialDownloadUrl(beatmapsetId: number, noVideo: boolean): str
   return noVideo ? `${base}?noVideo=1` : base
 }
 
+/**
+ * Diagnosis of one probe variant — plain words for the UI, derived from
+ * status + headers (+ a short HTML snippet when one was read). The
+ * `login-redirect` label from an HTML snippet is a HEURISTIC: it matches
+ * the snippet containing "login" (case-insensitive). Page copy can
+ * change, so it only labels the result — it never changes the PASS rule.
+ */
+export type ProbeDiagnosis = 'login-redirect' | 'html-page' | 'archive' | 'other'
+
+/** Max characters of an HTML body read for diagnosis (hard cap, never more). */
+export const PROBE_SNIPPET_MAX_CHARS = 300
+
 export interface ProbeVariantResult {
   status: number
   contentType: string | null
   contentLength: string | null
   contentDisposition: string | null
+  /** The `Location` header of a redirect response, if any. */
+  location: string | null
+  /** True when the status is 3xx (the probe uses `redirect: 'manual'`). */
+  redirected: boolean
+  /**
+   * First ≤300 characters of the body, ONLY when the response is an
+   * HTML page (never for archives — the body is cancelled unread).
+   * Rendered as plain text in the UI, never as HTML.
+   */
+  snippet: string | null
+  diagnosis: ProbeDiagnosis
   /** True only for 200 + octet-stream/zip + attachment disposition. */
   pass: boolean
 }
@@ -436,11 +460,94 @@ export function probeVerdict(
   return isArchive && cd.includes('attachment')
 }
 
+function isLoginLocation(location: string | null): boolean {
+  const loc = (location ?? '').toLowerCase()
+  return loc.includes('login') || loc.includes('oauth') || loc.includes('authorize')
+}
+
 /**
- * One header-only probe of the official download URL with the user's
- * Bearer token. Reads status + headers, then CANCELS the body without
- * downloading a single byte. No retry, no mirror fallback — the probe
- * answers exactly one question: does osu! accept this user token for
+ * Labels one probe variant. The PASS rule (probeVerdict) is untouched:
+ * only a passing variant is 'archive'. A 3xx to a login/oauth/authorize
+ * URL is 'login-redirect'; an HTML page whose snippet mentions "login"
+ * is 'login-redirect' by heuristic; a 200 HTML page with no login
+ * signal is 'html-page'; everything else is 'other'.
+ */
+export function probeDiagnosis(args: {
+  status: number
+  location: string | null
+  contentType: string | null
+  snippet: string | null
+  pass: boolean
+}): ProbeDiagnosis {
+  if (args.pass) return 'archive'
+  if (args.status >= 300 && args.status < 400 && isLoginLocation(args.location)) {
+    return 'login-redirect'
+  }
+  const ct = (args.contentType ?? '').toLowerCase()
+  if (ct.includes('text/html')) {
+    if ((args.snippet ?? '').toLowerCase().includes('login')) return 'login-redirect'
+    if (args.status === 200) return 'html-page'
+    return 'other'
+  }
+  return 'other'
+}
+
+/**
+ * Reads at most PROBE_SNIPPET_MAX_CHARS characters from a stream body,
+ * then cancels it. Returns null when there is nothing readable (no
+ * body, non-stream fake, empty body, or a read error). Never reads
+ * more than the cap: the loop stops as soon as the cap is reached.
+ */
+async function readBodySnippet(
+  body: ReadableStream<Uint8Array> | null | undefined,
+): Promise<string | null> {
+  if (!body) return null
+  if (typeof body.getReader !== 'function') {
+    // Non-stream body (test fakes): cancel without reading.
+    try {
+      await body.cancel()
+    } catch {
+      // Body already gone — nothing to cancel.
+    }
+    return null
+  }
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  try {
+    for (;;) {
+      if (text.length >= PROBE_SNIPPET_MAX_CHARS) break
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) text += decoder.decode(value, { stream: true })
+    }
+    text += decoder.decode()
+  } catch {
+    // Read failed mid-stream: keep whatever was decoded so far.
+  } finally {
+    try {
+      await reader.cancel()
+    } catch {
+      // Already gone — nothing to cancel.
+    }
+    try {
+      reader.releaseLock()
+    } catch {
+      // Already released.
+    }
+  }
+  return text.length > 0 ? text.slice(0, PROBE_SNIPPET_MAX_CHARS) : null
+}
+
+/**
+ * One diagnostic probe of the official download URL with the user's
+ * Bearer token. Fetches with `redirect: 'manual'` so a 302-to-login
+ * (token rejected) is distinguishable from osu! returning an HTML
+ * page directly. Reads status + headers, and — ONLY for HTML pages —
+ * at most the first 300 characters of the body as a diagnostic
+ * snippet. Archive bodies are cancelled unread: no file bytes are
+ * ever downloaded. No retry, no mirror fallback — the probe answers
+ * exactly one question: does osu! accept this user token for
  * downloads?
  */
 export async function probeDownloadVariant(deps: {
@@ -450,24 +557,36 @@ export async function probeDownloadVariant(deps: {
 }): Promise<ProbeVariantResult> {
   const res = await deps.fetchFn(deps.url, {
     headers: { Authorization: `Bearer ${deps.accessToken}` },
-    redirect: 'follow',
+    redirect: 'manual',
   })
-  const result: ProbeVariantResult = {
-    status: res.status,
-    contentType: res.headers.get('content-type'),
+  const status = res.status
+  const contentType = res.headers.get('content-type')
+  const contentDisposition = res.headers.get('content-disposition')
+  const location = res.headers.get('location')
+  const redirected = status >= 300 && status < 400
+  const isHtml = (contentType ?? '').toLowerCase().includes('text/html')
+  let snippet: string | null = null
+  if (!redirected && isHtml) {
+    snippet = await readBodySnippet(res.body)
+  } else {
+    // Archive or redirect: the body must never be consumed in Phase A.
+    try {
+      await res.body?.cancel()
+    } catch {
+      // Body already gone — nothing to cancel.
+    }
+  }
+  const pass = probeVerdict(status, { contentType, contentDisposition })
+  const diagnosis = probeDiagnosis({ status, location, contentType, snippet, pass })
+  return {
+    status,
+    contentType,
     contentLength: res.headers.get('content-length'),
-    contentDisposition: res.headers.get('content-disposition'),
-    pass: false,
+    contentDisposition,
+    location,
+    redirected,
+    snippet,
+    diagnosis,
+    pass,
   }
-  // Cancel immediately: the body must never be consumed in Phase A.
-  try {
-    await res.body?.cancel()
-  } catch {
-    // Body already gone — nothing to cancel.
-  }
-  result.pass = probeVerdict(result.status, {
-    contentType: result.contentType,
-    contentDisposition: result.contentDisposition,
-  })
-  return result
 }

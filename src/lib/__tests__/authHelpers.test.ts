@@ -7,6 +7,7 @@ import {
   OSU_AUTH_EXPIRED_CODE,
   OSU_CONFIG_MISSING_CODE,
   OsuAuthError,
+  PROBE_SNIPPET_MAX_CHARS,
   buildOsuAuthorizeUrl,
   decryptToken,
   encryptToken,
@@ -16,6 +17,7 @@ import {
   isTokenExpired,
   isValidOsuRedirectUri,
   officialDownloadUrl,
+  probeDiagnosis,
   probeDownloadVariant,
   probeVerdict,
   refreshAccessToken,
@@ -445,13 +447,17 @@ describe('probe verdict + header-only probe', () => {
       contentType: 'application/octet-stream',
       contentLength: '123456',
       contentDisposition: 'attachment; filename="1.osz"',
+      location: null,
+      redirected: false,
+      snippet: null,
+      diagnosis: 'archive',
       pass: true,
     })
     // The body must never be consumed in Phase A — cancel, not read.
     expect(cancel).toHaveBeenCalledTimes(1)
   })
 
-  it('reports a login-page response as FAIL and still cancels the body', async () => {
+  it('reports an HTML page as FAIL with an html-page diagnosis and still cancels the body', async () => {
     const cancel = vi.fn(async () => {})
     const fakeRes = {
       status: 200,
@@ -466,7 +472,137 @@ describe('probe verdict + header-only probe', () => {
     })
     expect(out.pass).toBe(false)
     expect(out.contentType).toBe('text/html; charset=utf-8')
+    expect(out.diagnosis).toBe('html-page')
+    expect(out.snippet).toBeNull()
+    expect(out.redirected).toBe(false)
+    expect(out.location).toBeNull()
     expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetches with redirect: manual and reports a login redirect without following it', async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = []
+    const cancel = vi.fn(async () => {})
+    const fakeRes = {
+      status: 302,
+      headers: new Headers({
+        'content-type': 'text/html',
+        location: 'https://osu.ppy.sh/home/login?returnTo=%2Fbeatmapsets%2F1%2Fdownload',
+      }),
+      body: { cancel },
+    } as unknown as Response
+    const fetchFn = fakeFetch(async (url, init) => {
+      seen.push({ url, init })
+      return fakeRes
+    })
+    const out = await probeDownloadVariant({
+      fetchFn,
+      url: officialDownloadUrl(1, false),
+      accessToken: 'at-1',
+    })
+    expect(seen[0].init?.redirect).toBe('manual')
+    expect(out.status).toBe(302)
+    expect(out.redirected).toBe(true)
+    expect(out.location).toBe('https://osu.ppy.sh/home/login?returnTo=%2Fbeatmapsets%2F1%2Fdownload')
+    expect(out.snippet).toBeNull()
+    expect(out.diagnosis).toBe('login-redirect')
+    expect(out.pass).toBe(false)
+    // A redirect body is never read — only cancelled.
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('labels a redirect to a non-login URL as other', async () => {
+    const fakeRes = {
+      status: 302,
+      headers: new Headers({ location: 'https://osu.ppy.sh/beatmapsets/1' }),
+      body: { cancel: vi.fn(async () => {}) },
+    } as unknown as Response
+    const out = await probeDownloadVariant({
+      fetchFn: fakeFetch(async () => fakeRes),
+      url: officialDownloadUrl(1, false),
+      accessToken: 'at-1',
+    })
+    expect(out.redirected).toBe(true)
+    expect(out.diagnosis).toBe('other')
+    expect(out.pass).toBe(false)
+  })
+
+  it('reads at most 300 chars of an HTML body for the snippet, and only for HTML', async () => {
+    const longBody = 'x'.repeat(500)
+    const out = await probeDownloadVariant({
+      fetchFn: fakeFetch(async () => new Response(longBody, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })),
+      url: officialDownloadUrl(1, false),
+      accessToken: 'at-1',
+    })
+    expect(out.snippet).toHaveLength(PROBE_SNIPPET_MAX_CHARS)
+    expect(out.snippet).toBe('x'.repeat(300))
+    expect(out.diagnosis).toBe('html-page')
+    expect(out.pass).toBe(false)
+  })
+
+  it('labels an HTML page mentioning login as login-redirect (snippet heuristic)', async () => {
+    const body = '<html><head><title>login · osu!</title></head><body>Enter your credentials to login.</body></html>'
+    const out = await probeDownloadVariant({
+      fetchFn: fakeFetch(async () => new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })),
+      url: officialDownloadUrl(1, false),
+      accessToken: 'at-1',
+    })
+    expect(out.snippet).toBe(body)
+    expect(out.diagnosis).toBe('login-redirect')
+    expect(out.pass).toBe(false)
+  })
+
+  it('never reads the body of an archive response', async () => {
+    const cancel = vi.fn(async () => {})
+    const getReader = vi.fn(() => {
+      throw new Error('archive body must not be read')
+    })
+    const fakeRes = {
+      status: 200,
+      headers: new Headers({
+        'content-type': 'application/octet-stream',
+        'content-disposition': 'attachment; filename="1.osz"',
+      }),
+      body: { cancel, getReader },
+    } as unknown as Response
+    const out = await probeDownloadVariant({
+      fetchFn: fakeFetch(async () => fakeRes),
+      url: officialDownloadUrl(1, false),
+      accessToken: 'at-1',
+    })
+    expect(getReader).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(out.snippet).toBeNull()
+    expect(out.diagnosis).toBe('archive')
+    expect(out.pass).toBe(true)
+  })
+
+  it('probeDiagnosis maps the documented cases', () => {
+    const base = { location: null, contentType: null, snippet: null }
+    // PASS rule unchanged: only a passing variant is 'archive'.
+    expect(probeDiagnosis({ ...base, status: 200, pass: true })).toBe('archive')
+    expect(probeDiagnosis({ ...base, status: 200, pass: false })).toBe('other')
+    // 3xx to a login/oauth/authorize URL.
+    expect(probeDiagnosis({
+      ...base, status: 302, location: 'https://osu.ppy.sh/oauth/authorize?x=1', pass: false,
+    })).toBe('login-redirect')
+    // HTML + login snippet (any non-redirect status).
+    expect(probeDiagnosis({
+      ...base, status: 403, contentType: 'text/html', snippet: '<form>Login</form>', pass: false,
+    })).toBe('login-redirect')
+    // 200 HTML, no login signal.
+    expect(probeDiagnosis({
+      ...base, status: 200, contentType: 'text/html; charset=utf-8', snippet: '<html>hi</html>', pass: false,
+    })).toBe('html-page')
+    // Non-200 HTML with no login signal.
+    expect(probeDiagnosis({
+      ...base, status: 403, contentType: 'text/html', snippet: '<html>nope</html>', pass: false,
+    })).toBe('other')
   })
 
   it('sends the user Bearer token (never the guest app token)', async () => {
