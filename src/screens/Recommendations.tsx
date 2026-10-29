@@ -13,12 +13,12 @@ import { seedPlayedSets, useProfileData, type ProfileData } from '../lib/profile
 import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import {
-  applyDownloadedVisibility,
+  applySeenVisibility,
   clearRecTag,
   defaultFiltersFor,
   emptyGenerationResume,
   emptyPoolReason,
-  generateRecommendations,
+  generateUnseenWindow,
   mostUsedEssentialTags,
   widenRecFilters,
   type GenerationDiagnostics,
@@ -27,6 +27,7 @@ import {
   type RecFilters,
 } from '../lib/recommend'
 import { FeedReal } from './RecommendationsUnlimited'
+import BackToTop from '../components/BackToTop'
 import { seenKey, seenStore, useSeenVersion } from '../lib/seenStore'
 import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
@@ -810,6 +811,7 @@ function RecommendationsReal({
   onFiltersChange,
   onDraftChange,
   resumeRef,
+  active,
 }: {
   data: ProfileData
   onBrowseSamples: () => void
@@ -818,8 +820,15 @@ function RecommendationsReal({
   onFiltersChange: (next: RecFilters) => void
   onDraftChange: (next: RecFilters) => void
   /** Resume state owned by the page gate, so switching to the
-   * Endless view and back does not restart the Generated window. */
+   * Unlimited view and back does not restart the Generated window. */
   resumeRef: { current: { sig: string; resume: GenerationResume } | null }
+  /**
+   * Keep-place (§AE): the gate keeps this view mounted while the
+   * Unlimited view is shown. `active` is false while hidden —
+   * the auto-generate effect must not run (or re-adopt filters)
+   * until the view is visible again.
+   */
+  active: boolean
 }) {
   const mode = useModeStore((s) => s.mode)
   const { tier, user } = useAuth()
@@ -843,6 +852,24 @@ function RecommendationsReal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const runRef = useRef(0)
+  // Snapshot of the served set BEFORE the currently displayed
+  // window was generated (written when a generate press commits,
+  // never while a fetch is in flight — otherwise the displayed
+  // rows would hide themselves mid-fetch). Items in the snapshot
+  // appeared in an earlier generation and hide; the displayed
+  // window's own items are exempt because they were not served
+  // when the snapshot was taken. A fresh mount starts empty;
+  // the first generate captures the live store state.
+  const servedBeforeRef = useRef<ReadonlySet<number>>(new Set())
+  // Last non-empty window displayed under the current signature,
+  // so a Renew that finds the cursor already spent can show that
+  // batch again with the seen note instead of an empty list for
+  // a pool that exists. Cleared when the signature changes
+  // (mode/profile/filter change) — stale rows under new filters
+  // must never resurface. Local to this mounted view (the gate
+  // keeps it mounted across view switches since §AE, so it also
+  // survives a switch to Unlimited and back).
+  const lastWindowRef = useRef<{ sig: string; items: RecCandidate[] } | null>(null)
 
   useEffect(() => {
     seedPlayedSets(key, data)
@@ -860,43 +887,81 @@ function RecommendationsReal({
       setError(null)
       // Resume key: mode + profile identity + the applied filters.
       // A changed key (mode/profile/filter change, Loosen/Clear)
-      // restarts from page 1; a matching key continues through the
-      // next search window instead of re-querying page 1 (batch 5,
-      // item A). `fresh` restarts too — the engine ignores the
-      // resume on a fresh run.
+      // restarts from page 1 and drops the retained window; a
+      // matching key continues through the next search window
+      // instead of re-querying page 1 (batch 5, item A). `fresh`
+      // restarts too — the engine ignores the resume on a fresh
+      // run. Renew no longer passes fresh: it advances.
       const sig = `${key}:${mode}:${profile.pp}:${profile.comfortSrMin}:${profile.comfortSrMax}:${profile.srCeiling}:${profile.bpmSweetMin}:${profile.bpmSweetMax}:${(profile.playstyleTags ?? []).join(',')}:${JSON.stringify(nextFilters)}`
       if (resumeRef.current?.sig !== sig) {
         resumeRef.current = { sig, resume: emptyGenerationResume() }
+        lastWindowRef.current = null
       }
       try {
         const seen = seenStore.load(key)
         // M5 learning: the mode's own ratings re-weight this run.
         // Best-effort — a failed load just means no boost.
         const boostFor = await loadModeBoostFor(supabase, user?.id ?? null, mode)
-        const result = await generateRecommendations(profile, mode, {
-          count: nextCount,
-          filters: nextFilters,
-          seen,
-          fresh: opts.fresh,
-          resume: resumeRef.current.resume,
-          boostFor,
-          // Part 4: Generated mode's fetch-time seen exclusion
-          // stays off (ignoreSeen) — downloaded maps are hidden
-          // at list level instead (applyDownloadedVisibility),
-          // so the engine pool is unaffected. The run still marks
-          // served below (the Endless feed reads it).
-          ignoreSeen: true,
-        })
+        // Snapshot for this press: served + downloaded as of now.
+        // The skip loop and the render filter both read it, so a
+        // window fetched below never hides itself; the ref is
+        // only committed alongside the displayed window (after
+        // the run guard), never mid-flight.
+        const servedBefore = new Set(seen.served)
+        const downloadedNow = new Set(seen.downloaded)
+        const isHidden = (id: number) => downloadedNow.has(id) || servedBefore.has(id)
+        const { result } = await generateUnseenWindow(
+          profile,
+          mode,
+          {
+            count: nextCount,
+            filters: nextFilters,
+            seen,
+            fresh: opts.fresh,
+            resume: resumeRef.current.resume,
+            boostFor,
+            // Part 4: Generated mode's fetch-time seen exclusion
+            // stays off (ignoreSeen) — downloaded and
+            // previously-seen maps are hidden at list level
+            // instead (applySeenVisibility), so the engine pool
+            // is unaffected. The run still marks served below
+            // (the Unlimited feed reads it).
+            ignoreSeen: true,
+          },
+          isHidden,
+        )
         if (runRef.current !== run) return
         resumeRef.current = { sig, resume: result.nextResume }
-        setItems(result.items)
-        setTotalMatched(result.totalMatched)
-        setDiagnostics(result.diagnostics)
-        seenStore.markMany(
-          key,
-          'served',
-          result.items.map((c) => c.beatmapsetId),
-        )
+        servedBeforeRef.current = servedBefore
+        if (result.items.length > 0) {
+          setItems(result.items)
+          lastWindowRef.current = { sig, items: result.items }
+          setTotalMatched(result.totalMatched)
+          setDiagnostics(result.diagnostics)
+          // Mark ONLY the displayed window served: skipped
+          // windows were fetched but never shown, so they must
+          // not count as appeared before — a later fresh run may
+          // still show them, and the Unlimited feed must not
+          // exclude maps the user never saw.
+          seenStore.markMany(
+            key,
+            'served',
+            result.items.map((c) => c.beatmapsetId),
+          )
+        } else if (lastWindowRef.current && lastWindowRef.current.sig === sig) {
+          // Cursor spent and nothing new: show the last batch
+          // again — the visibility fallback below flags it with
+          // the seen note — instead of an empty list for a pool
+          // that exists. Diagnostics come from the spent run so
+          // the "end of window" line stays truthful.
+          setItems(lastWindowRef.current.items)
+          setTotalMatched(result.totalMatched)
+          setDiagnostics(result.diagnostics)
+        } else {
+          setItems([])
+          setTotalMatched(result.totalMatched)
+          setDiagnostics(result.diagnostics)
+        }
       } catch {
         if (runRef.current !== run) return
         setError('The recommendation search failed just now — osu! or the proxy may be busy. Try regenerating.')
@@ -911,10 +976,15 @@ function RecommendationsReal({
   // mode's rows are cleared first (item 5): showing them as if
   // current while the new mode generates would be stale data.
   // On first mount the shared filters are adopted as-is (they may
-  // already carry the user's choices from the Endless feed view) —
+  // already carry the user's choices from the Unlimited feed view) —
   // only a real profile/mode change resets them to the defaults.
+  // Keep-place (§AE): while this view is hidden the effect must
+  // NOT run — the signature ref is left untouched, so returning
+  // to the view re-runs the effect and generates under the
+  // current profile/mode instead of showing stale rows.
   const genSigRef = useRef<string | null>(null)
   useEffect(() => {
+    if (!active) return
     const sig = `${data.user.id}:${mode}:${profile.pp}:${profile.comfortSrMin}:${profile.comfortSrMax}`
     if (genSigRef.current === sig) return
     const firstMount = genSigRef.current === null
@@ -928,10 +998,10 @@ function RecommendationsReal({
     setTotalMatched(null)
     void generate(start, count)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, mode])
+  }, [profile, mode, active])
 
   // Live downloaded state: re-render whenever any seen-store
-  // mutation lands (a download in the Endless view included),
+  // mutation lands (a download in the Unlimited view included),
   // so `downloaded` below is never a stale snapshot — the old
   // per-screen downloadedTick only refreshed on this view's
   // own downloads. The downloaded array keeps its identity
@@ -941,13 +1011,26 @@ function RecommendationsReal({
     () => seenStore.load(key).downloaded,
     [key, seenVersion],
   )
-  // Hide downloaded maps, reappearing when every item in this
-  // window is downloaded (see applyDownloadedVisibility). The
-  // chip allowlist is computed from the VISIBLE rows, so hidden
-  // rows' tags never claim top-7 slots.
-  const { visible: visibleItems, showingDownloadedFallback } = useMemo(
-    () => applyDownloadedVisibility(items, downloaded),
-    [items, downloaded],
+  // Show-downloaded toggle (§AE), default OFF: when ON,
+  // downloaded sets show again with their downloaded state. It
+  // overrides ONLY the downloaded rule — the served-before rule
+  // still hides non-downloaded maps that appeared before. Local
+  // state, not persisted: a transient viewing choice.
+  const [showDownloaded, setShowDownloaded] = useState(false)
+  // Hide downloaded and previously-seen maps, reappearing when
+  // every item in this window is hidden (see
+  // applySeenVisibility). The chip allowlist is computed from
+  // the VISIBLE rows, so hidden rows' tags never claim top-7
+  // slots. The served snapshot is the ref committed with the
+  // displayed window — never the live store, which would hide
+  // the window's own items the moment they are marked served.
+  const {
+    visible: visibleItems,
+    showingDownloadedFallback,
+    showingSeenFallback,
+  } = useMemo(
+    () => applySeenVisibility(items, downloaded, servedBeforeRef.current, { showDownloaded }),
+    [items, downloaded, showDownloaded],
   )
   // Row chips: only the 7 most-used essential tags across the
   // rendered list get chips — the rest of the skillset
@@ -1010,6 +1093,18 @@ function RecommendationsReal({
               )}
             </div>
             <div className="flex items-center gap-1.5 text-on-surface-variant font-label-sm text-label-sm">
+              <button
+                type="button"
+                aria-pressed={showDownloaded}
+                onClick={() => setShowDownloaded((v) => !v)}
+                title={showDownloaded ? 'Hide downloaded beatmaps again' : 'Show downloaded beatmaps again'}
+                className={showDownloaded
+                  ? 'px-2.5 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm flex items-center gap-1 transition-colors'
+                  : 'px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm flex items-center gap-1 hover:text-on-surface transition-colors'}
+              >
+                <span className="material-symbols-outlined text-[16px]">{showDownloaded ? 'visibility' : 'visibility_off'}</span>
+                Show downloaded
+              </button>
               <span>Sorted by:</span>
               <span className="text-primary font-medium flex items-center gap-0.5">pp training weight
                 <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
@@ -1087,6 +1182,11 @@ function RecommendationsReal({
               Everything in this batch is already downloaded — showing downloaded maps again.
             </p>
           )}
+          {showingSeenFallback && (
+            <p className="font-body-sm text-body-sm text-on-surface-variant px-space-xs">
+              Everything in this batch has appeared before — showing seen maps again.
+            </p>
+          )}
           {visibleItems.map((c) => (
             <BeatmapRow
               key={c.beatmapsetId}
@@ -1103,12 +1203,13 @@ function RecommendationsReal({
           ))}
           {/* Part 4 + batch 7, item 3 — Renew: rendered at the bottom
               of the list whenever items were returned (NOT gated on
-              windowExhausted). Every press restarts from page 1 in
-              the deterministic PP-anchored fixed ranking — no
-              shuffling, so consecutive Renews show the same order
-              (minus newly downloaded maps, which stay hidden until
-              every item in the window is downloaded). There is no
-              separate Regenerate button anymore. */}
+              windowExhausted). Every press ADVANCES to the next
+              fresh window via the resume cursor — it never restarts
+              from page 1 — skipping windows whose maps all
+              appeared before, in the deterministic PP-anchored
+              fixed ranking (no shuffling). When the pool is spent,
+              the last batch shows again with the seen note. There
+              is no separate Regenerate button anymore. */}
           {!error && items.length > 0 && (
             <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
               {diagnostics?.windowExhausted && (
@@ -1121,11 +1222,10 @@ function RecommendationsReal({
                 className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0 disabled:opacity-50"
                 type="button"
                 disabled={busy}
-                title="Start over from the first window in the fixed ranking order"
+                title="Show the next fresh batch — maps you haven't seen yet, in the fixed ranking order"
                 onClick={() => {
-                  resumeRef.current = null
                   window.scrollTo({ top: 0, behavior: 'smooth' })
-                  void generate(filters, count, { fresh: true })
+                  void generate(filters, count)
                 }}
               >
                 Renew recommendations
@@ -1147,9 +1247,32 @@ export default function Recommendations() {
   const [showDemo, setShowDemo] = useState(false)
   // Batch 5, item B: the feed switch lives ON this page, not in a
   // floating toggle — "Batches" (Generated, fixed top-N per window)
-  // vs "Endless feed" (FeedSession, loads more as you scroll). Both
+  // vs "Unlimited" (FeedSession, loads more as you scroll). Both
   // views share the same mode + filters state, lifted here.
-  const [view, setView] = useState<'generated' | 'endless'>('generated')
+  const [view, setView] = useState<'generated' | 'unlimited'>('generated')
+  // Keep-place (§AE): BOTH views stay mounted (the inactive one
+  // hidden with `hidden`), so switching views preserves each
+  // view's loaded list and its scroll position is restored from
+  // here. The views also receive `active` so their fetch effects
+  // only run while visible — a hidden view must not refetch
+  // (or re-adopt filters) behind the user's back.
+  const scrollPosRef = useRef<Record<'generated' | 'unlimited', number>>({
+    generated: 0,
+    unlimited: 0,
+  })
+  const switchView = useCallback(
+    (next: 'generated' | 'unlimited') => {
+      scrollPosRef.current[view] = window.scrollY
+      setView(next)
+    },
+    [view],
+  )
+  useEffect(() => {
+    const y = scrollPosRef.current[view] ?? 0
+    if (y > 0) {
+      requestAnimationFrame(() => window.scrollTo({ top: y, behavior: 'auto' }))
+    }
+  }, [view])
   const [filtersState, setFiltersState] = useState<RecFilters | null>(null)
   const [draftState, setDraftState] = useState<RecFilters | null>(null)
   // Generated-mode resume state (batch 5, item A), owned here so
@@ -1207,29 +1330,29 @@ export default function Recommendations() {
               ? 'px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all'
               : 'px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors'}
             type="button"
-            onClick={() => setView('generated')}
+            onClick={() => switchView('generated')}
           >
             Batches
           </button>
           <button
             role="tab"
-            aria-selected={view === 'endless'}
-            className={view === 'endless'
+            aria-selected={view === 'unlimited'}
+            className={view === 'unlimited'
               ? 'px-3 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm transition-all'
               : 'px-3 py-1 rounded-full text-on-surface-variant font-label-sm text-label-sm hover:text-on-surface transition-colors'}
             type="button"
-            onClick={() => setView('endless')}
+            onClick={() => switchView('unlimited')}
           >
-            Endless feed
+            Unlimited
           </button>
         </div>
         <span className="font-label-sm text-label-sm text-on-surface-variant">
           {view === 'generated'
             ? 'A fixed batch from each search window — Generate again for the next window.'
-            : 'Loads more as you scroll — ordered for you as it loads.'}
+            : 'Unlimited beatmaps — keeps loading more as you scroll.'}
         </span>
       </div>
-      {view === 'generated' ? (
+      <div className={view === 'generated' ? undefined : 'hidden'}>
         <RecommendationsReal
           data={data}
           onBrowseSamples={() => setShowDemo(true)}
@@ -1238,8 +1361,10 @@ export default function Recommendations() {
           onFiltersChange={setFiltersState}
           onDraftChange={setDraftState}
           resumeRef={generationResumeRef}
+          active={view === 'generated'}
         />
-      ) : (
+      </div>
+      <div className={view === 'unlimited' ? undefined : 'hidden'}>
         <FeedReal
           data={data}
           onBrowseSamples={() => setShowDemo(true)}
@@ -1247,8 +1372,11 @@ export default function Recommendations() {
           draft={sharedDraft}
           onFiltersChange={setFiltersState}
           onDraftChange={setDraftState}
+          active={view === 'unlimited'}
+          renderBackToTop={false}
         />
-      )}
+      </div>
+      <BackToTop />
     </AppShell>
   )
 }

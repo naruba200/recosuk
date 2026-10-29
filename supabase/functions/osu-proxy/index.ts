@@ -173,6 +173,44 @@ function errorJson(error: string, status: number, code?: string): Response {
 // Upstream osu! calls
 // ---------------------------------------------------------------------------
 
+// Beatmap `.osu` files (PP feature): the website file endpoint, NOT
+// the API — no client-credentials token is sent (it is a public
+// website URL, not an API route, and the token buys nothing here).
+// Throttled like every upstream call and cached 1h in-memory; the
+// client caches per (beatmap, checksum, calculator version) itself,
+// so a stale hour here only delays a freshly-updated map, never a
+// wrong PP (the checksum key misses and the file is re-fetched).
+// The first-line check is the real guard: a missing/redirected map
+// lands on an HTML page, which must never be passed off as a .osu
+// file. Deploy: supabase functions deploy osu-proxy --no-verify-jwt
+const OSU_FILE_URL = 'https://osu.ppy.sh/osu'
+const MAX_OSU_FILE_BYTES = 5 * 1024 * 1024
+
+async function fetchBeatmapFile(beatmapId: number): Promise<{ beatmapId: number; osuFile: string }> {
+  const cacheKey = `GET osu-file ${beatmapId}`
+  const hit = cacheGet(cacheKey)
+  if (hit && typeof hit === 'object' && typeof (hit as { osuFile?: unknown }).osuFile === 'string') {
+    return hit as { beatmapId: number; osuFile: string }
+  }
+
+  await throttle()
+  const res = await fetch(`${OSU_FILE_URL}/${beatmapId}`, {
+    headers: { Accept: 'text/plain, */*' },
+  })
+  if (res.status === 404) throw new ProxyError('Beatmap file not found on osu!', 404)
+  if (!res.ok) throw new ProxyError(`osu! beatmap file request failed (${res.status})`, 502)
+  const text = await res.text()
+  if (text.length > MAX_OSU_FILE_BYTES) {
+    throw new ProxyError('Beatmap file is too large', 502)
+  }
+  if (!text.startsWith('osu file format v')) {
+    throw new ProxyError('osu! did not return a beatmap file', 502)
+  }
+  const body = { beatmapId, osuFile: text }
+  cacheSet(cacheKey, body, CACHE_TTL_BEATMAP_MS)
+  return body
+}
+
 async function osuFetch(path: string, init?: RequestInit): Promise<unknown> {
   const cacheKey = `${init?.method ?? 'GET'} ${path} ${init?.body ?? ''}`
   const ttl =
@@ -266,6 +304,8 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
     'getBeatmapPack',
     // The user-tag vocabulary is global (no mode scope).
     'getBeatmapUserTags',
+    // Beatmap .osu file fetch (PP feature): website endpoint, mode-free.
+    'getBeatmapFile',
   ])
   const mode = MODE_FREE_ACTIONS.has(action) ? undefined : requireMode(params)
 
@@ -311,6 +351,20 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
     case 'getBeatmap': {
       const beatmapId = requireId(params, 'beatmapId')
       return osuFetch(`/beatmaps/${beatmapId}`)
+    }
+    // Beatmap .osu file (PP feature): raw file text for one
+    // difficulty, fetched server-side from the public website
+    // endpoint so the browser never touches osu! directly. The
+    // client computes max PP from this with rosu-pp-js and
+    // caches per (beatmap, checksum, calculator version).
+    // Mode-free; needs the same redeploy as any function change:
+    // supabase functions deploy osu-proxy --no-verify-jwt
+    case 'getBeatmapFile': {
+      const raw = params.beatmapId
+      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
+        throw new ProxyError('beatmapId is required and must be a positive integer', 400)
+      }
+      return fetchBeatmapFile(raw)
     }
     // Single beatmapset lookup (M5): list detail, Tried & Rated
     // rows, and rating enrichment need titles/covers/tags/SR

@@ -1,5 +1,5 @@
 // Converted from Stitch export: stitch-raw/11-history.html
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
 import { useAuth } from '../lib/auth'
@@ -18,6 +18,16 @@ import {
   fetchBeatmapsetSummary,
   type BeatmapsetSummary,
 } from '../lib/beatmapsets'
+import {
+  seenKey,
+  seenStore,
+  takeRecentDownloaded,
+  useSeenVersion,
+} from '../lib/seenStore'
+
+/** Cap on rendered download rows: the store is id-only, so each
+ * row costs one (cached) beatmapset lookup. */
+const DOWNLOAD_HISTORY_LIMIT = 50
 function HistoryDemo() {
   return (
       <ExampleBlock note="Example — create an account to track tried & rated maps. Nothing here is saved yet.">
@@ -993,12 +1003,57 @@ interface HistoryRow {
   summary: BeatmapsetSummary | null
 }
 
-function HistoryReal({ userId }: { userId: string }) {
+function HistoryReal({ userId, username }: { userId: string; username: string | null }) {
   const [rows, setRows] = useState<HistoryRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modeFilter, setModeFilter] = useState<GameMode | 'all'>('all')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
+
+  // Downloaded section (§AE): the seen store's `downloaded` list
+  // for this account's key is the same source of truth the
+  // recommendation hiding uses — ids only, newest first, capped.
+  // Titles come from the same cached beatmapset lookup the
+  // feedback rows use; an id that cannot be resolved shows the
+  // honest `Beatmapset #id` fallback, never an invented title.
+  // Limits, stated in the section footnote: per-browser and per
+  // tier+username key — guest downloads live under the guest key
+  // and do not carry into this account view.
+  const seenVersion = useSeenVersion()
+  const downloadKey = username ? seenKey('account', username) : null
+  const downloadIds = useMemo(
+    () => (downloadKey ? seenStore.load(downloadKey).downloaded : []),
+    [downloadKey, seenVersion],
+  )
+  const { ids: recentDownloadIds, total: totalDownloads } = useMemo(
+    () => takeRecentDownloaded(downloadIds, DOWNLOAD_HISTORY_LIMIT),
+    [downloadIds],
+  )
+  const [downloadSummaries, setDownloadSummaries] = useState<
+    Record<number, BeatmapsetSummary | null>
+  >({})
+  useEffect(() => {
+    if (recentDownloadIds.length === 0) return
+    let live = true
+    Promise.all(recentDownloadIds.map((id) => fetchBeatmapsetSummary(id)))
+      .then((summaries) => {
+        if (!live) return
+        setDownloadSummaries((prev) => {
+          const next = { ...prev }
+          summaries.forEach((s, i) => {
+            next[recentDownloadIds[i]] = s
+          })
+          return next
+        })
+      })
+      .catch(() => {
+        // Summaries stay absent → id-fallback rows. A failed
+        // lookup must never block the downloads list itself.
+      })
+    return () => {
+      live = false
+    }
+  }, [recentDownloadIds])
 
   useEffect(() => {
     let live = true
@@ -1245,6 +1300,57 @@ function HistoryReal({ userId }: { userId: string }) {
           </div>
         </>
       )}
+
+      {downloadKey && (
+        <section className="mt-space-lg" aria-label="Downloaded beatmaps">
+          <h2 className="font-headline-sm text-headline-sm text-on-surface mb-space-xs">Downloaded</h2>
+          <p className="font-body-sm text-body-sm text-on-surface-variant mb-space-sm">
+            {totalDownloads === 0
+              ? 'No downloads recorded in this browser yet.'
+              : `Showing the ${recentDownloadIds.length} most recent of ${totalDownloads} downloaded beatmapsets.`}
+          </p>
+          {recentDownloadIds.length > 0 && (
+            <div className="flex flex-col gap-space-sm">
+              {recentDownloadIds.map((id) => {
+                const summary = downloadSummaries[id] ?? null
+                return (
+                  <div
+                    key={id}
+                    className="flex flex-col sm:flex-row sm:items-center gap-3 p-space-md rounded-DEFAULT bg-surface-container"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-11 h-11 rounded-full overflow-hidden flex-shrink-0 bg-surface-container-highest">
+                        {summary?.cover ? (
+                          <img className="w-full h-full object-cover" alt="" src={summary.cover} loading="lazy" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <span className="material-symbols-outlined text-on-surface-variant">music_note</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-label-md text-label-md text-on-surface truncate">
+                          {summary ? summary.title : `Beatmapset #${id}`}
+                        </span>
+                        <span className="font-label-sm text-label-sm text-on-surface-variant truncate">
+                          {summary ? `by ${summary.artist}` : 'Details unavailable'}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[11px] flex-shrink-0">
+                      Downloaded
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <p className="font-body-sm text-body-sm text-on-surface-variant mt-space-sm">
+            Download history is stored locally in this browser, under this account&apos;s key —
+            it doesn&apos;t follow you to other browsers, and guest downloads stay separate.
+          </p>
+        </section>
+      )}
     </div>
   )
 }
@@ -1262,7 +1368,7 @@ export default function History() {
   const isReal = tier === 'account' && !!user && isSupabaseConfigured
   return (
     <AppShell identity={pageIdentity}>
-      {isReal && user ? <HistoryReal userId={user.id} /> : <HistoryDemo />}
+      {isReal && user ? <HistoryReal userId={user.id} username={sidebarName} /> : <HistoryDemo />}
     </AppShell>
   )
 }

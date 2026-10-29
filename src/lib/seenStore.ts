@@ -211,3 +211,20 @@ export function isHardSeen(state: SeenState, beatmapsetId: number): boolean {
 export function isPlayed(state: SeenState, beatmapsetId: number): boolean {
   return state.played.includes(beatmapsetId)
 }
+
+/**
+ * History's "Downloaded" section (§AE): the store holds ids in
+ * oldest-first insertion order (Set iteration order, preserved
+ * through save/load), so newest-first is a reverse. Capped — the
+ * section renders at most `limit` rows and reports the total, so
+ * a long download history never floods the page with per-id
+ * lookups. Pure: no storage access, no fetching.
+ */
+export function takeRecentDownloaded(
+  downloaded: readonly number[],
+  limit: number,
+): { ids: number[]; total: number } {
+  const total = downloaded.length
+  const ids = [...downloaded].reverse().slice(0, Math.max(0, limit))
+  return { ids, total }
+}

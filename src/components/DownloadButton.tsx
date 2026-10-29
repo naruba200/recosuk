@@ -44,12 +44,6 @@ interface DownloadButtonProps {
   mode: GameMode
   seenKeyValue: string
   downloaded?: boolean
-  /**
-   * Mirror only: hide the done-state (replay) icon even when the
-   * set was downloaded / registered. Recording is untouched —
-   * the click still registers and records the download.
-   */
-  suppressDownloadedState?: boolean
   onDownloaded?: () => void
 }
 
@@ -60,7 +54,6 @@ export default function DownloadButton({
   mode,
   seenKeyValue,
   downloaded = false,
-  suppressDownloadedState = false,
   onDownloaded,
 }: DownloadButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -103,9 +96,12 @@ export default function DownloadButton({
   const nativeOrder = displayOrderFor(noVideo).filter((id) => id !== 'official')
   const autoFirstName = mirrorNameFor(nativeOrder[0] ?? null)
 
-  const isDone = suppressDownloadedState
-    ? false
-    : downloaded || latest?.status === 'browser'
+  // Done state: the `downloaded` prop (seen store) or the latest
+  // register entry. Every screen shows it the same way — the
+  // Mirror-only suppression (batch 11, part 3) was removed in
+  // §AE: it was the reason the Mirror icon never flipped after
+  // a download.
+  const isDone = downloaded || latest?.status === 'browser'
   // The one exception to icon-only: a failed Songs-folder copy must
   // stay visible (the dock row says it too, but the dock can be
   // hidden while this row stays on screen).

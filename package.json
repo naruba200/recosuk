@@ -15,6 +15,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4",
+    "rosu-pp-js": "https://github.com/MaxOhn/rosu-pp-js/releases/download/v4.0.1/rosu_pp_js_bundler.tar.gz",
     "zustand": "^5.0.16"
   },
   "devDependencies": {

@@ -35,7 +35,8 @@ import {
   type MirrorView,
   type RangeFilter,
 } from '../lib/mirrorSearch'
-import { seenKey, seenStore } from '../lib/seenStore'
+import { seenKey, seenStore, useSeenVersion } from '../lib/seenStore'
+import BackToTop from '../components/BackToTop'
 import { useCapabilities } from '../lib/capabilities'
 import { useRowMaps } from '../lib/useRowMaps'
 import { useAuth } from '../lib/auth'
@@ -805,17 +806,58 @@ const TAB_ORDER: { id: MirrorTab; label: string; dot?: string }[] = [
   { id: 'mania', label: 'Mania', dot: 'bg-primary-fixed' },
 ]
 
+/**
+ * Keep-place snapshot (§AE): everything needed to resume Mirror
+ * exactly where the user left it. Transient UI state (busy,
+ * loadingMore, error, drawer) is deliberately NOT preserved —
+ * a restored screen shows its results immediately, not a
+ * spinner.
+ */
+interface MirrorPlace {
+  key: string
+  tab: MirrorTab
+  query: string
+  debouncedQuery: string
+  sort: MirrorSort
+  filters: MirrorFilters
+  view: MirrorView
+  results: MirrorResult[]
+  total: number | null
+  cursors: Partial<Record<GameMode, string | null>>
+  exhausted: Partial<Record<GameMode, boolean>>
+  scrollY: number
+}
+
+let mirrorPlace: MirrorPlace | null = null
+
 function MirrorReal() {
   const globalMode = useModeStore((s) => s.mode)
   const setGlobalMode = useModeStore((s) => s.setMode)
   const { tier, user } = useAuth()
   const caps = useCapabilities()
   const guestSession = useGuestStore((s) => s.session)
-  const [tab, setTab] = useState<MirrorTab>(globalMode)
-  const [query, setQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [sort, setSort] = useState<MirrorSort>(DEFAULT_MIRROR_SORT)
-  const [filters, setFilters] = useState<MirrorFilters>(() => defaultMirrorFilters())
+  // Seen key first: keep-place restore (below) is keyed by it, so
+  // it must exist before the state initializers read the holder.
+  const username = guestSession?.osuUsername ?? null
+  const key = seenKey(tier, username ?? 'mirror')
+  // Keep-place (§AE): the last snapshot of this screen's list
+  // state, saved on unmount and restored on the next mount with
+  // the SAME seen key — navigating away and back keeps the
+  // loaded items, cursors, filters and scroll position. Mode-tab
+  // switches still reset (they run a fresh search, as before);
+  // a different key (different tier/identity) restores nothing.
+  // Module-level, not a store: one snapshot, no persistence
+  // beyond the session, no cross-screen sharing.
+  const [initialPlace] = useState<MirrorPlace | null>(() =>
+    mirrorPlace && mirrorPlace.key === key ? mirrorPlace : null,
+  )
+  const [tab, setTab] = useState<MirrorTab>(initialPlace?.tab ?? globalMode)
+  const [query, setQuery] = useState(initialPlace?.query ?? '')
+  const [debouncedQuery, setDebouncedQuery] = useState(initialPlace?.debouncedQuery ?? '')
+  const [sort, setSort] = useState<MirrorSort>(initialPlace?.sort ?? DEFAULT_MIRROR_SORT)
+  const [filters, setFilters] = useState<MirrorFilters>(
+    () => initialPlace?.filters ?? defaultMirrorFilters(),
+  )
   // Drawer animation state: `drawerMounted` keeps the fixed
   // overlay in the DOM for the close transition;
   // `drawerShown` drives the transform/opacity classes. The
@@ -827,27 +869,87 @@ function MirrorReal() {
   const drawerTimerRef = useRef<number | null>(null)
   // Grid/list view, persisted in localStorage. List is the
   // pre-existing layout and the fallback for any stored junk.
+  // A keep-place restore wins over the stored preference: the
+  // user left the screen in that view.
   const [view, setView] = useState<MirrorView>(() => {
+    if (initialPlace) return initialPlace.view
     try {
       return parseMirrorView(window.localStorage.getItem(MIRROR_VIEW_STORAGE_KEY))
     } catch {
       return 'list'
     }
   })
-  const [results, setResults] = useState<MirrorResult[]>([])
-  const [total, setTotal] = useState<number | null>(null)
+  const [results, setResults] = useState<MirrorResult[]>(initialPlace?.results ?? [])
+  const [total, setTotal] = useState<number | null>(initialPlace?.total ?? null)
   const [busy, setBusy] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loadWarning, setLoadWarning] = useState<string | null>(null)
-  const [cursors, setCursors] = useState<Partial<Record<GameMode, string | null>>>({})
-  const [exhausted, setExhausted] = useState<Partial<Record<GameMode, boolean>>>({})
+  const [cursors, setCursors] = useState<Partial<Record<GameMode, string | null>>>(
+    initialPlace?.cursors ?? {},
+  )
+  const [exhausted, setExhausted] = useState<Partial<Record<GameMode, boolean>>>(
+    initialPlace?.exhausted ?? {},
+  )
   const runRef = useRef(0)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const loadingMoreRef = useRef(false)
-
-  const username = guestSession?.osuUsername ?? null
-  const key = seenKey(tier, username ?? 'mirror')
+  // Keep-place save/restore (§AE): the latest state is mirrored
+  // into a ref every render, so the unmount cleanup below always
+  // saves the current list — no stale closure. The restore guards
+  // further down (mount-snapshot comparisons) keep the restored
+  // tab/list intact: the global-mode sync and the fresh search
+  // must not fire on a restore (a later global-mode change still
+  // syncs, and any tab/sort/filter/query change still runs a
+  // fresh search).
+  const placeRef = useRef({
+    tab,
+    query,
+    debouncedQuery,
+    sort,
+    filters,
+    view,
+    results,
+    total,
+    cursors,
+    exhausted,
+  })
+  placeRef.current = {
+    tab,
+    query,
+    debouncedQuery,
+    sort,
+    filters,
+    view,
+    results,
+    total,
+    cursors,
+    exhausted,
+  }
+  // StrictMode-safe restore guards (§AE): dev double-invokes
+  // effects, so a "skip once" ref flag would be consumed by the
+  // first (simulated) run and the second would discard the
+  // restore. These comparisons are idempotent instead — they
+  // stay true across the double-invoke and only turn false when
+  // something actually changed. `mountGlobalMode` is the global
+  // mode at mount; `searchRanRef` flips once a real search runs,
+  // so reverting filters to exactly the restored values still
+  // searches instead of showing the previous filter set's rows.
+  const mountGlobalModeRef = useRef(globalMode)
+  const searchRanRef = useRef(false)
+  useEffect(
+    () => () => {
+      mirrorPlace = { key, ...placeRef.current, scrollY: window.scrollY }
+    },
+    [key],
+  )
+  useEffect(() => {
+    if (!initialPlace || initialPlace.scrollY <= 0) return
+    const y = initialPlace.scrollY
+    requestAnimationFrame(() => window.scrollTo({ top: y, behavior: 'auto' }))
+    // Run once on mount: the restore is a mount-time snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const queryText = useMemo(
     () => buildMirrorQueryText(debouncedQuery, filters),
     [debouncedQuery, filters],
@@ -941,9 +1043,13 @@ function MirrorReal() {
   )
 
   // Follow the global mode when it changes elsewhere (top-bar pills).
+  // Skipped while the global mode is still the mount-time value on
+  // a keep-place restore: the restored tab wins over the global
+  // mode until the user changes either.
   useEffect(() => {
+    if (initialPlace && globalMode === mountGlobalModeRef.current) return
     setTab(globalMode)
-  }, [globalMode])
+  }, [globalMode, initialPlace])
 
   // Typing is debounced; filter/sort/tab changes search immediately
   // through the effect below (they change queryText/filters/sort).
@@ -953,8 +1059,23 @@ function MirrorReal() {
   }, [query])
 
   useEffect(() => {
+    // Skipped on a keep-place restore while the search inputs
+    // still match the snapshot: the restored list is already on
+    // screen, and a fresh search would discard it. Any real
+    // change (or a search having run once) searches normally.
+    if (
+      initialPlace &&
+      !searchRanRef.current &&
+      tab === initialPlace.tab &&
+      sort === initialPlace.sort &&
+      filters === initialPlace.filters &&
+      queryText === buildMirrorQueryText(initialPlace.debouncedQuery, initialPlace.filters)
+    ) {
+      return
+    }
+    searchRanRef.current = true
     void runFreshSearch({ fresh: false })
-  }, [runFreshSearch])
+  }, [runFreshSearch, initialPlace, tab, sort, filters, queryText])
 
   // Infinite scroll: the sentinel loads the next cursor page per
   // mode and appends, deduped. Changing anything above resets the
@@ -1116,7 +1237,20 @@ function MirrorReal() {
     beatmapsetIds: results.map((r) => r.candidate.beatmapsetId),
   })
 
-  const downloaded = seenStore.load(key).downloaded
+  // Live downloaded state (§AE): the shared seen-version signal,
+  // like the two Recommendations screens — the old plain
+  // render-time read never re-rendered when a download landed,
+  // and the rows suppressed the downloaded indicator entirely
+  // (batch 11, part 3), so the download icon could never flip
+  // in Mirror. Both are fixed here: the signal re-renders on
+  // every seen-store mutation, and the rows receive `downloaded`
+  // like every other screen. The "Downloaded from Mirror"
+  // panel below becomes live with the same change.
+  const seenVersion = useSeenVersion()
+  const downloaded = useMemo(
+    () => seenStore.load(key).downloaded,
+    [key, seenVersion],
+  )
   const sessionDownloads = results.filter((r) => downloaded.includes(r.candidate.beatmapsetId))
 
   return (
@@ -1402,10 +1536,9 @@ function MirrorReal() {
           {/* List = the pre-existing rows. Grid = the same rows
               as stacked cards in a responsive 2-column grid
               (BeatmapRow `card`), same content and actions.
-              No downloaded indicator on Mirror rows in either
-              view (batch 11, part 3): rows render without the
-              downloaded badge/icon; download recording and the
-              "Downloaded from Mirror" history panel are untouched. */}
+              Downloaded rows show the downloaded badge + redo
+              icon like every other screen (§AE removed the
+              batch-11 suppression that hid them here). */}
           {view === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {results.map(({ candidate, mode: entryMode }) => (
@@ -1414,7 +1547,7 @@ function MirrorReal() {
                   candidate={candidate}
                   mode={entryMode}
                   seenKeyValue={key}
-                  hideDownloadedIndicator
+                  downloaded={downloaded.includes(candidate.beatmapsetId)}
                   card
                   feedback={rowMaps.feedbackById.get(candidate.beatmapId) ?? null}
                   containing={rowMaps.containingBySet.get(candidate.beatmapsetId) ?? []}
@@ -1433,7 +1566,7 @@ function MirrorReal() {
                   candidate={candidate}
                   mode={entryMode}
                   seenKeyValue={key}
-                  hideDownloadedIndicator
+                  downloaded={downloaded.includes(candidate.beatmapsetId)}
                   feedback={rowMaps.feedbackById.get(candidate.beatmapId) ?? null}
                   containing={rowMaps.containingBySet.get(candidate.beatmapsetId) ?? []}
                   onFeedbackChange={rowMaps.onFeedbackChange}
@@ -1478,6 +1611,7 @@ function MirrorReal() {
           </div>
         </aside>
       </div>
+      <BackToTop />
     </div>
   )
 }

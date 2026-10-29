@@ -5,6 +5,8 @@ import { modeLabel } from '../lib/mode'
 import type { RecCandidate } from '../lib/recommend'
 import { applyTagAllowlist, essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
 import { usePreviewPlayer } from '../lib/previewPlayer'
+import { usePpRange } from '../lib/usePpRange'
+import { formatPpRange, ppFormulaIsCurrent, PP_STALENESS_NOTE } from '../lib/pp'
 import { useCapabilities } from '../lib/capabilities'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
@@ -40,15 +42,6 @@ interface BeatmapRowProps {
   mode: GameMode
   seenKeyValue: string
   downloaded?: boolean
-  /**
-   * Mirror only (batch 11, part 3): suppress the downloaded
-   * badge + the download button's done-state icon on Mirror
-   * rows. Download recording/history is untouched — the button
-   * still registers the download; only the row display hides
-   * that this set was downloaded. Every other screen keeps the
-   * indicator (default false).
-   */
-  hideDownloadedIndicator?: boolean
   /** Card (grid) layout: same content, stacked instead of a row. */
   card?: boolean
   /**
@@ -368,7 +361,6 @@ export default function BeatmapRow({
   mode,
   seenKeyValue,
   downloaded = false,
-  hideDownloadedIndicator = false,
   card = false,
   tagAllowlist,
   onSkip,
@@ -386,7 +378,29 @@ export default function BeatmapRow({
   const [saveOpen, setSaveOpen] = useState(false)
   const [rateOpen, setRateOpen] = useState(false)
   const playing = preview.isPlaying(c.beatmapsetId)
-  const isDownloaded = downloaded && !hideDownloadedIndicator
+  const isDownloaded = downloaded
+
+  // Max-PP range (see lib/pp): computed lazily once the row is near
+  // the viewport; `—` while loading or unavailable. Rows without
+  // difficulty data (never from setToCandidate/rankedSetToCandidate)
+  // show no pill at all. The † marker + note name the October 2025
+  // formula for reworked modes — never presented as current-formula.
+  const ppHasDifficulties = !!c.difficulties && c.difficulties.length > 0
+  const { ref: ppRef, range: ppRangeValue, state: ppState } = usePpRange(
+    ppHasDifficulties ? c.difficulties : undefined,
+  )
+  const ppStale = !ppFormulaIsCurrent(mode)
+  const ppText = ppState === 'ready' && ppRangeValue ? formatPpRange(ppRangeValue) : '—'
+  const ppTitle = ppRangeValue
+    ? ppStale
+      ? PP_STALENESS_NOTE
+      : 'Max PP for a perfect score'
+    : ppState === 'loading'
+      ? 'Computing max PP…'
+      : 'PP unavailable for this map'
+  const ppAriaLabel = ppRangeValue
+    ? `Max PP range ${formatPpRange(ppRangeValue)}${ppStale ? '. October 2025 formula; the July 2026 rework is not yet in this calculator' : ', for a perfect score'}`
+    : ppTitle
 
   const goAuth = () => navigate('/auth')
 
@@ -396,7 +410,7 @@ export default function BeatmapRow({
   const inAnyList = containing.length > 0
 
   return (
-    <article className={`group relative flex flex-col ${card ? 'items-start' : 'xl:flex-row xl:items-center'} justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md`}>
+    <article ref={ppRef} className={`group relative flex flex-col ${card ? 'items-start' : 'xl:flex-row xl:items-center'} justify-between p-space-md bg-surface-container-low hover:bg-surface-container transition-all duration-200 rounded-lg shadow-sm gap-space-md`}>
       <div className="flex items-center gap-space-md flex-1 min-w-0 w-full">
         <div className="relative flex-shrink-0">
           <div className="w-14 h-14 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-primary to-secondary">
@@ -426,6 +440,23 @@ export default function BeatmapRow({
                 ? `${c.srMin.toFixed(2)}★ – ${c.srMax.toFixed(2)}★`
                 : `${c.sr.toFixed(2)}★`}
             </span>
+            {/* Max-PP range across the set's in-mode difficulties
+                (same aggregate pattern as the SR pill): one number
+                when every difficulty shares one max PP, `—` while
+                loading or unavailable. The † marks the October
+                2025 formula on reworked modes (see PP_STALENESS_NOTE). */}
+            {ppHasDifficulties && (
+              <span
+                className="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm"
+                title={ppTitle}
+                aria-label={ppAriaLabel}
+              >
+                {ppText}
+                {ppRangeValue && ppStale && (
+                  <sup aria-hidden="true" className="text-[10px] leading-none">†</sup>
+                )}
+              </span>
+            )}
             <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">{c.title}</h3>
             <span className="text-on-surface-variant font-body-sm text-body-sm">by {c.artist}</span>
             {isDownloaded && (
@@ -526,7 +557,6 @@ export default function BeatmapRow({
             mode={mode}
             seenKeyValue={seenKeyValue}
             downloaded={downloaded}
-            suppressDownloadedState={hideDownloadedIndicator}
             onDownloaded={onDownloaded}
           />
           {caps.canSave && user ? (

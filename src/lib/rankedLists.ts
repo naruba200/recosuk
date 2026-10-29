@@ -3,7 +3,7 @@ import { proxyCall } from './osu'
 import { dataCache } from './dataCache'
 import type { GameMode } from './mode'
 import { modeLabel } from './mode'
-import type { RecCandidate, SearchBeatmapset, SearchPage } from './recommend'
+import type { RecCandidate, SearchBeatmapset, SearchDifficulty, SearchPage } from './recommend'
 import { splitTags } from './recommend'
 import { addToList, createList, loadListItems, loadLists } from './lists'
 
@@ -77,9 +77,10 @@ export function rankedSetToCandidate(
 ): RecCandidate | null {
   if (!set || typeof set.id !== 'number') return null
   const inMode = (set.beatmaps ?? []).filter(
-    (b) =>
-      b &&
+    (b): b is SearchDifficulty =>
+      !!b &&
       b.mode === mode &&
+      typeof b.id === 'number' &&
       typeof b.difficulty_rating === 'number' &&
       Number.isFinite(b.difficulty_rating),
   )
@@ -102,6 +103,17 @@ export function rankedSetToCandidate(
     sr: diff.difficulty_rating,
     srMin: Math.min(...srs),
     srMax: Math.max(...srs),
+    // PP range inputs: every in-mode difficulty with a numeric id
+    // (same list as the SR range here — the median pick above
+    // already requires a finite SR, so this matches it exactly).
+    difficulties: inMode.map((b) => ({
+      beatmapId: b.id,
+      mode,
+      checksum:
+        typeof b.checksum === 'string' && b.checksum !== '' ? b.checksum : undefined,
+      lastUpdated:
+        typeof b.last_updated === 'string' && b.last_updated !== '' ? b.last_updated : undefined,
+    })),
     bpm: diff.bpm ?? 0,
     lengthSec: diff.total_length ?? 0,
     cs: diff.cs ?? 0,

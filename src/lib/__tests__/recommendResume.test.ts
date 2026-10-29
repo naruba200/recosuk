@@ -23,6 +23,8 @@ import {
   emptyGenerationResume,
   FeedSession,
   generateRecommendations,
+  generateUnseenWindow,
+  MAX_UNSEEN_WINDOW_SKIPS,
   type SearchBeatmapset,
   type SearchPage,
 } from '../recommend'
@@ -232,7 +234,8 @@ describe('Regenerate / Retry flow (batch 6, defect 1; part 4: Generated ignores 
    * window. Since part 4, Generated runs pass `ignoreSeen: true`,
    * so the window advance — not seen exclusion — is what
    * separates the two runs. (The header Regenerate button was
-   * removed in batch 7; Renew is the restart path.)
+   * removed in batch 7; Renew is the advance path — it continues
+   * via the resume, never restarts from page 1.)
    */
   it('a second non-fresh generation returns the next window via the resume', async () => {
     mockPagedSearch()
@@ -384,8 +387,11 @@ describe('Renew determinism — no shuffle (shuffle removed 2026-10-29)', () => 
     const first = await generateRecommendations(profile, 'mania', base)
     const plainIds = first.items.map((c) => c.beatmapsetId)
 
-    // A Renew-style fresh run (restart from page 1) returns the
-    // same PP-anchored fixed ranking — no shuffle, no rng.
+    // A fresh restart (page 1) returns the same PP-anchored
+    // fixed ranking — no shuffle, no rng. (Renew itself no
+    // longer restarts: it advances via the resume — see
+    // generateUnseenWindow. Fresh restarts still happen on
+    // filter/mode/profile changes.)
     const renewed = await generateRecommendations(profile, 'mania', {
       ...base,
       fresh: true,
@@ -413,7 +419,7 @@ describe('Renew determinism — no shuffle (shuffle removed 2026-10-29)', () => 
     expect('shuffled' in result.diagnostics).toBe(false)
   })
 
-  it('windowExhausted is still reported on a Renew-style resume run', async () => {
+  it('windowExhausted is still reported on a Renew-style resume-continue run', async () => {
     mockPagedSearch()
     const profile = testProfile()
     const filters = defaultFiltersFor(profile)
@@ -432,5 +438,203 @@ describe('Renew determinism — no shuffle (shuffle removed 2026-10-29)', () => 
     })
     expect(renewed.items.map((c) => c.beatmapsetId).sort()).toEqual([5, 6])
     expect(renewed.diagnostics.windowExhausted).toBe(true)
+  })
+})
+
+describe('Renew-advance: generateUnseenWindow skips all-hidden windows (2026-10-29)', () => {
+  /**
+   * Cursor-aware search mock with an arbitrary page chain: each
+   * entry is [cursorKey, setIds, nextCursor]. The mock ignores
+   * the query text (as mockPagedSearch does), so every query
+   * walks the same chain and the per-call fetch cap of 2 pages
+   * yields 2 sets per page × 2 pages = 4 sets per window, then
+   * the next windows in chain order.
+   */
+  function mockPagedSearchChain(chain: Array<[string, number[], string | null]>) {
+    const pages = new Map<string, SearchPage>()
+    for (const [key, ids, next] of chain) {
+      pages.set(key, {
+        beatmapsets: ids.map(testSet),
+        cursor_string: next,
+        total: 12,
+      })
+    }
+    mocks.proxyCall.mockImplementation(async (action: string, params?: Record<string, unknown>) => {
+      if (action === 'searchBeatmapsets') {
+        const cursor = typeof params?.cursor_string === 'string' ? params.cursor_string : ''
+        return pages.get(cursor) ?? { beatmapsets: [], cursor_string: null, total: 12 }
+      }
+      return { attributes: { star_rating: 4.4 } }
+    })
+  }
+
+  function sixPageChain(): Array<[string, number[], string | null]> {
+    return [
+      ['', [1, 2], 'c1'],
+      ['c1', [3, 4], 'c2'],
+      ['c2', [5, 6], 'c3'],
+      ['c3', [7, 8], 'c4'],
+      ['c4', [9, 10], 'c5'],
+      ['c5', [11, 12], null],
+    ]
+  }
+
+  const baseOpts = (profile: ReturnType<typeof testProfile>) => ({
+    count: 20,
+    filters: defaultFiltersFor(profile),
+    seen: EMPTY_SEEN,
+    ignoreSeen: true,
+  })
+
+  it('returns the first window untouched when it has a visible map', async () => {
+    mockPagedSearchChain(sixPageChain())
+    const profile = testProfile()
+    const { result, skippedWindows, hitSkipCap } = await generateUnseenWindow(
+      profile,
+      'mania',
+      baseOpts(profile),
+      (id) => id === 1,
+    )
+    expect(result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
+    expect(skippedWindows).toBe(0)
+    expect(hitSkipCap).toBe(false)
+  })
+
+  it('skips an all-hidden first window and returns the next window via the resume', async () => {
+    mockPagedSearchChain(sixPageChain())
+    const profile = testProfile()
+    const hidden = new Set([1, 2, 3, 4])
+    const { result, skippedWindows, hitSkipCap } = await generateUnseenWindow(
+      profile,
+      'mania',
+      baseOpts(profile),
+      (id) => hidden.has(id),
+    )
+    // Window 1 ([1..4]) is entirely hidden; window 2 ([5..8])
+    // has visible maps and is returned, with its cursor spent
+    // only through window 2 (a third window still exists).
+    expect(result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([5, 6, 7, 8])
+    expect(skippedWindows).toBe(1)
+    expect(hitSkipCap).toBe(false)
+    expect(result.diagnostics.windowExhausted).toBe(false)
+    // The returned resume continues past the skipped window:
+    // a further continue call serves window 3, never window 1.
+    const next = await generateRecommendations(profile, 'mania', {
+      ...baseOpts(profile),
+      resume: result.nextResume,
+    })
+    expect(next.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([9, 10, 11, 12])
+  })
+
+  it('a second Renew-advance call serves only ids the first never served', async () => {
+    mockPagedSearchChain(sixPageChain())
+    const profile = testProfile()
+    const servedBefore = new Set<number>()
+    const first = await generateUnseenWindow(
+      profile,
+      'mania',
+      baseOpts(profile),
+      (id) => servedBefore.has(id),
+    )
+    expect(first.result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
+    for (const c of first.result.items) servedBefore.add(c.beatmapsetId)
+    const second = await generateUnseenWindow(
+      profile,
+      'mania',
+      { ...baseOpts(profile), resume: first.result.nextResume },
+      (id) => servedBefore.has(id),
+    )
+    expect(second.result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([5, 6, 7, 8])
+    expect(second.result.items.every((c) => !servedBefore.has(c.beatmapsetId))).toBe(true)
+    expect(second.skippedWindows).toBe(0)
+  })
+
+  it('returns the last fetched window at exhaustion so the caller can fall back to it', async () => {
+    mockPagedSearch()
+    const profile = testProfile()
+    const hidden = new Set([1, 2, 3, 4, 5, 6])
+    const { result, skippedWindows, hitSkipCap } = await generateUnseenWindow(
+      profile,
+      'mania',
+      baseOpts(profile),
+      (id) => hidden.has(id),
+    )
+    // Window 1 hidden → skipped; window 2 ([5, 6]) hidden too
+    // but its cursor is spent, so it is returned for the
+    // exhaustion fallback instead of an empty list.
+    expect(result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([5, 6])
+    expect(result.diagnostics.windowExhausted).toBe(true)
+    expect(skippedWindows).toBe(1)
+    expect(hitSkipCap).toBe(false)
+  })
+
+  it('stops at the skip cap and reports it, with windows still unfetched', async () => {
+    // Eight pages = four windows: the cap must stop the hunt at
+    // window 3 with a fourth window still unfetched.
+    mockPagedSearchChain([
+      ['', [1, 2], 'c1'],
+      ['c1', [3, 4], 'c2'],
+      ['c2', [5, 6], 'c3'],
+      ['c3', [7, 8], 'c4'],
+      ['c4', [9, 10], 'c5'],
+      ['c5', [11, 12], 'c6'],
+      ['c6', [13, 14], 'c7'],
+      ['c7', [15, 16], null],
+    ])
+    const profile = testProfile()
+    const hidden = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+    const { result, skippedWindows, hitSkipCap } = await generateUnseenWindow(
+      profile,
+      'mania',
+      baseOpts(profile),
+      (id) => hidden.has(id),
+      2,
+    )
+    // Two skips (windows 1 and 2), then the cap stops the hunt:
+    // window 3 ([9..12]) is returned all-hidden, a fourth window
+    // is still unfetched, and the cap is reported.
+    expect(result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([9, 10, 11, 12])
+    expect(result.diagnostics.windowExhausted).toBe(false)
+    expect(skippedWindows).toBe(2)
+    expect(hitSkipCap).toBe(true)
+  })
+
+  it('the default skip cap is 5', () => {
+    expect(MAX_UNSEEN_WINDOW_SKIPS).toBe(5)
+  })
+
+  it('an empty-items window is returned as-is (diagnostics stay honest)', async () => {
+    mocks.proxyCall.mockImplementation(async (action: string) => {
+      if (action === 'searchBeatmapsets') return { beatmapsets: [], cursor_string: null, total: 0 }
+      return { attributes: { star_rating: 4.4 } }
+    })
+    const profile = testProfile()
+    const { result, skippedWindows } = await generateUnseenWindow(
+      profile,
+      'mania',
+      baseOpts(profile),
+      () => true,
+    )
+    expect(result.items).toEqual([])
+    expect(result.diagnostics.windowExhausted).toBe(true)
+    expect(skippedWindows).toBe(0)
+  })
+
+  it('fresh:true restarts from page 1 and the skip loop still advances from there', async () => {
+    mockPagedSearchChain(sixPageChain())
+    const profile = testProfile()
+    const first = await generateRecommendations(profile, 'mania', baseOpts(profile))
+    expect(first.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
+    const hidden = new Set([1, 2, 3, 4])
+    const { result, skippedWindows } = await generateUnseenWindow(
+      profile,
+      'mania',
+      { ...baseOpts(profile), resume: first.nextResume, fresh: true },
+      (id) => hidden.has(id),
+    )
+    // Fresh discards the resume (page 1 again, all hidden), the
+    // loop advances to window 2 instead of re-serving window 1.
+    expect(result.items.map((c) => c.beatmapsetId).sort((a, b) => a - b)).toEqual([5, 6, 7, 8])
+    expect(skippedWindows).toBe(1)
   })
 })

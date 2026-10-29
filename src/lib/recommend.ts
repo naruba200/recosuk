@@ -37,6 +37,15 @@ export interface SearchDifficulty {
   cs?: number
   ar?: number
   od?: number
+  /**
+   * Opportunistic payload fields (osu! Beatmap object): the .osu
+   * checksum is the exact file-version key for the PP cache, and
+   * last_updated is its fallback. Neither is guaranteed present
+   * in every payload — the PP cache key falls back to the bare
+   * beatmap id when both are absent, never failing the row.
+   */
+  checksum?: string
+  last_updated?: string
 }
 
 export interface SearchBeatmapset {
@@ -61,6 +70,20 @@ export interface SearchPage {
   total?: number
 }
 
+/**
+ * One difficulty of a candidate set, as carried for the max-PP
+ * range (see lib/pp): the .osu file is fetched per beatmap id and
+ * computed in the difficulty's own ruleset. Checksum/lastUpdated
+ * are the cache version signals, read opportunistically from the
+ * search payload (see SearchDifficulty).
+ */
+export interface CandidateDifficulty {
+  beatmapId: number
+  mode: GameMode
+  checksum?: string
+  lastUpdated?: string
+}
+
 // ---------------------------------------------------------------------------
 // Candidates + filters
 // ---------------------------------------------------------------------------
@@ -77,6 +100,14 @@ export interface RecCandidate {
   /** Lowest/highest star rating across the set's in-mode difficulties. */
   srMin: number
   srMax: number
+  /**
+   * The set's difficulties in the row's mode, carried from the
+   * already-fetched search payload (no extra API calls) so the
+   * row can compute the max-PP range (see lib/pp). Optional:
+   * candidates built before this field existed, and demo/test
+   * literals, omit it — rows without it show no PP pill.
+   */
+  difficulties?: CandidateDifficulty[]
   bpm: number
   lengthSec: number
   cs: number
@@ -352,35 +383,116 @@ export function applyTagAllowlist(
 }
 
 /**
- * Hide downloaded maps from a rendered recommendation list
- * (2026-10-29): sets in the seen store's `downloaded` list drop
- * out of the Generated and Endless rows. Exhaustion fallback:
- * when EVERY item in the current window is downloaded, the
- * downloaded items show again — with their downloaded state
- * visible — plus an honest note from the caller. "All" means
- * all of this rendered window, not the whole pool: a fresh
- * window or a new refill re-evaluates the rule from its own
- * items. Mirror / Welcome Recs / Collections never call this;
- * they keep showing downloaded state. Filtering happens at
- * list level, never inside BeatmapRow, and the engine's
- * fetch-time exclusion is untouched.
+ * Hide downloaded and previously-seen maps from a rendered
+ * recommendation list (2026-10-29): sets in the seen store's
+ * `downloaded` list, or in the `seenBefore` snapshot (the served
+ * set as of BEFORE the current window was generated), drop out
+ * of the rows. Exhaustion fallback: when EVERY item in the
+ * current window is hidden, the hidden items show again — with
+ * their downloaded state visible — plus an honest note from the
+ * caller. "All" means all of this rendered window, not the whole
+ * pool: a fresh window or a new refill re-evaluates the rule
+ * from its own items. The two fallback flags distinguish WHY
+ * the list came back: every item downloaded (the downloaded
+ * note) vs every item hidden for either reason (the seen note).
+ * The Generated/Batches view calls this; Mirror / Welcome Recs
+ * / Collections never do. Filtering happens at list level,
+ * never inside BeatmapRow, and the engine's fetch-time
+ * exclusion is untouched.
  */
+export interface SeenVisibility<T> {
+  visible: T[]
+  /** True when the fallback is active because every item was downloaded. */
+  showingDownloadedFallback: boolean
+  /** True when the fallback is active because every item was hidden
+   *  (downloaded or previously seen) but not every item was downloaded. */
+  showingSeenFallback: boolean
+}
+
+/**
+ * Visibility options: `showDownloaded` (the show-downloaded toggle,
+ * §AE) reveals downloaded sets again with their downloaded state —
+ * it overrides ONLY the downloaded rule; the served-before rule is
+ * untouched.
+ */
+export interface SeenVisibilityOptions {
+  showDownloaded?: boolean
+}
+
+export function applySeenVisibility<T extends { beatmapsetId: number }>(
+  items: readonly T[],
+  downloadedIds: ReadonlySet<number> | readonly number[],
+  seenBeforeIds: ReadonlySet<number> | readonly number[],
+  opts?: SeenVisibilityOptions,
+): SeenVisibility<T> {
+  // With the show-downloaded toggle ON, the downloaded set is
+  // treated as empty for hiding AND for the downloaded fallback —
+  // the toggle reveals those rows, so there is nothing to fall back
+  // to. The served-before rule still applies in full.
+  const downloaded = new Set(opts?.showDownloaded ? [] : downloadedIds)
+  const seenBefore = new Set(seenBeforeIds)
+  const visible = items.filter(
+    (c) => !downloaded.has(c.beatmapsetId) && !seenBefore.has(c.beatmapsetId),
+  )
+  if (visible.length > 0 || items.length === 0) {
+    return { visible, showingDownloadedFallback: false, showingSeenFallback: false }
+  }
+  const allDownloaded = items.every((c) => downloaded.has(c.beatmapsetId))
+  return {
+    visible: [...items],
+    showingDownloadedFallback: allDownloaded,
+    showingSeenFallback: !allDownloaded,
+  }
+}
+
 export interface DownloadVisibility<T> {
   visible: T[]
   /** True when the fallback is active: every item was downloaded. */
   showingDownloadedFallback: boolean
 }
 
+/**
+ * Downloaded-only entry point, kept for the Unlimited feed (which
+ * does its seen-dedupe at fetch time and must NOT hide
+ * previously-served rows here — its own rows ARE the served
+ * set). Identical to the previous implementation: the
+ * previously-seen set is empty, so only downloads hide.
+ */
 export function applyDownloadedVisibility<T extends { beatmapsetId: number }>(
   items: readonly T[],
   downloadedIds: readonly number[],
+  opts?: SeenVisibilityOptions,
 ): DownloadVisibility<T> {
-  const downloaded = new Set(downloadedIds)
-  const visible = items.filter((c) => !downloaded.has(c.beatmapsetId))
-  if (visible.length > 0 || items.length === 0) {
-    return { visible, showingDownloadedFallback: false }
-  }
-  return { visible: [...items], showingDownloadedFallback: true }
+  const { visible, showingDownloadedFallback } = applySeenVisibility(
+    items,
+    downloadedIds,
+    [],
+    opts,
+  )
+  return { visible, showingDownloadedFallback }
+}
+
+/**
+ * Unlimited-feed top-up guard (§AE): when hiding leaves the visible
+ * list thin, the feed fetches the next window on its own instead of
+ * waiting for the user to reach the bottom. Bounded — an
+ * all-downloaded remainder must not loop forever.
+ */
+export const FEED_TOP_UP_THRESHOLD = 10
+export const FEED_TOP_UP_MAX_CONSECUTIVE = 3
+
+export function shouldTopUpFeed(args: {
+  visibleCount: number
+  totalCount: number
+  ended: boolean
+  loading: boolean
+  showingFallback: boolean
+  consecutiveTopUps: number
+}): boolean {
+  if (args.ended || args.loading || args.showingFallback) return false
+  if (args.totalCount === 0) return false
+  if (args.visibleCount >= FEED_TOP_UP_THRESHOLD) return false
+  return args.consecutiveTopUps < FEED_TOP_UP_MAX_CONSECUTIVE
 }
 
 export function setToCandidate(
@@ -394,17 +506,22 @@ export function setToCandidate(
   if (!set || typeof set.id !== 'number') return null
   const diff = pickDifficulty(set, mode, profile, bounds)
   if (!diff) return null
+  // In-mode difficulties (same list pickDifficulty uses, minus the
+  // finite-SR requirement — PP needs no star rating): the SR range
+  // uses the finite-SR subset, the PP range uses every difficulty
+  // with a numeric id.
+  const inMode = (set.beatmaps ?? []).filter(
+    (b): b is SearchDifficulty =>
+      !!b && b.mode === mode && typeof b.id === 'number',
+  )
   // SR range across the set's in-mode difficulties (same in-mode
   // list pickDifficulty uses, independent of the picked difficulty
   // and of any bounds): a set with 2.1★–6.8★ diffs must not be
   // presented as a single SR value.
-  const inModeSrs = (set.beatmaps ?? [])
+  const inModeSrs = inMode
     .filter(
       (b) =>
-        b &&
-        b.mode === mode &&
-        typeof b.difficulty_rating === 'number' &&
-        Number.isFinite(b.difficulty_rating),
+        typeof b.difficulty_rating === 'number' && Number.isFinite(b.difficulty_rating),
     )
     .map((b) => b.difficulty_rating)
   return {
@@ -418,6 +535,14 @@ export function setToCandidate(
     sr: diff.difficulty_rating,
     srMin: inModeSrs.length > 0 ? Math.min(...inModeSrs) : diff.difficulty_rating,
     srMax: inModeSrs.length > 0 ? Math.max(...inModeSrs) : diff.difficulty_rating,
+    difficulties: inMode.map((b) => ({
+      beatmapId: b.id,
+      mode,
+      checksum:
+        typeof b.checksum === 'string' && b.checksum !== '' ? b.checksum : undefined,
+      lastUpdated:
+        typeof b.last_updated === 'string' && b.last_updated !== '' ? b.last_updated : undefined,
+    })),
     bpm: diff.bpm ?? set.beatmaps?.[0]?.bpm ?? 0,
     lengthSec: diff.total_length ?? 0,
     cs: diff.cs ?? 0,
@@ -674,8 +799,8 @@ function normalizeSearchPage(page: unknown): SearchPage {
  * the SR/BPM/length/status/key-count filters, afterSeen = survivors
  * of the seen-set exclusion when it is active (= poolSize when the
  * run ignores seen, as Generated mode always does since batch 6,
- * part 4 — downloaded hiding happens at list level in the UI, not
- * in this pool).
+ * part 4 — downloaded/previously-seen hiding happens at list
+ * level in the UI, not in this pool).
  */
 export interface GenerationDiagnostics {
   queries: string[]
@@ -719,9 +844,9 @@ export function emptyGenerationResume(): GenerationResume {
  * never blames user-set filters for a pool the defaults emptied.
  * There is deliberately NO seen-set branch: Generated mode's
  * fetch-time exclusion is off (ignoreSeen), so the seen set can
- * never be what emptied this pool — downloaded hiding happens at
- * list level in the UI instead, with its own all-downloaded
- * fallback (see applyDownloadedVisibility).
+ * never be what emptied this pool — downloaded/previously-seen
+ * hiding happens at list level in the UI instead, with its own
+ * exhaustion fallbacks (see applySeenVisibility).
  */
 export function emptyPoolReason(d: GenerationDiagnostics, filters: RecFilters): string {
   if (d.rawSets === 0) {
@@ -755,12 +880,13 @@ export async function generateRecommendations(
     fresh?: boolean
     /** Skip the seen-set exclusion for this run. Generated mode
      * always passes this (batch 6, part 4): the fetch-time
-     * exclusion never applies here — downloaded maps are hidden
-     * at list level by the UI instead (applyDownloadedVisibility),
-     * so the engine pool is unaffected. The seen store itself is
-     * never touched by this flag — the caller still marks served
-     * separately. The Endless feed does NOT use this: its
-     * no-repeat guarantee is its whole point. */
+     * exclusion never applies here — downloaded and
+     * previously-seen maps are hidden at list level by the UI
+     * instead (applySeenVisibility), so the engine pool is
+     * unaffected. The seen store itself is never touched by
+     * this flag — the caller still marks served separately.
+     * The Unlimited feed does NOT use this: its no-repeat
+     * guarantee is its whole point. */
     ignoreSeen?: boolean
     /** Resume state from the previous window (see GenerationResume).
      * Ignored when `fresh` is set — a fresh run always restarts
@@ -864,6 +990,70 @@ export async function generateRecommendations(
     diagnostics,
     nextResume: { cursors: nextCursors },
   }
+}
+
+/** Max consecutive fetched windows skipped while hunting for an
+ * unseen one (Renew-advance, 2026-10-29). Bounded so a spent pool
+ * can never loop forever: after this many all-hidden windows the
+ * last fetched window is returned and the caller shows it via
+ * the exhaustion fallback with an honest note. */
+export const MAX_UNSEEN_WINDOW_SKIPS = 5
+
+export interface UnseenWindowResult {
+  /** The window to display: the first with a visible item, or the
+   * last fetched window when every window was hidden or the
+   * cursor spent itself. */
+  result: GenerateResult
+  /** Fetched windows skipped because they yielded nothing visible. */
+  skippedWindows: number
+  /** True when the loop stopped at the skip cap with windows
+   * still unfetched (the returned window may still be all-hidden). */
+  hitSkipCap: boolean
+}
+
+/**
+ * Renew-advance (2026-10-29): fetch windows until one yields a
+ * visible map, instead of restarting from page 1. A window is
+ * skipped only when it has items and EVERY one is hidden per
+ * `isHidden` (downloaded or served before this press) — an
+ * empty-items window is returned as-is so its diagnostics keep
+ * driving the honest genuinely-empty state, and an exhausted
+ * window is returned so the caller can show it via the
+ * exhaustion fallback. `fresh` (restart) applies to the first
+ * fetch only; continuation fetches always honour the resume.
+ * The caller owns the `isHidden` snapshot (served-before plus
+ * downloaded, captured before this press marks anything) and
+ * marks only the returned window served — skipped windows were
+ * fetched but never shown, so they must not count as appeared.
+ */
+export async function generateUnseenWindow(
+  profile: SkillProfile,
+  mode: GameMode,
+  opts: Parameters<typeof generateRecommendations>[2],
+  isHidden: (beatmapsetId: number) => boolean,
+  maxSkips: number = MAX_UNSEEN_WINDOW_SKIPS,
+): Promise<UnseenWindowResult> {
+  let result = await generateRecommendations(profile, mode, opts)
+  let skippedWindows = 0
+  while (
+    result.items.length > 0 &&
+    result.items.every((c) => isHidden(c.beatmapsetId)) &&
+    !result.diagnostics.windowExhausted &&
+    skippedWindows < maxSkips
+  ) {
+    skippedWindows += 1
+    result = await generateRecommendations(profile, mode, {
+      ...opts,
+      fresh: false,
+      resume: result.nextResume,
+    })
+  }
+  const hitSkipCap =
+    skippedWindows >= maxSkips &&
+    result.items.length > 0 &&
+    result.items.every((c) => isHidden(c.beatmapsetId)) &&
+    !result.diagnostics.windowExhausted
+  return { result, skippedWindows, hitSkipCap }
 }
 
 // ---------------------------------------------------------------------------

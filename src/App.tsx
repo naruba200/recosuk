@@ -71,7 +71,7 @@ function RequireSession({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** Recommendations route: the Batches/Endless switch lives ON the
+/** Recommendations route: the Batches/Unlimited switch lives ON the
  *  page itself (batch 5, item B) — the route renders the page,
  *  which owns the switch and the shared mode + filters state. */
 function RecommendationsPage() {

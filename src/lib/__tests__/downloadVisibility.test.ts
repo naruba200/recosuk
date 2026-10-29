@@ -50,4 +50,22 @@ describe('applyDownloadedVisibility', () => {
     applyDownloadedVisibility(items, [1])
     expect(items.map((c) => c.beatmapsetId)).toEqual([1, 2])
   })
+
+  it('showDownloaded reveals downloaded sets with no fallback', () => {
+    const items = [item(1), item(2), item(3)]
+    const { visible, showingDownloadedFallback } = applyDownloadedVisibility(items, [2], {
+      showDownloaded: true,
+    })
+    expect(visible.map((c) => c.beatmapsetId)).toEqual([1, 2, 3])
+    expect(showingDownloadedFallback).toBe(false)
+  })
+
+  it('showDownloaded with everything downloaded: all visible, no fallback', () => {
+    const items = [item(1), item(2)]
+    const { visible, showingDownloadedFallback } = applyDownloadedVisibility(items, [1, 2], {
+      showDownloaded: true,
+    })
+    expect(visible.map((c) => c.beatmapsetId)).toEqual([1, 2])
+    expect(showingDownloadedFallback).toBe(false)
+  })
 })

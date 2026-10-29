@@ -4,6 +4,7 @@ import {
   isHardSeen,
   isPlayed,
   seenKey,
+  takeRecentDownloaded,
   type StorageLike,
 } from '../seenStore'
 
@@ -181,5 +182,34 @@ describe('seenStore', () => {
     a.mark(seenKey('guest', 'x'), 'downloaded', 1)
     expect(a.version()).toBe(1)
     expect(b.version()).toBe(0)
+  })
+})
+
+describe('takeRecentDownloaded (§AE)', () => {
+  it('returns newest first, capped, with the full total', () => {
+    const { ids, total } = takeRecentDownloaded([10, 20, 30, 40, 50], 3)
+    expect(ids).toEqual([50, 40, 30])
+    expect(total).toBe(5)
+  })
+
+  it('returns everything reversed when the limit covers the list', () => {
+    const { ids, total } = takeRecentDownloaded([1, 2], 50)
+    expect(ids).toEqual([2, 1])
+    expect(total).toBe(2)
+  })
+
+  it('empty input stays empty', () => {
+    expect(takeRecentDownloaded([], 50)).toEqual({ ids: [], total: 0 })
+  })
+
+  it('a zero or negative limit yields no ids but keeps the total', () => {
+    expect(takeRecentDownloaded([1, 2, 3], 0)).toEqual({ ids: [], total: 3 })
+    expect(takeRecentDownloaded([1, 2, 3], -5)).toEqual({ ids: [], total: 3 })
+  })
+
+  it('does not mutate the input list', () => {
+    const input = [1, 2, 3]
+    takeRecentDownloaded(input, 2)
+    expect(input).toEqual([1, 2, 3])
   })
 })

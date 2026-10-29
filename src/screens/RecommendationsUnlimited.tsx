@@ -1,7 +1,7 @@
 // Converted from Stitch export: stitch-raw/08b-recommendations-unlimited.html
 // M3 (§13): the exported markup below is the DEMO variant, rendered
 // unchanged when nothing is linked. The real variant at the bottom is
-// the endless feed: windowed re-ranking over a cursor-paginated pool,
+// the unlimited feed: windowed re-ranking over a cursor-paginated pool,
 // seen-set dedupe, honest end card.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
@@ -16,9 +16,11 @@ import {
   defaultFiltersFor,
   FeedSession,
   mostUsedEssentialTags,
+  shouldTopUpFeed,
   type RecCandidate,
   type RecFilters,
 } from '../lib/recommend'
+import BackToTop from '../components/BackToTop'
 import { seenKey, seenStore, useSeenVersion, type SeenState } from '../lib/seenStore'
 import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
@@ -51,7 +53,7 @@ function RecommendationsUnlimitedDemo() {
               <div className="flex items-center gap-space-sm">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-container/20 text-primary font-label-sm text-label-sm border-surface-container-highest/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse">
-                  </span>Endless feed mode
+                  </span>Unlimited mode
                 </span>
                 <span className="text-on-surface-variant font-label-sm text-label-sm">• ~4,200 maps match your filters
                 </span>
@@ -243,7 +245,7 @@ function RecommendationsUnlimitedDemo() {
               {/* Stream Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-space-xs py-1">
                 <div className="flex items-center gap-space-sm flex-wrap">
-                  <h2 className="font-headline-sm text-headline-sm text-on-surface">Training your 5.0★ gap — Endless stream
+                  <h2 className="font-headline-sm text-headline-sm text-on-surface">Training your 5.0★ gap — Unlimited stream
                   </h2>
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-primary-container/20 text-primary font-label-sm text-[10px] font-semibold">
                     <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse">
@@ -872,7 +874,7 @@ function RecommendationsUnlimitedDemo() {
                   </span>
                   <span className="text-on-surface font-medium">Loading more maps calibrated to 5.0★ gap...
                   </span>
-                  <span className="text-[11px] text-on-surface-variant">(Continuous endless stream active)
+                  <span className="text-[11px] text-on-surface-variant">(Continuous unlimited stream active)
                   </span>
                 </div>
               </div>
@@ -884,14 +886,14 @@ function RecommendationsUnlimitedDemo() {
 }
 
 // ---------------------------------------------------------------------------
-// Real variant (M3, §13): Unlimited — endless feed, ordered as it loads.
+// Real variant (M3, §13): Unlimited — unlimited feed, ordered as it loads.
 // ---------------------------------------------------------------------------
 
 const PAGE_TAKE = 20
 
 /**
- * The endless feed, usable standalone (via the default export's gate)
- * or embedded in the Recommendations page's Batches/Endless switch
+ * The unlimited feed, usable standalone (via the default export's gate)
+ * or embedded in the Recommendations page's Batches/Unlimited switch
  * (batch 5, item B). Filters/draft are lifted state owned by the
  * parent, so both views share the same mode + filters: changing
  * filters or mode restarts the feed session, as before.
@@ -903,6 +905,8 @@ export function FeedReal({
   draft,
   onFiltersChange,
   onDraftChange,
+  active = true,
+  renderBackToTop = true,
 }: {
   data: ProfileData
   onBrowseSamples: () => void
@@ -910,6 +914,20 @@ export function FeedReal({
   draft: RecFilters
   onFiltersChange: (next: RecFilters) => void
   onDraftChange: (next: RecFilters) => void
+  /**
+   * Keep-place (§AE): the Recommendations gate keeps this view
+   * mounted while Batches is shown. `active` is false while
+   * hidden — the session effect must not restart the feed
+   * until the view is visible again. Defaults true: the
+   * standalone gate renders it as the only view.
+   */
+  active?: boolean
+  /**
+   * The Recommendations gate renders one shared BackToTop for
+   * both views and passes false here; standalone rendering
+   * keeps the default true.
+   */
+  renderBackToTop?: boolean
 }) {
   const mode = useModeStore((s) => s.mode)
   const { tier, user } = useAuth()
@@ -934,6 +952,10 @@ export function FeedReal({
   const sessionRef = useRef<FeedSession | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const loadingRef = useRef(false)
+  // Top-up bookkeeping (§AE): consecutive top-up-triggered refills,
+  // reset whenever the visible list grows or a session restarts.
+  const topUpCountRef = useRef(0)
+  const prevVisibleCountRef = useRef(0)
 
   useEffect(() => {
     seedPlayedSets(key, data)
@@ -955,6 +977,7 @@ export function FeedReal({
       { fresh: opts.fresh, boostFor },
       )
       sessionRef.current = session
+      topUpCountRef.current = 0
       setItems([])
       setEnded(false)
       setError(null)
@@ -980,8 +1003,13 @@ export function FeedReal({
   // mount the shared filters are adopted as-is (they may already
   // carry the user's choices from the Batches view) — only a real
   // profile/mode change resets them to the profile defaults.
+  // Keep-place (§AE): while hidden, the effect must NOT run — the
+  // signature ref is left untouched, so returning to the view
+  // re-runs the effect and starts a session under the current
+  // profile/mode instead of showing stale rows.
   const feedSigRef = useRef<string | null>(null)
   useEffect(() => {
+    if (!active) return
     const sig = `${data.user.id}:${mode}:${profile.pp}:${profile.comfortSrMin}:${profile.comfortSrMax}`
     if (feedSigRef.current === sig) return
     const firstMount = feedSigRef.current === null
@@ -994,7 +1022,7 @@ export function FeedReal({
     setRestarted(false)
     void startSession(start)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, mode])
+  }, [profile, mode, active])
 
   const loadMore = useCallback(async () => {
     const session = sessionRef.current
@@ -1016,6 +1044,9 @@ export function FeedReal({
   }, [])
 
   // Prefetch on scroll: refill when the sentinel nears the viewport.
+  // The margin (§AE: 600px → 1200px) starts the next window before
+  // the user reaches the bottom, so scrolling never stalls on a
+  // load. The loading guard lives in loadMore.
   useEffect(() => {
     const el = sentinelRef.current
     if (!el) return
@@ -1023,7 +1054,7 @@ export function FeedReal({
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) void loadMore()
       },
-      { rootMargin: '600px' },
+      { rootMargin: '1200px' },
     )
     observer.observe(el)
     return () => observer.disconnect()
@@ -1070,6 +1101,11 @@ export function FeedReal({
     () => seenStore.load(key).downloaded,
     [key, seenVersion],
   )
+  // Show-downloaded toggle (§AE), default OFF — same control and
+  // same scope as Batches: when ON, downloaded sets show again
+  // with their downloaded state; only the downloaded rule is
+  // overridden. Local state, not persisted.
+  const [showDownloaded, setShowDownloaded] = useState(false)
   // Hide downloaded maps from the rendered rows (same rule as
   // Generated: reappear when everything loaded so far is
   // downloaded). The engine's fetch-time exclusion is untouched;
@@ -1077,9 +1113,36 @@ export function FeedReal({
   // re-evaluates live as downloads land and refills arrive. The
   // chip allowlist is computed from the VISIBLE rows.
   const { visible: visibleItems, showingDownloadedFallback } = useMemo(
-    () => applyDownloadedVisibility(items, downloaded),
-    [items, downloaded],
+    () => applyDownloadedVisibility(items, downloaded, { showDownloaded }),
+    [items, downloaded, showDownloaded],
   )
+  // Top-up (§AE): when hiding leaves fewer than the threshold
+  // visible, fetch the next window without waiting for the
+  // scroll sentinel. Capped (see shouldTopUpFeed) so an
+  // all-downloaded remainder cannot loop forever; the fallback
+  // note, not another fetch, is the end state then. The counter
+  // resets whenever the visible list grows — a refill that
+  // produced visible rows earned its keep.
+  useEffect(() => {
+    if (visibleItems.length > prevVisibleCountRef.current) topUpCountRef.current = 0
+    prevVisibleCountRef.current = visibleItems.length
+  }, [visibleItems.length])
+  useEffect(() => {
+    if (
+      active &&
+      shouldTopUpFeed({
+        visibleCount: visibleItems.length,
+        totalCount: items.length,
+        ended,
+        loading,
+        showingFallback: showingDownloadedFallback,
+        consecutiveTopUps: topUpCountRef.current,
+      })
+    ) {
+      topUpCountRef.current += 1
+      void loadMore()
+    }
+  }, [visibleItems.length, items.length, ended, loading, showingDownloadedFallback, loadMore, active])
   // Row chips: same top-7 narrowing as the Generated list — the
   // set recomputes as the feed grows.
   const tagAllowlist = useMemo(() => mostUsedEssentialTags(visibleItems), [visibleItems])
@@ -1092,13 +1155,13 @@ export function FeedReal({
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-label-sm text-label-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>Unlimited mode
             </span>
-            <span className="text-on-surface-variant font-label-sm text-label-sm">• Endless feed for {MODE_LABELS[mode]}</span>
+            <span className="text-on-surface-variant font-label-sm text-label-sm">• Unlimited beatmaps for {MODE_LABELS[mode]}</span>
           </div>
           <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight">Recommendations</h1>
           <p className="font-body-md text-body-md text-on-surface-variant">
             {profile.isStarter
               ? 'Starter picks — popular Ranked maps for this mode until your profile is personal.'
-              : 'An endless stream ordered for you as it loads — scored from the window ahead of your scroll, never a claimed global ranking.'}
+              : 'Unlimited beatmaps ordered for you as they load — scored from the window ahead of your scroll, never a claimed global ranking.'}
           </p>
         </div>
       </header>
@@ -1115,13 +1178,25 @@ export function FeedReal({
         <main className="lg:col-span-8 xl:col-span-9 flex flex-col gap-space-md">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-space-xs py-1">
             <div className="flex items-center gap-space-sm flex-wrap">
-              <h2 className="font-headline-sm text-headline-sm text-on-surface">Training your {profile.srCeiling.toFixed(1)}★ gap — Endless stream</h2>
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">Training your {profile.srCeiling.toFixed(1)}★ gap — Unlimited stream</h2>
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-primary-container/20 text-primary font-label-sm text-[10px] font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
                 {totalMatched !== null ? `~${totalMatched.toLocaleString('en-US')} maps match your filters` : 'Live stream • counting matches…'}
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-on-surface-variant font-label-sm text-label-sm">
+              <button
+                type="button"
+                aria-pressed={showDownloaded}
+                onClick={() => setShowDownloaded((v) => !v)}
+                title={showDownloaded ? 'Hide downloaded beatmaps again' : 'Show downloaded beatmaps again'}
+                className={showDownloaded
+                  ? 'px-2.5 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm flex items-center gap-1 transition-colors'
+                  : 'px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm flex items-center gap-1 hover:text-on-surface transition-colors'}
+              >
+                <span className="material-symbols-outlined text-[16px]">{showDownloaded ? 'visibility' : 'visibility_off'}</span>
+                Show downloaded
+              </button>
               <span>Sorted by:</span>
               <span className="text-primary font-medium flex items-center gap-0.5 cursor-pointer hover:underline">pp training weight
                 <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
@@ -1192,7 +1267,7 @@ export function FeedReal({
                     : feedStats.produced === 0
                       ? `${feedStats.examined} ${feedStats.examined === 1 ? 'set' : 'sets'} came back from osu! search, but none survived the SR/BPM/length/status/key-count filters. Loosen the filters for more maps.`
                       : 'The maps that matched were all already served, downloaded, or skipped. Start over to see seen maps again, or loosen the filters for fresh ones.'
-                  : 'The endless feed is honest: the pool ran out. Loosen the filters for more maps, or start over and see the ones you skipped again.'}
+                  : 'The Unlimited feed is honest: the pool ran out. Loosen the filters for more maps, or start over and see the ones you skipped again.'}
               </p>
               <div className="flex items-center gap-space-sm">
                 <button className="px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md" type="button" onClick={loosenFilters}>Loosen filters</button>
@@ -1202,6 +1277,7 @@ export function FeedReal({
           )}
         </main>
       </div>
+      {renderBackToTop && <BackToTop />}
     </div>
   )
 }
