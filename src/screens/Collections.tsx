@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
 import LoadingState from '../components/LoadingState'
+import BeatmapRow from '../components/BeatmapRow'
+import LockedButton from '../components/LockedButton'
 import { isProxyConfigured, OsuServiceError } from '../lib/osu'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
 import { useDownloadSettings } from '../lib/downloadSettings'
 import { downloadManager } from '../lib/downloadManager'
 import { attemptSongsCopy } from '../lib/songCopy'
-import { seenKey } from '../lib/seenStore'
+import { seenKey, seenStore } from '../lib/seenStore'
+import { useModeStore } from '../lib/modeStore'
+import { modeLabel } from '../lib/mode'
+import { useCapabilities } from '../lib/capabilities'
+import { supabase } from '../lib/supabase'
+import {
+  RANKED_WINDOWS,
+  fetchRankedCompilation,
+  rankedListName,
+  saveCompilationAsList,
+  type RankedCompilation,
+  type RankedWindow,
+  type RankedWindowId,
+} from '../lib/rankedLists'
 import {
   fetchBeatmapPack,
   fetchBeatmapPacks,
@@ -127,6 +143,212 @@ function PackCard({
         <span>{downloading ? 'Queuing…' : 'Download'}</span>
       </button>
     </article>
+  )
+}
+
+/**
+ * Ranked compilation lists (batch 9): the top 50 most-played maps
+ * ranked inside the selected window, compiled live from osu!
+ * search. One list per mode, following the GLOBAL mode state
+ * (no mode tabs inside the section). All rows are live data —
+ * never sample entries. "Save as list" stores the whole 50 as
+ * one M5 user list (account-only; guests see the locked state).
+ */
+function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
+  const mode = useModeStore((s) => s.mode)
+  const { user } = useAuth()
+  const caps = useCapabilities()
+  const navigate = useNavigate()
+  const [windowId, setWindowId] = useState<RankedWindowId>('week')
+  const [compilation, setCompilation] = useState<RankedCompilation | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [downloadedTick, setDownloadedTick] = useState(0)
+  const runRef = useRef(0)
+
+  const win: RankedWindow =
+    RANKED_WINDOWS.find((w) => w.id === windowId) ?? RANKED_WINDOWS[0]
+
+  const load = useCallback(
+    async (fresh: boolean) => {
+      const run = ++runRef.current
+      setLoading(true)
+      setError(null)
+      try {
+        const compiled = await fetchRankedCompilation(mode, win, { fresh })
+        if (runRef.current !== run) return
+        setCompilation(compiled)
+      } catch {
+        if (runRef.current !== run) return
+        setError('Could not compile the ranked list just now — osu! or the proxy may be busy.')
+      } finally {
+        if (runRef.current === run) setLoading(false)
+      }
+    },
+    [mode, win],
+  )
+
+  useEffect(() => {
+    void load(false)
+  }, [load])
+
+  useEffect(() => {
+    setSaveMessage(null)
+    setSaveError(null)
+  }, [mode, windowId])
+
+  const saveAsList = useCallback(async () => {
+    if (!user || !compilation || saving) return
+    setSaving(true)
+    setSaveMessage(null)
+    setSaveError(null)
+    try {
+      const result = await saveCompilationAsList(supabase, user.id, {
+        name: rankedListName(mode, win),
+        mode,
+        entries: compilation.entries,
+      })
+      setSaveMessage(
+        result.added > 0
+          ? `Saved ${result.added} of ${result.total} maps to "${result.listName}"` +
+              (result.alreadyHad > 0 ? ` — ${result.alreadyHad} were already in it.` : '.')
+          : `All ${result.total} maps were already in "${result.listName}" — nothing new added.`,
+      )
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }, [user, compilation, saving, mode, win])
+
+  // Re-read on tick so rows show the downloaded state after a
+  // download (same pattern as Mirror).
+  void downloadedTick
+  const downloaded = seenStore.load(seenKeyValue).downloaded
+  const entries = compilation?.entries ?? []
+
+  return (
+    <section className="flex flex-col gap-space-md" aria-label="Ranked lists">
+      <div className="flex flex-col gap-space-xs">
+        <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm uppercase tracking-widest">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+          <span>Ranked Lists</span>
+          <span className="text-outline-variant">•</span>
+          <span>Live from osu!</span>
+        </div>
+        <h2 className="font-headline-sm text-headline-sm text-on-surface">
+          Top 50 Ranked — {modeLabel(mode)}
+        </h2>
+        <p className="font-body-sm text-body-sm text-on-surface-variant">
+          The most-played maps ranked in the selected window, compiled live from osu! search —
+          newest-ranked first, then ordered by play count. Follows your current mode (
+          {modeLabel(mode)}); switch modes to see that mode&apos;s list.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-space-md">
+        <div
+          className="inline-flex items-center gap-1 p-1 rounded-full bg-surface-container-low"
+          role="tablist"
+          aria-label="Ranked list window"
+        >
+          {RANKED_WINDOWS.map((w) => (
+            <button
+              key={w.id}
+              role="tab"
+              aria-selected={w.id === windowId}
+              className={`px-space-md py-1.5 rounded-full font-label-md text-label-md transition-all ${
+                w.id === windowId
+                  ? 'bg-primary text-on-primary shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+              type="button"
+              onClick={() => setWindowId(w.id)}
+            >
+              {w.tabLabel}
+            </button>
+          ))}
+        </div>
+        <button
+          className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
+          type="button"
+          disabled={loading}
+          onClick={() => void load(true)}
+        >
+          <span className="material-symbols-outlined text-[16px]">refresh</span>
+          <span>Refresh</span>
+        </button>
+        <LockedButton
+          allowed={caps.canSave}
+          lockedTitle="Create a free account to save lists"
+          onLocked={() => navigate('/auth')}
+          onClick={() => void saveAsList()}
+          className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all disabled:opacity-60"
+          aria-label="Save this ranked list as one of my lists"
+        >
+          <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
+          <span>{saving ? 'Saving…' : 'Save as list'}</span>
+        </LockedButton>
+      </div>
+
+      {saveMessage && (
+        <p className="font-body-sm text-body-sm text-on-surface" role="status">
+          {saveMessage}
+        </p>
+      )}
+      {saveError && (
+        <p className="font-body-sm text-body-sm text-error" role="alert">
+          {saveError}
+        </p>
+      )}
+
+      {loading && <LoadingState label={`Compiling the top 50 Ranked ${modeLabel(mode)} maps…`} />}
+      {error && !loading && (
+        <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+          <p className="font-body-sm text-body-sm text-error">{error}</p>
+          <button
+            className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
+            type="button"
+            onClick={() => void load(true)}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!loading && !error && compilation && compilation.entries.length === 0 && (
+        <div className="p-space-md rounded-lg bg-surface-container-low">
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            No maps were ranked in this window for {modeLabel(mode)} yet.
+          </p>
+        </div>
+      )}
+      {!loading && !error && compilation && compilation.partial && entries.length > 0 && (
+        <div className="p-space-md rounded-lg bg-surface-container-low">
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Partial list — the scan stopped early before reaching the start of this window, so
+            this may not be the full top 50. Refresh to try the full scan again.
+          </p>
+        </div>
+      )}
+      {!loading && !error && entries.length > 0 && (
+        <div className="flex flex-col gap-3">
+          {entries.map((entry) => (
+            <BeatmapRow
+              key={entry.candidate.beatmapsetId}
+              candidate={entry.candidate}
+              mode={mode}
+              seenKeyValue={seenKeyValue}
+              downloaded={downloaded.includes(entry.candidate.beatmapsetId)}
+              onDownloaded={() => setDownloadedTick((n) => n + 1)}
+              rank={entry.rank}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -398,6 +620,8 @@ function CollectionsReal() {
             </section>
           )
         })}
+
+      <RankedListsSection seenKeyValue={key} />
 
       {error && !loading && (
         <div className="mt-space-md">

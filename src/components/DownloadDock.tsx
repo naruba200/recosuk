@@ -1,4 +1,9 @@
-import { useDownloadQueue, mirrorNameFor, type DownloadQueueItem } from '../lib/downloadQueue'
+import {
+  mirrorNameFor,
+  nextRetryMirrorId,
+  useDownloadQueue,
+  type DownloadQueueItem,
+} from '../lib/downloadQueue'
 import { usePreviewPlayer } from '../lib/previewPlayer'
 
 /**
@@ -20,11 +25,13 @@ import { usePreviewPlayer } from '../lib/previewPlayer'
  * audio playing but no player, and no visible player with
  * nothing playing. Closing the footer calls stop().
  *
- * Download rows show STATUS TEXT ONLY (batch 6, part 1): browser
- * downloads expose no progress to the page, so there is no
- * percentage, no byte count, and no rate — never faked. Each row
- * records what was handed off, via which mirror, no-video on/off,
- * and when, plus the Songs-folder copy outcome.
+ * Download rows show ONE STATUS WORD ONLY (batch 7, item 2):
+ * `Downloading` once handed to the browser (or `Failed`), plus
+ * the Songs-folder copy outcome as one word (`Copied` /
+ * `Copy failed`) where it ran. No mirror name, no-video flag,
+ * timestamp, or sentences — browser downloads expose no progress
+ * to the page, so there is no percentage, no byte count, and no
+ * rate — never faked.
  */
 
 function formatTime(seconds: number): string {
@@ -36,11 +43,17 @@ function formatTime(seconds: number): string {
 
 function QueueRow({ item }: { item: DownloadQueueItem }) {
   const retry = useDownloadQueue((s) => s.retry)
-  const time = new Date(item.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const statusLine =
-    item.status === 'browser'
-      ? `Downloading via your browser…${item.mirrorIdUsed ? ` · via ${mirrorNameFor(item.mirrorIdUsed)}` : ''}${item.noVideo ? ' · no video' : ''} · ${time}`
-      : (item.note ?? 'Download failed.')
+  // Batch 7, item 2: one status word only. The handoff is
+  // synchronous, so there is no observable "Starting" transient —
+  // a handed-off row reads "Downloading" from registration.
+  const statusWord = item.status === 'failed' ? 'Failed' : 'Downloading'
+  const copyWord =
+    item.copied === 'copied' ? ' · Copied' : item.copied === 'failed' ? ' · Copy failed' : ''
+  // Batch 8: Retry advances to the next mirror, so its tooltip
+  // names the mirror the next click will try — the label updates
+  // after each click as the next mirror advances. Visible text
+  // stays "Retry" (batch 7 one-word rule for rows).
+  const nextMirrorName = mirrorNameFor(nextRetryMirrorId(item))
   return (
     <div className="flex flex-col gap-1 px-3 py-2 rounded-lg bg-surface-container">
       <div className="flex items-center gap-2 min-w-0">
@@ -52,18 +65,17 @@ function QueueRow({ item }: { item: DownloadQueueItem }) {
         <button
           className="px-2 py-0.5 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm flex-shrink-0"
           type="button"
+          title={`Retry via ${nextMirrorName}`}
+          aria-label={`Retry download via ${nextMirrorName}`}
           onClick={() => retry(item.id)}
         >
           Retry
         </button>
       </div>
-      <p className="font-label-sm text-label-sm text-on-surface-variant truncate">{statusLine}</p>
-      {item.status === 'browser' && item.copied === 'copied' && (
-        <p className="font-label-sm text-label-sm text-on-surface-variant">Copied to your Songs folder.</p>
-      )}
-      {item.status === 'browser' && item.copied === 'failed' && item.note && (
-        <p className="font-label-sm text-label-sm text-error">{item.note}</p>
-      )}
+      <p className="font-label-sm text-label-sm text-on-surface-variant truncate">
+        {statusWord}
+        {copyWord}
+      </p>
     </div>
   )
 }
@@ -114,7 +126,10 @@ function DownloadWindow() {
 /**
  * Bottom footer bar (part 6, item 4): same controls and styling as
  * the old floating player window, only the placement/container
- * changed. Exactly ONE progress/seek control (part 6, item 1):
+ * changed. Batch 7, item 1: `left-[232px]` — the same offset as
+ * the header — so the footer occupies only the content area and
+ * never slides under the fixed 232px sidebar.
+ * Exactly ONE progress/seek control (part 6, item 1):
  * the range slider with its time display — the thin progress bar
  * that used to sit below it duplicated the slider and is gone.
  * Seeking still works from the slider; there is no buffered-state
@@ -128,7 +143,7 @@ function PlayerFooter() {
   if (!track) return null
   return (
     <section
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-surface-container-high bg-surface-container-low"
+      className="fixed left-[232px] right-0 bottom-0 z-40 border-t border-surface-container-high bg-surface-container-low"
       aria-label="Song player"
     >
       <div className="flex items-center gap-3 px-3 py-2.5 min-w-0">

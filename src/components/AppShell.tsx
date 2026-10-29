@@ -4,6 +4,7 @@ import { GAME_MODES, MODE_LABELS } from '../lib/mode'
 import { MODE_ACCENTS, MODE_PILL_LABELS, useModeStore } from '../lib/modeStore'
 import { fmtInt } from '../lib/interpretations'
 import { useAuth } from '../lib/auth'
+import { usePreviewPlayer } from '../lib/previewPlayer'
 
 /**
  * The Stitch app shell (sidebar + top bar) as a parameterized component.
@@ -132,6 +133,11 @@ export default function AppShell({
   children: ReactNode
 }) {
   const mode = useModeStore((s) => s.mode)
+  // Batch 7, item 1: while the player footer is visible, the main
+  // content gets bottom clearance (~96px footer + gap) so the last
+  // row is never hidden behind it. pb-* sorts after py-* in
+  // Tailwind, so this overrides the py-space-xl bottom padding.
+  const hasPlayer = usePreviewPlayer().track !== null
   return (
     <div
       className="bg-background font-body-md text-body-md text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen"
@@ -260,7 +266,7 @@ export default function AppShell({
             </div>
           </div>
         </header>
-        <main className="w-full pt-16 bg-surface min-h-screen px-space-xl py-space-xl">
+        <main className={`w-full pt-16 bg-surface min-h-screen px-space-xl py-space-xl${hasPlayer ? ' pb-[120px]' : ''}`}>
           {children}
         </main>
       </div>

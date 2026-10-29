@@ -226,11 +226,13 @@ describe('Generated-mode resume (batch 5, item A)', () => {
 
 describe('Regenerate / Retry flow (batch 6, defect 1; part 4: Generated ignores seen)', () => {
   /**
-   * The screen's Regenerate and Retry buttons must call generate()
-   * WITHOUT `fresh`, so the second press carries the first run's
-   * resume and returns the NEXT window. Since part 4, Generated
-   * runs pass `ignoreSeen: true`, so the window advance — not seen
-   * exclusion — is what separates the two runs.
+   * The screen's regeneration paths (count pills, Retry, filter
+   * Apply) must call generate() WITHOUT `fresh`, so the second
+   * run carries the first run's resume and returns the NEXT
+   * window. Since part 4, Generated runs pass `ignoreSeen: true`,
+   * so the window advance — not seen exclusion — is what
+   * separates the two runs. (The header Regenerate button was
+   * removed in batch 7; Renew is the restart path.)
    */
   it('a second non-fresh generation returns the next window via the resume', async () => {
     mockPagedSearch()
@@ -245,8 +247,9 @@ describe('Regenerate / Retry flow (batch 6, defect 1; part 4: Generated ignores 
     })
     expect(first.items.map((c) => c.beatmapsetId).sort()).toEqual([1, 2, 3, 4])
 
-    // The screen marks the served window, then Regenerate runs again
-    // with the same signature and the carried resume — no fresh.
+    // The screen marks the served window, then a second non-fresh
+    // generation runs again with the same signature and the
+    // carried resume — no fresh.
     // Seen is ignored (part 4), so only the resume separates the
     // windows: the second run must return window 3's sets.
     const seenAfterFirst: SeenState = {
@@ -428,7 +431,7 @@ describe('Renew shuffle (batch 6, part 4)', () => {
     expect(second.diagnostics.shuffled).toBe(true)
   })
 
-  it('windowExhausted is still reported on a shuffled run, so the Renew footer can gate on it', async () => {
+  it('windowExhausted is still reported on a shuffled run', async () => {
     mockPagedSearch()
     const profile = testProfile()
     const filters = defaultFiltersFor(profile)

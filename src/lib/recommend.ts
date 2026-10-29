@@ -46,6 +46,9 @@ export interface SearchBeatmapset {
   status: string
   play_count?: number
   favourite_count?: number
+  /** ISO date the set was ranked (null when unranked). Present on
+   *  ranked search results; read by the Ranked compilation lists. */
+  ranked_date?: string | null
   tags?: string
   covers?: { card?: string; cover?: string; list?: string }
   beatmaps?: SearchDifficulty[]

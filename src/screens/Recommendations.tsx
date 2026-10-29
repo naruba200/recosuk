@@ -952,23 +952,6 @@ function RecommendationsReal({
               </button>
             ))}
           </div>
-          <button
-            className="flex items-center gap-2 px-space-md py-2 rounded-full bg-gradient-to-r from-primary-container to-inverse-primary text-on-primary font-label-md text-label-md shadow-[0_0_16px_rgba(164,118,255,0.35)] hover:shadow-[0_0_22px_rgba(164,118,255,0.6)] active:scale-95 transition-all disabled:opacity-60"
-            id="regenerate-btn"
-            type="button"
-            disabled={busy}
-            // Batch 6, defect 1: NO fresh flag — Regenerate advances
-            // to the next window via the resume ref. `fresh` made
-            // generateRecommendations ignore the resume and re-fetch
-            // page 1, so pressing Regenerate twice returned the same
-            // window. The restart path is "Renew recommendations"
-            // (part 4 footer), which resets the resume ref and
-            // passes fresh + shuffle.
-            onClick={() => void generate(filters, count)}
-          >
-            <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
-            <span>{busy ? 'Generating…' : 'Regenerate'}</span>
-          </button>
         </div>
       </header>
 
@@ -1074,19 +1057,22 @@ function RecommendationsReal({
               onDownloaded={() => setDownloadedTick((n) => n + 1)}
             />
           ))}
-          {/* Part 4 — Renew: shown ONLY at the end of the list, once
-              the windows are exhausted AND items were returned. Every
-              press restarts from page 1 with a fresh shuffle, so
-              consecutive Renews show different orders/selections.
-              Normal Generate/Regenerate keep the PP-anchored fixed
-              ranking — only Renew shuffles, and the label says so. */}
-          {!error && items.length > 0 && diagnostics?.windowExhausted && (
+          {/* Part 4 + batch 7, item 3 — Renew: rendered at the bottom
+              of the list whenever items were returned (NOT gated on
+              windowExhausted). Every press restarts from page 1 with
+              a fresh shuffle, so consecutive Renews show different
+              orders/selections. Generation keeps the PP-anchored
+              fixed ranking — only Renew shuffles, and the label says
+              so. There is no separate Regenerate button anymore. */}
+          {!error && items.length > 0 && (
             <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
-              <p className="font-body-sm text-body-sm text-on-surface-variant">
-                {diagnostics.shuffled
-                  ? 'Renewed picks are shuffled — order is random for this run.'
-                  : "You've reached the end of this window."}
-              </p>
+              {(diagnostics?.shuffled || diagnostics?.windowExhausted) && (
+                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                  {diagnostics.shuffled
+                    ? 'Renewed picks are shuffled — order is random for this run.'
+                    : "You've reached the end of this window."}
+                </p>
+              )}
               <button
                 id="renew-btn"
                 className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0 disabled:opacity-50"

@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import { createDownloadManager, type DownloadManagerDeps } from './downloadManager'
+import {
+  createDownloadManager,
+  NATIVE_MIRROR_ORDER,
+  NATIVE_MIRROR_ORDER_NO_VIDEO,
+  type DownloadManagerDeps,
+} from './downloadManager'
 import { getNoVideo } from './downloadSettings'
 import { MIRRORS } from './mirrors'
 import {
@@ -27,6 +32,15 @@ import {
  * the batch-2 design, unchanged. Its outcome shows on the row.
  * Collections bulk downloads never used this store (they use the
  * downloadManager loop directly) and are untouched.
+ *
+ * Retry (batch 8): the first attempt still uses order[0] (or the
+ * explicit pick) with no automatic fallback — native downloads
+ * report nothing back, so no fallback chain is possible there.
+ * Retry is user-driven, not automatic: each Retry hands the set
+ * off via the NEXT mirror in the same order (wrapping to the
+ * start after the last), so re-firing the identical URL — a
+ * no-op against a mirror that failed server-side — never happens.
+ * Attempts are tracked per row in `triedMirrorIds`.
  */
 
 export type DownloadQueueStatus = 'browser' | 'failed'
@@ -41,6 +55,10 @@ export interface DownloadQueueItem {
   noVideo: boolean
   status: DownloadQueueStatus
   mirrorIdUsed: string | null
+  /** Mirrors this row has been handed off to, in attempt order.
+   * The first entry is the register attempt; each Retry appends
+   * the next mirror in the order (see nextRetryMirrorId). */
+  triedMirrorIds: string[]
   /** Songs-folder copy outcome for this item (only when auto-copy ran). */
   copied: 'copied' | 'failed' | 'skipped' | null
   note: string | null
@@ -80,6 +98,31 @@ export function resetDownloadQueue(): void {
   useDownloadQueue.setState({ items: [], dockOpen: false })
 }
 
+/** The mirror order a row cycles through: catboy first when
+ * no-video is on (only its no-video URL form is verified), the
+ * default order otherwise — exactly as startDownload picks. */
+export function mirrorOrderFor(noVideo: boolean): readonly string[] {
+  return noVideo ? NATIVE_MIRROR_ORDER_NO_VIDEO : NATIVE_MIRROR_ORDER
+}
+
+/**
+ * The mirror a Retry of this row would hand off to: the next
+ * mirror in the row's order after the last attempted one,
+ * wrapping to the start after the last mirror. An explicit pick
+ * counts as the first attempt, so a retry after it advances to
+ * the next mirror in the same order. A last attempt outside the
+ * order (or none yet) restarts at the first mirror.
+ */
+export function nextRetryMirrorId(
+  item: Pick<DownloadQueueItem, 'noVideo' | 'triedMirrorIds' | 'mirrorIdUsed' | 'mirrorId'>,
+): string {
+  const order = mirrorOrderFor(item.noVideo)
+  const tried = item.triedMirrorIds ?? []
+  const last = tried.length > 0 ? tried[tried.length - 1] : (item.mirrorIdUsed ?? item.mirrorId)
+  const idx = last ? order.indexOf(last) : -1
+  return order[(idx + 1) % order.length]
+}
+
 interface DownloadQueueState {
   items: DownloadQueueItem[]
   dockOpen: boolean
@@ -108,6 +151,7 @@ export const useDownloadQueue = create<DownloadQueueState>()((set, get) => ({
       noVideo,
       status: 'browser',
       mirrorIdUsed: null,
+      triedMirrorIds: [],
       copied: null,
       note: null,
       at: now(),
@@ -120,6 +164,9 @@ export const useDownloadQueue = create<DownloadQueueState>()((set, get) => ({
   retry: (id) => {
     const item = get().items.find((i) => i.id === id)
     if (!item) return
+    // Advance to the NEXT mirror: re-firing the same mirror's URL
+    // is a no-op when that mirror failed server-side.
+    const nextMirrorId = nextRetryMirrorId(item)
     set((s) => ({
       items: s.items.map((i) =>
         i.id === id
@@ -128,7 +175,10 @@ export const useDownloadQueue = create<DownloadQueueState>()((set, get) => ({
       ),
       dockOpen: true,
     }))
-    handOffAndCopy({ ...item, status: 'browser', mirrorIdUsed: null, copied: null, note: null })
+    handOffAndCopy(
+      { ...item, status: 'browser', mirrorIdUsed: null, copied: null, note: null },
+      nextMirrorId,
+    )
   },
 
   clearFinished: () => {
@@ -155,19 +205,26 @@ function patchItem(id: string, patch: Partial<DownloadQueueItem>): void {
  * the row with its outcome. The copy's fetch is the copy itself —
  * plain single-stream via attemptSongsCopy, never the chunked path.
  */
-function handOffAndCopy(item: DownloadQueueItem): void {
+function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void {
   const manager = createDownloadManager({
     startBrowserDownload: deps.startBrowserDownload,
     record: deps.record,
   })
+  // A Retry passes the next mirror explicitly; the first attempt
+  // uses the explicit pick (or Auto order[0]) as before.
+  const effectiveMirrorId = mirrorOverride ?? item.mirrorId
   try {
     const result = manager.startDownload({
       beatmapsetId: item.beatmapsetId,
-      mirrorId: item.mirrorId,
+      mirrorId: effectiveMirrorId,
       seenKeyValue: item.seenKeyValue,
       noVideo: item.noVideo,
     })
-    patchItem(item.id, { status: 'browser', mirrorIdUsed: result.mirrorId })
+    patchItem(item.id, {
+      status: 'browser',
+      mirrorIdUsed: result.mirrorId,
+      triedMirrorIds: [...(item.triedMirrorIds ?? []), result.mirrorId],
+    })
   } catch (err) {
     patchItem(item.id, {
       status: 'failed',
@@ -181,7 +238,7 @@ function handOffAndCopy(item: DownloadQueueItem): void {
     artist: item.artist,
     title: item.title,
     noVideo: item.noVideo,
-    mirrorId: item.mirrorId,
+    mirrorId: effectiveMirrorId,
   }
   void attemptSongsCopy(copyRequest, deps.folderDeps ?? {})
     .then((outcome) =>

@@ -12,7 +12,7 @@ import { MIRRORS, recordDownload, type MirrorSource } from './mirrors'
  * the page never navigates, and the browser's download manager takes
  * over at full speed. There is deliberately NO fetch() in this module
  * (and no progress bar: native downloads report no progress to the
- * page, so the UI says "Downloading via your browser…" and must not
+ * page, so the dock row says "Downloading" and must not
  * fake a percentage).
  *
  * Honest limits (do not soften these in UI copy):

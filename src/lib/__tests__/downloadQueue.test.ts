@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   configureDownloadQueue,
+  nextRetryMirrorId,
   resetDownloadQueue,
   useDownloadQueue,
 } from '../downloadQueue'
@@ -118,7 +119,7 @@ describe('download register (batch 6, part 1)', () => {
     expect(useDownloadQueue.getState().items[0].mirrorIdUsed).toBe('nerinyan')
   })
 
-  it('retry re-hands-off the same set and re-records it', () => {
+  it('retry re-hands-off via the NEXT mirror in the order and re-records it (batch 8)', () => {
     const handOff = vi.fn()
     const record = vi.fn()
     configureDownloadQueue({ startBrowserDownload: handOff, record })
@@ -127,9 +128,86 @@ describe('download register (batch 6, part 1)', () => {
     useDownloadQueue.getState().retry(id)
 
     expect(handOff).toHaveBeenCalledTimes(2)
-    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('beatconnect.io/b/42'))
+    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('catboy.best/d/42'))
     expect(record).toHaveBeenCalledTimes(2)
+    expect(record).toHaveBeenNthCalledWith(2, 'test', 42, 'catboy')
     expect(useDownloadQueue.getState().items).toHaveLength(1)
+    const item = useDownloadQueue.getState().items[0]
+    expect(item.mirrorIdUsed).toBe('catboy')
+    expect(item.triedMirrorIds).toEqual(['beatconnect', 'catboy'])
+  })
+
+  it('successive retries walk the Auto order and wrap to the first mirror', () => {
+    const handOff = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn() })
+
+    const id = useDownloadQueue.getState().register(REQ)
+    const state = () => useDownloadQueue.getState()
+    state().retry(id)
+    state().retry(id)
+    state().retry(id)
+    state().retry(id)
+
+    expect(handOff).toHaveBeenCalledTimes(5)
+    expect(handOff).toHaveBeenNthCalledWith(1, expect.stringContaining('beatconnect.io/b/42'))
+    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('catboy.best/d/42'))
+    expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('api.nerinyan.moe/d/42'))
+    expect(handOff).toHaveBeenNthCalledWith(4, expect.stringContaining('txy1.sayobot.cn/beatmaps/download/full/42'))
+    expect(handOff).toHaveBeenNthCalledWith(5, expect.stringContaining('beatconnect.io/b/42'))
+    expect(state().items[0].triedMirrorIds).toEqual([
+      'beatconnect',
+      'catboy',
+      'nerinyan',
+      'sayobot',
+      'beatconnect',
+    ])
+    expect(state().items[0].mirrorIdUsed).toBe('beatconnect')
+  })
+
+  it('no-video retries walk the no-video order (catboy first, then full-file mirrors)', () => {
+    const handOff = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn() })
+
+    const id = useDownloadQueue.getState().register({ ...REQ, noVideo: true })
+    const state = () => useDownloadQueue.getState()
+    state().retry(id)
+    state().retry(id)
+
+    expect(handOff).toHaveBeenNthCalledWith(1, 'https://catboy.best/d/42n')
+    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('beatconnect.io/b/42'))
+    expect(handOff).toHaveBeenNthCalledWith(2, expect.not.stringContaining('42n'))
+    expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('api.nerinyan.moe/d/42'))
+    expect(state().items[0].triedMirrorIds).toEqual(['catboy', 'beatconnect', 'nerinyan'])
+  })
+
+  it('an explicit mirror pick retries to the next mirror after the pick, then wraps', () => {
+    const handOff = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn() })
+
+    const id = useDownloadQueue.getState().register({ ...REQ, mirrorId: 'nerinyan' })
+    const state = () => useDownloadQueue.getState()
+    state().retry(id)
+    state().retry(id)
+
+    expect(handOff).toHaveBeenNthCalledWith(1, expect.stringContaining('api.nerinyan.moe/d/42'))
+    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('txy1.sayobot.cn/beatmaps/download/full/42'))
+    expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('beatconnect.io/b/42'))
+    expect(state().items[0].triedMirrorIds).toEqual(['nerinyan', 'sayobot', 'beatconnect'])
+  })
+
+  it('nextRetryMirrorId names the mirror after the last attempt, wrapping at the end', () => {
+    const base = { noVideo: false, mirrorIdUsed: null, mirrorId: undefined } as const
+    expect(nextRetryMirrorId({ ...base, triedMirrorIds: [] })).toBe('beatconnect')
+    expect(nextRetryMirrorId({ ...base, triedMirrorIds: ['beatconnect'] })).toBe('catboy')
+    expect(nextRetryMirrorId({ ...base, triedMirrorIds: ['beatconnect', 'catboy', 'nerinyan', 'sayobot'] })).toBe(
+      'beatconnect',
+    )
+    expect(
+      nextRetryMirrorId({ ...base, noVideo: true, triedMirrorIds: ['catboy'] }),
+    ).toBe('beatconnect')
+    expect(
+      nextRetryMirrorId({ ...base, triedMirrorIds: [], mirrorId: 'sayobot' }),
+    ).toBe('beatconnect')
   })
 
   it('clearFinished removes every row', () => {

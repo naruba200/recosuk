@@ -47,6 +47,9 @@ interface BeatmapRowProps {
   /** Unlimited feed only: renders the Skip (✕) action. */
   onSkip?: () => void
   onDownloaded?: () => void
+  /** Ranked compilation lists only: renders the #N rank badge and
+   *  the play count. Absent everywhere else — rows stay unchanged. */
+  rank?: number
 }
 
 function Stars({ filled }: { filled: number }) {
@@ -339,6 +342,7 @@ export default function BeatmapRow({
   downloaded = false,
   onSkip,
   onDownloaded,
+  rank,
 }: BeatmapRowProps) {
   const preview = usePreviewPlayer()
   const caps = useCapabilities()
@@ -404,6 +408,11 @@ export default function BeatmapRow({
         </div>
         <div className="flex flex-col min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-space-xs mb-0.5">
+            {rank !== undefined && (
+              <span className="w-8 text-center font-headline-sm text-headline-sm text-on-surface font-extrabold flex-shrink-0">
+                #{rank}
+              </span>
+            )}
             <span className="px-2 py-0.5 rounded-full bg-[#FFCC22] text-[#332200] font-label-sm text-label-sm font-extrabold flex items-center gap-1 shadow-sm">
               <span className="material-symbols-outlined text-[13px] leading-none">star</span>
               {/* SR range across the set's in-mode difficulties
@@ -438,6 +447,12 @@ export default function BeatmapRow({
               <span className="material-symbols-outlined text-[14px]">person</span>
               <span>mapped by {c.creator}</span>
             </div>
+            {rank !== undefined && (
+              <>
+                <span className="text-outline-variant">•</span>
+                <span>{c.playCount.toLocaleString('en-US')} plays</span>
+              </>
+            )}
             {/* Skillset-vocabulary tags only (batch 5, item C) —
                 raw mapper tags (song/series/meme tags) are not
                 shown; no chips at all when none match. */}
