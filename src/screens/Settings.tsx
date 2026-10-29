@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
+import MenuSelect from '../components/MenuSelect'
 import { useAuth } from '../lib/auth'
 import { useGuestStore } from '../lib/guestStore'
 import { useModeStore } from '../lib/modeStore'
@@ -28,6 +29,12 @@ export default function Settings() {
   const setSongsFolderName = useDownloadSettings((s) => s.setSongsFolderName)
   const [folderBusy, setFolderBusy] = useState(false)
   const [folderNote, setFolderNote] = useState<string | null>(null)
+  // Mirror Route Priority (batch 12): display-only selection, exactly
+  // as the native select it replaces was — no functional wiring
+  // exists (the native order is fixed in downloadManager.ts), so
+  // picking here changes nothing but the shown label. The custom
+  // dropdown exists only so the popup is readable on dark themes.
+  const [routePriority, setRoutePriority] = useState('balanced')
   const fsaSupported = isFileSystemAccessSupported()
   // Defensive shell detection only: adjusts the Desktop-app group
   // copy below. It never disables or removes any control — the
@@ -292,7 +299,7 @@ export default function Settings() {
                   <div className="flex flex-col max-w-xl">
                     <span className="font-label-md text-label-md text-on-surface">Download without video</span>
                     <span className="font-body-sm text-body-sm text-on-surface-variant">
-                      Downloads the smaller no-video .osz where the mirror supports it. Today that means catboy.best (its no-video file); Beatconnect, Nerinyan and Sayobot don&apos;t publish a verified no-video form yet, so they still serve the full file, and the official osu! option is unaffected.
+                      Downloads the smaller no-video .osz where the mirror supports it. Today that means catboy.best (its no-video file) and the official osu! option (which uses <span className="font-mono">?noVideo=1</span>); Beatconnect, Nerinyan and Sayobot don&apos;t publish a verified no-video form yet, so they still serve the full file.
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
@@ -470,16 +477,18 @@ export default function Settings() {
                       <span>sayobot
                       </span>
                     </div>
-                    <select className="px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-colors cursor-pointer border-none focus:outline-none focus:ring-0">
-                      <option selected value="balanced">Priority: beatconnect first
-                      </option>
-                      <option value="nerinyan">Priority: nerinyan first
-                      </option>
-                      <option value="sayobot">Priority: sayobot first
-                      </option>
-                      <option value="direct">Direct Bancho only (Supporter)
-                      </option>
-                    </select>
+                    <MenuSelect
+                      options={[
+                        { value: 'balanced', label: 'Priority: beatconnect first' },
+                        { value: 'nerinyan', label: 'Priority: nerinyan first' },
+                        { value: 'sayobot', label: 'Priority: sayobot first' },
+                        { value: 'direct', label: 'Direct Bancho only (Supporter)' },
+                      ]}
+                      value={routePriority}
+                      onChange={setRoutePriority}
+                      ariaLabel="Mirror route priority"
+                      buttonClassName="relative flex items-center h-9 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    />
                   </div>
                 </div>
                 {/* Row: Concurrent downloads limit */}

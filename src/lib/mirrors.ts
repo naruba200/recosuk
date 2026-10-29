@@ -10,6 +10,7 @@ import { seenStore } from './seenStore'
  *
  * URL patterns (verified against each mirror's public download API):
  *   official    https://osu.ppy.sh/beatmapsets/{id}/download
+ *               (+ `?noVideo=1` when no-video is on — see below)
  *   catboy.best https://catboy.best/d/{id}
  *   Nerinyan    https://api.nerinyan.moe/d/{id}
  *   Beatconnect https://beatconnect.io/b/{id}
@@ -40,7 +41,11 @@ import { seenStore } from './seenStore'
  *     osu-api-extended wiki confirms these hosts support a no-video
  *     CONCEPT, but gives no URL shape — do not guess one here. If a
  *     shape is verified later, add it with its source cited.
- *   official: unaffected — it opens the osu! page, never a file URL.
+ *   official: `?noVideo=1` (batch 12, verified from osu!'s own game
+ *     client source: `DownloadBeatmapSetRequest.cs` builds the
+ *     target as `beatmapsets/{id}/download` plus `?noVideo=1` when
+ *     no-video is requested). The official option stays a new-tab
+ *     link requiring osu! login — only the query param is added.
  */
 export interface MirrorUrlOptions {
   /** Request the mirror's no-video file variant where one is verified. */
@@ -57,7 +62,8 @@ export const MIRRORS: MirrorSource[] = [
   {
     id: 'official',
     name: 'osu! official',
-    url: (id) => `https://osu.ppy.sh/beatmapsets/${id}/download`,
+    url: (id, opts) =>
+      `https://osu.ppy.sh/beatmapsets/${id}/download${opts?.noVideo ? '?noVideo=1' : ''}`,
   },
   {
     id: 'catboy',

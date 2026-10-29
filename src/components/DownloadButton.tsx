@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MIRRORS, recordDownload } from '../lib/mirrors'
+import { MIRRORS } from '../lib/mirrors'
 import { useDownloadSettings } from '../lib/downloadSettings'
 import { useDownloadQueue } from '../lib/downloadQueue'
 import { modeLabel, type GameMode } from '../lib/mode'
@@ -25,12 +25,15 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * via its own plain single-stream fetch — that fetch is the copy,
  * not the download (see lib/downloadQueue.ts).
  *
- * - Main button: Auto (Beatconnect first; catboy first when
- *   no-video is on). Handed off + recorded on click.
- * - Expand menu: pick one mirror, or the official osu! page. The
- *   official option is a plain new-tab link: osu! downloads need an
- *   osu! login session and are not available via the API, so RecOsuk
- *   cannot fetch that file itself.
+ * - Main button: osu! OFFICIAL first (batch 12, part 9) — opens
+ *   the official download in a new tab (with `?noVideo=1` when
+ *   no-video is on) and registers the attempt in the dock, so
+ *   Retry cycles on from official to the native mirrors. The
+ *   official option is never iframed: it needs the user's osu!
+ *   login session in the browser tab.
+ * - Expand menu: official first, then Auto (native order), then
+ *   each native mirror. The official entry is a register action,
+ *   not a bare link, so its attempt is tracked like any other.
  */
 
 interface DownloadButtonProps {
@@ -82,18 +85,11 @@ export default function DownloadButton({
     onDownloaded?.()
   }
 
-  // Full-file retry for a no-video attempt handed to the browser
-  // (batch 3, item D): normal mirror order, no-video off. One click
-  // from working when the no-video endpoint refuses the request.
-  const showFullFileRetry =
-    !!latest && latest.status === 'browser' && latest.noVideo
-  const retryFullFile = () => start(undefined, { noVideo: false })
-
-  const openOfficial = () => {
-    void recordDownload(seenKeyValue, beatmapsetId, 'official')
-    setMenuOpen(false)
-    onDownloaded?.()
-  }
+  // Primary action (batch 12, part 9): osu! official first. The
+  // register opens the official download in a new tab (with
+  // ?noVideo=1 when the toggle is on) and tracks the attempt, so
+  // the dock Retry cycle starts from official.
+  const startOfficial = () => start('official')
 
   const isDone = suppressDownloadedState
     ? false
@@ -112,9 +108,9 @@ export default function DownloadButton({
         <button
           className={`w-9 h-9 rounded-full ${isDone ? 'bg-surface-container-highest text-tertiary hover:bg-secondary hover:text-on-secondary' : 'bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface'} flex items-center justify-center transition-all shadow-sm`}
           aria-label={isDone ? 'Download again' : 'Download .osz'}
-          title={isDone ? 'Download again' : 'Download .osz in RecOsuk'}
+          title={isDone ? 'Download again from osu! official' : 'Download .osz from osu! official'}
           type="button"
-          onClick={() => start()}
+          onClick={startOfficial}
         >
           <span className="material-symbols-outlined text-[18px]">
             {isDone ? 'replay' : 'download'}
@@ -134,6 +130,14 @@ export default function DownloadButton({
             <button
               className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
               type="button"
+              onClick={startOfficial}
+            >
+              osu! official — opens osu! page (needs your osu! login)
+              {noVideo ? ' (no video)' : ''}
+            </button>
+            <button
+              className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
+              type="button"
               onClick={() => start()}
             >
               {noVideo ? 'Auto — catboy first (no video)' : 'Auto — Beatconnect first'}
@@ -149,34 +153,15 @@ export default function DownloadButton({
                 {noVideo && mirror.id === 'catboy' ? ' (no video)' : ''}
               </button>
             ))}
-            <a
-              className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md"
-              href={MIRRORS[0].url(beatmapsetId)}
-              target="_blank"
-              rel="noreferrer"
-              onClick={openOfficial}
-            >
-              osu! official — opens osu! page (needs your osu! login)
-            </a>
             <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">Full .osz set · {modeLabel(mode)} difficulty shown</span>
             {noVideo && (
-              <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">No-video downloads use catboy&apos;s no-video file; other mirrors serve the full file.</span>
+              <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">No-video: catboy serves its no-video file and osu! official uses ?noVideo=1; other mirrors serve the full file.</span>
             )}
           </div>
         )}
       </div>
       {copyFailedNote && (
         <span className="font-label-sm text-[10px] text-on-surface-variant text-right max-w-48">{copyFailedNote}</span>
-      )}
-      {showFullFileRetry && (
-        <button
-          className="font-label-sm text-[11px] text-primary hover:underline text-right"
-          type="button"
-          title="The no-video file may have been refused by the mirror — download the full file instead"
-          onClick={retryFullFile}
-        >
-          No video not downloading? Get the full file
-        </button>
       )}
     </div>
   )

@@ -38,6 +38,22 @@ export const NATIVE_MIRROR_ORDER = ['beatconnect', 'catboy', 'nerinyan', 'sayobo
  */
 export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan', 'sayobot'] as const
 
+/**
+ * Display/default order (batch 12, part 9): osu! official FIRST,
+ * then the native mirrors in their usual order. This order drives
+ * the DownloadButton menu, the primary download action, and the
+ * dock Retry cycle. It must NEVER drive an iframe handoff: the
+ * official option is a new-tab link (osu! login session), so
+ * downloadManager.startDownload and the Songs-folder copy keep
+ * using the NATIVE orders above, and bulk downloads stay
+ * native-only. The two orders are deliberately separate constants.
+ */
+export const DISPLAY_MIRROR_ORDER = ['official', ...NATIVE_MIRROR_ORDER] as const
+export const DISPLAY_MIRROR_ORDER_NO_VIDEO = [
+  'official',
+  ...NATIVE_MIRROR_ORDER_NO_VIDEO,
+] as const
+
 export interface DownloadRequest {
   beatmapsetId: number
   /** Start from this mirror only (menu pick). Omitted = Auto order. */

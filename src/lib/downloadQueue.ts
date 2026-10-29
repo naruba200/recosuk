@@ -1,12 +1,14 @@
 import { create } from 'zustand'
 import {
   createDownloadManager,
+  DISPLAY_MIRROR_ORDER,
+  DISPLAY_MIRROR_ORDER_NO_VIDEO,
   NATIVE_MIRROR_ORDER,
   NATIVE_MIRROR_ORDER_NO_VIDEO,
   type DownloadManagerDeps,
 } from './downloadManager'
 import { getNoVideo } from './downloadSettings'
-import { MIRRORS } from './mirrors'
+import { MIRRORS, mirrorById, recordDownload } from './mirrors'
 import {
   attemptSongsCopy,
   type SongCopyDeps,
@@ -71,7 +73,10 @@ export interface RegisterRequest {
   artist: string
   title: string
   seenKeyValue: string
-  /** Explicit mirror pick from the menu. Omitted = Auto order. */
+  /** Explicit mirror pick from the menu, or 'official' for the
+   * primary (official-first) action. Omitted = Auto native order.
+   * 'official' is preserved: the handoff opens the osu! download
+   * in a new tab instead of the iframe path. */
   mirrorId?: string
   noVideo?: boolean
 }
@@ -81,6 +86,11 @@ export interface DownloadQueueDeps extends DownloadManagerDeps {
   folderDeps?: SongCopyDeps
   /** Clock for the registered time. Defaults to Date.now. */
   now?: () => number
+  /** Opens the official osu! download in a new tab. Defaults to
+   * `window.open` (guarded: no-ops without a window, e.g. tests).
+   * Injected in tests. Never an iframe: the osu! session lives in
+   * the browser tab, not in the page. */
+  openOfficial?: (url: string) => void
 }
 
 let deps: DownloadQueueDeps = {}
@@ -106,17 +116,29 @@ export function mirrorOrderFor(noVideo: boolean): readonly string[] {
 }
 
 /**
+ * The display order a row's Retry cycles through (batch 12, part
+ * 9): osu! official FIRST, then the native mirrors in their usual
+ * order, wrapping to official after the last native mirror. The
+ * official step opens a new tab (see handOffAndCopy); native steps
+ * use the iframe handoff.
+ */
+export function displayOrderFor(noVideo: boolean): readonly string[] {
+  return noVideo ? DISPLAY_MIRROR_ORDER_NO_VIDEO : DISPLAY_MIRROR_ORDER
+}
+
+/**
  * The mirror a Retry of this row would hand off to: the next
- * mirror in the row's order after the last attempted one,
+ * mirror in the DISPLAY order (official first, then the native
+ * mirrors — see displayOrderFor) after the last attempted one,
  * wrapping to the start after the last mirror. An explicit pick
  * counts as the first attempt, so a retry after it advances to
  * the next mirror in the same order. A last attempt outside the
- * order (or none yet) restarts at the first mirror.
+ * order (or none yet) restarts at the first mirror (official).
  */
 export function nextRetryMirrorId(
   item: Pick<DownloadQueueItem, 'noVideo' | 'triedMirrorIds' | 'mirrorIdUsed' | 'mirrorId'>,
 ): string {
-  const order = mirrorOrderFor(item.noVideo)
+  const order = displayOrderFor(item.noVideo)
   const tried = item.triedMirrorIds ?? []
   const last = tried.length > 0 ? tried[tried.length - 1] : (item.mirrorIdUsed ?? item.mirrorId)
   const idx = last ? order.indexOf(last) : -1
@@ -138,7 +160,7 @@ export const useDownloadQueue = create<DownloadQueueState>()((set, get) => ({
 
   register: (req) => {
     const noVideo = req.noVideo ?? getNoVideo()
-    const mirrorId = req.mirrorId && req.mirrorId !== 'official' ? req.mirrorId : undefined
+    const mirrorId = req.mirrorId ?? undefined
     const now = deps.now ?? Date.now
     const id = `dq-${++idCounter}-${req.beatmapsetId}-${now()}`
     const item: DownloadQueueItem = {
@@ -198,12 +220,30 @@ function patchItem(id: string, patch: Partial<DownloadQueueItem>): void {
   }))
 }
 
+/** Default official-tab opener: a real new tab, guarded for non-DOM runtimes. */
+function defaultOpenOfficialTab(url: string): void {
+  if (
+    typeof globalThis.window !== 'undefined' &&
+    typeof globalThis.window.open === 'function'
+  ) {
+    globalThis.window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
 /**
  * Hand the set to the browser's native downloader (mirror order +
  * no-video setting exactly as in batch 2/3, recording included),
  * then run the opt-in Songs-folder copy in the background and patch
  * the row with its outcome. The copy's fetch is the copy itself —
  * plain single-stream via attemptSongsCopy, never the chunked path.
+ *
+ * Official exception (batch 12, part 9): when the effective mirror
+ * is 'official', the osu! download opens in a NEW TAB via
+ * openOfficial — never an iframe (the osu! session lives in the
+ * browser tab) — and NO Songs-folder copy fetch runs: the authed
+ * osu! origin is not fetchable from the page. The row still
+ * records the attempt, so Retry can cycle on from official to the
+ * native mirrors.
  */
 function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void {
   const manager = createDownloadManager({
@@ -213,6 +253,30 @@ function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void 
   // A Retry passes the next mirror explicitly; the first attempt
   // uses the explicit pick (or Auto order[0]) as before.
   const effectiveMirrorId = mirrorOverride ?? item.mirrorId
+  if (effectiveMirrorId === 'official') {
+    const openOfficial =
+      deps.openOfficial ?? defaultOpenOfficialTab
+    const url = mirrorById('official').url(item.beatmapsetId, {
+      noVideo: item.noVideo,
+    })
+    try {
+      openOfficial(url)
+      const record = deps.record ?? recordDownload
+      void record(item.seenKeyValue, item.beatmapsetId, 'official')
+    } catch (err) {
+      patchItem(item.id, {
+        status: 'failed',
+        note: err instanceof Error ? err.message : String(err),
+      })
+      return
+    }
+    patchItem(item.id, {
+      status: 'browser',
+      mirrorIdUsed: 'official',
+      triedMirrorIds: [...(item.triedMirrorIds ?? []), 'official'],
+    })
+    return
+  }
   try {
     const result = manager.startDownload({
       beatmapsetId: item.beatmapsetId,

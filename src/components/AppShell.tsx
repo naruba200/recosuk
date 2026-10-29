@@ -17,7 +17,9 @@ import { usePreviewPlayer } from '../lib/previewPlayer'
 
 export interface ShellIdentity {
   username: string
-  pp: number
+  /** Null while the identity is still resolving (or genuinely
+   * unknown): the sidebar shows "…" rather than flashing "0 pp". */
+  pp: number | null
   countryCode?: string
   avatarUrl?: string
   tierLabel: string
@@ -188,7 +190,7 @@ export default function AppShell({
               </span>
               <div className="flex items-center gap-1">
                 <span className="font-label-sm text-label-sm text-primary font-bold">
-                  {fmtInt(identity.pp)}
+                  {identity.pp === null ? '…' : fmtInt(identity.pp)}
                 </span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant">pp</span>
               </div>

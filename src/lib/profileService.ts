@@ -234,6 +234,10 @@ interface AccountProfileRow {
   osu_username: string | null
   osu_user_id: number | null
   selected_mode: string | null
+  /** Per-mode stored skill profiles (`{ [mode]: SkillProfile }`),
+   * written by persistProfile; read here so the sidebar pp needs
+   * no second fetch and no osu! API call (batch 12, part 11). */
+  skill_profiles: Record<string, unknown> | null
 }
 
 async function fetchAccountProfileRow(userId: string): Promise<AccountProfileRow | null> {
@@ -241,7 +245,7 @@ async function fetchAccountProfileRow(userId: string): Promise<AccountProfileRow
   try {
     const { data } = await supabase
       .from('profiles')
-      .select('osu_username, osu_user_id, selected_mode')
+      .select('osu_username, osu_user_id, selected_mode, skill_profiles')
       .eq('id', userId)
       .maybeSingle()
     return (data as AccountProfileRow | null) ?? null
@@ -358,10 +362,17 @@ export function resolveSidebarIdentity(input: SidebarIdentityInput): string | nu
  * pending — callers render a placeholder ('Loading…', matching
  * Dashboard/Stats) instead of flashing 'Guest'.
  */
-export function useSidebarIdentity(): { username: string | null; resolving: boolean } {
+export function useSidebarIdentity(): {
+  username: string | null
+  pp: number | null
+  avatarUrl: string | null
+  resolving: boolean
+} {
   const { user, loading: authLoading, guestSession } = useAuth()
   const { accountRow, loaded: accountRowLoaded } = useAccountProfileRow()
-  const pendingUsername = readPendingLink()?.osuUsername ?? null
+  const mode = useModeStore((s) => s.mode)
+  const pending = readPendingLink()
+  const pendingUsername = pending?.osuUsername ?? null
   const guestUsername = guestSession?.osuUsername ?? null
   const resolving =
     authLoading || (!!user && !accountRowLoaded && !pendingUsername && !guestUsername)
@@ -372,7 +383,83 @@ export function useSidebarIdentity(): { username: string | null; resolving: bool
     email: user?.email ?? null,
     resolving,
   })
-  return { username, resolving: username === null }
+  // pp/avatar resolve from STORED sources only (same single row
+  // fetch for accounts, the local guest session for guests) — no
+  // osu! API call on these pages. While the name is still
+  // resolving, pp/avatar stay null too, so shells never flash
+  // "0 pp" or an avatar built from a missing id.
+  const details = resolveSidebarPpAvatar({
+    accountSkillProfiles: accountRow?.skill_profiles ?? null,
+    guestSkillProfile: guestSession?.skillProfiles?.[mode] ?? null,
+    accountUserId: accountRow?.osu_user_id ?? null,
+    guestUserId: guestSession?.osuUserId ?? null,
+    pendingUserId: pending?.osuUserId ?? null,
+    mode,
+  })
+  if (username === null) {
+    return { username: null, pp: null, avatarUrl: null, resolving: true }
+  }
+  return { username, pp: details.pp, avatarUrl: details.avatarUrl, resolving: false }
+}
+
+/** pp from one stored skill-profile value (unknown-shaped JSONB /
+ * local-store payload). Only a finite, non-negative numeric `pp`
+ * counts — a stored profile with pp 0 is a real 0, not "unknown". */
+export function storedSkillProfilePp(stored: unknown): number | null {
+  const rec =
+    stored && typeof stored === 'object' && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : null
+  const pp = rec?.pp
+  return typeof pp === 'number' && Number.isFinite(pp) && pp >= 0 ? pp : null
+}
+
+/** Avatar URL for an osu! user id, or null when no usable id is
+ * known. Never build a URL from a missing id (a `…/null` avatar
+ * would render broken). */
+export function avatarUrlForUserId(userId: number | null | undefined): string | null {
+  return typeof userId === 'number' && Number.isFinite(userId) && userId > 0
+    ? `https://a.ppy.sh/${userId}`
+    : null
+}
+
+export interface SidebarPpAvatarInput {
+  /** Account profiles-row `skill_profiles` map (all modes). */
+  accountSkillProfiles?: unknown
+  /** Guest session's stored profile for the current mode. */
+  guestSkillProfile?: unknown
+  accountUserId?: number | null
+  guestUserId?: number | null
+  pendingUserId?: number | null
+  mode: GameMode
+}
+
+/**
+ * Sidebar pp + avatar resolution (batch 12, part 11), sharing the
+ * name chain's source priority: account stored profile first, then
+ * the guest session, then the pending link (avatar id only — a
+ * pending link carries no skill profile). No fetch: every input is
+ * already in hand on the calling shell. `countryCode` is
+ * deliberately NOT resolved here — no stored source carries it,
+ * and fetching for it alone is not worth it.
+ */
+export function resolveSidebarPpAvatar(
+  input: SidebarPpAvatarInput,
+): { pp: number | null; avatarUrl: string | null } {
+  const profiles =
+    input.accountSkillProfiles &&
+    typeof input.accountSkillProfiles === 'object' &&
+    !Array.isArray(input.accountSkillProfiles)
+      ? (input.accountSkillProfiles as Record<string, unknown>)
+      : null
+  const pp =
+    storedSkillProfilePp(profiles?.[input.mode]) ??
+    storedSkillProfilePp(input.guestSkillProfile)
+  const avatarUrl =
+    avatarUrlForUserId(input.accountUserId) ??
+    avatarUrlForUserId(input.guestUserId) ??
+    avatarUrlForUserId(input.pendingUserId)
+  return { pp, avatarUrl }
 }
 
 export interface UseProfileData {

@@ -27,6 +27,13 @@ import type { RegisterRequest } from './downloadQueue'
  * a list must never hand the same file to the browser twice.
  * An empty list registers nothing and calls onSettled
  * immediately (synchronously) with no timers.
+ *
+ * DELIBERATE EXCEPTION (batch 12, part 9): bulk downloads stay
+ * NATIVE-ONLY — they never use the official-first default order.
+ * Opening one official tab per set would flood the browser with
+ * tabs, and the authed osu! origin cannot be iframed or fetched.
+ * Each set registers with no explicit mirror, so the register's
+ * native Auto order applies exactly as for a single Auto click.
  */
 
 /** Gap between staggered handoffs: 250ms, inside the 200–300ms spec. */

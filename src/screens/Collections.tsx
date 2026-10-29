@@ -35,6 +35,9 @@ import {
   groupPacks,
   PACK_PERIOD_LABELS,
   PACK_PERIOD_ORDER,
+  PACKS_PAGE_SIZE,
+  packDownloadLabel,
+  paginatePackList,
   type BeatmapPack,
   type PackPeriod,
 } from '../lib/packs'
@@ -43,10 +46,14 @@ import {
  * Collections (QA batch 2, item 6): beatmap PACKS grouped Weekly /
  * Monthly / Yearly, BeatConnect-style. The packs themselves come
  * from osu!'s public beatmap-packs API via the proxy (see lib/packs.ts
- * for the source-honesty notes) — never fabricated. Each pack
- * downloads through the same native browser-download path as Mirror,
- * and "Download all" queues packs sequentially with a polite gap
- * between requests.
+ * for the source-honesty notes) — never fabricated. "View pack"
+ * expands a pack in place to list its contents (never a download);
+ * "Download" opens the pack's archive URL when the API provides one
+ * (the `url` field IS the pack download URL), and otherwise hands
+ * every set to the browser one at a time through the same native
+ * browser-download path as Mirror. No pack-level bulk-download
+ * buttons: the Ranked section's Download All is the only bulk
+ * action on this page.
  *
  * The Song-folder copy step (item 8) plugs in through the optional
  * `copySet` seam on the download loop: when the user has auto-copy
@@ -97,55 +104,115 @@ interface DownloadProgress {
   label: string
 }
 
+/** Cap on expanded pack contents rendered at once: yearly packs
+ * can hold 1000+ sets, and rendering every row would jank the
+ * page. The note under the list says the rest is in the download. */
+const EXPANDED_SET_LIMIT = 200
+
 function PackCard({
   pack,
   onDownload,
+  onToggleView,
+  onDownloadSet,
+  expanded,
+  detailLoading,
   downloading,
   error,
 }: {
   pack: BeatmapPack
   onDownload: (pack: BeatmapPack) => void
+  onToggleView: (pack: BeatmapPack) => void
+  onDownloadSet: (pack: BeatmapPack, item: { id: number; artist: string; title: string }) => void
+  expanded: boolean
+  detailLoading: boolean
   downloading: boolean
   error: string | null
 }) {
+  const meta = new Map((pack.setMeta ?? []).map((m) => [m.id, m]))
+  const shownIds = pack.beatmapsetIds.slice(0, EXPANDED_SET_LIMIT)
   return (
-    <article className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md p-space-md bg-surface-container-low hover:bg-surface-container transition-all rounded-lg shadow-sm">
-      <div className="flex flex-col min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-headline-sm text-headline-sm text-on-surface truncate">{pack.name}</span>
-          {pack.date && (
-            <span className="font-label-sm text-label-sm text-on-surface-variant">{pack.date}</span>
+    <article className="flex flex-col gap-space-md p-space-md bg-surface-container-low hover:bg-surface-container transition-all rounded-lg shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-headline-sm text-headline-sm text-on-surface truncate">{pack.name}</span>
+            {pack.date && (
+              <span className="font-label-sm text-label-sm text-on-surface-variant">{pack.date}</span>
+            )}
+          </div>
+          <span className="font-body-sm text-body-sm text-on-surface-variant">
+            {pack.beatmapsetIds.length > 0
+              ? `${pack.beatmapsetIds.length} beatmapsets`
+              : 'Contents load when you view the pack'}
+          </span>
+          {error && <span className="font-body-sm text-body-sm text-error">{error}</span>}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all flex-shrink-0"
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => onToggleView(pack)}
+          >
+            <span className="material-symbols-outlined text-[18px]">visibility</span>
+            <span>{expanded ? 'Hide contents' : 'View pack'}</span>
+          </button>
+          <button
+            className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all flex-shrink-0 disabled:opacity-60"
+            type="button"
+            disabled={downloading}
+            onClick={() => onDownload(pack)}
+          >
+            <span className="material-symbols-outlined text-[18px]">download</span>
+            <span>{downloading ? 'Queuing…' : packDownloadLabel(pack)}</span>
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="flex flex-col gap-1 border-t border-surface-container-highest/60 pt-space-sm">
+          {detailLoading ? (
+            <span className="font-body-sm text-body-sm text-on-surface-variant">Loading contents…</span>
+          ) : pack.beatmapsetIds.length === 0 ? (
+            <span className="font-body-sm text-body-sm text-on-surface-variant">
+              This pack&apos;s contents could not be loaded just now — try viewing it again in a moment.
+            </span>
+          ) : (
+            <>
+              {shownIds.map((id) => {
+                const m = meta.get(id)
+                return (
+                  <div key={id} className="flex items-center justify-between gap-space-md py-1">
+                    <span className="font-body-sm text-body-sm text-on-surface truncate min-w-0">
+                      {m && (m.artist || m.title) ? `${m.artist} — ${m.title}` : `Beatmapset ${id}`}
+                    </span>
+                    <button
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm hover:bg-surface-container-highest transition-all flex-shrink-0 disabled:opacity-60"
+                      type="button"
+                      disabled={downloading}
+                      aria-label={`Download beatmapset ${id}`}
+                      onClick={() =>
+                        onDownloadSet(pack, {
+                          id,
+                          artist: m?.artist ?? '',
+                          title: m?.title ?? '',
+                        })
+                      }
+                    >
+                      <span className="material-symbols-outlined text-[16px]">download</span>
+                      <span>Download</span>
+                    </button>
+                  </div>
+                )
+              })}
+              {pack.beatmapsetIds.length > EXPANDED_SET_LIMIT && (
+                <span className="font-body-sm text-body-sm text-on-surface-variant">
+                  Showing the first {EXPANDED_SET_LIMIT} of {pack.beatmapsetIds.length} sets — use Download to get them all.
+                </span>
+              )}
+            </>
           )}
         </div>
-        <span className="font-body-sm text-body-sm text-on-surface-variant">
-          {pack.beatmapsetIds.length > 0
-            ? `${pack.beatmapsetIds.length} beatmapsets`
-            : 'Contents load when you download'}
-          {pack.url ? (
-            <>
-              {' · '}
-              <a
-                className="text-primary hover:underline"
-                href={pack.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View pack
-              </a>
-            </>
-          ) : null}
-        </span>
-        {error && <span className="font-body-sm text-body-sm text-error">{error}</span>}
-      </div>
-      <button
-        className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all flex-shrink-0 disabled:opacity-60"
-        type="button"
-        disabled={downloading}
-        onClick={() => onDownload(pack)}
-      >
-        <span className="material-symbols-outlined text-[18px]">download</span>
-        <span>{downloading ? 'Queuing…' : 'Download'}</span>
-      </button>
+      )}
     </article>
   )
 }
@@ -430,6 +497,9 @@ function CollectionsReal() {
   const [error, setError] = useState<string | null>(null)
   const [packErrors, setPackErrors] = useState<Record<string, string>>({})
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
+  const [visibleCount, setVisibleCount] = useState(PACKS_PAGE_SIZE)
+  const [expandedTag, setExpandedTag] = useState<string | null>(null)
+  const [detailLoadingTag, setDetailLoadingTag] = useState<string | null>(null)
   const cancelRef = useRef(false)
   const runRef = useRef(0)
 
@@ -444,6 +514,9 @@ function CollectionsReal() {
       const list = await fetchBeatmapPacks({ fresh })
       if (runRef.current !== run) return
       setPacks(list)
+      setVisibleCount(PACKS_PAGE_SIZE)
+      setExpandedTag(null)
+      setDetailLoadingTag(null)
     } catch (err) {
       if (runRef.current !== run) return
       // A 400 here is the OLD deployed Edge Function: it does not know
@@ -523,6 +596,42 @@ function CollectionsReal() {
     }))
   }
 
+  /** Expand a pack in place to list its contents (never a download). */
+  const toggleView = useCallback(
+    async (pack: BeatmapPack) => {
+      if (expandedTag === pack.tag) {
+        setExpandedTag(null)
+        return
+      }
+      setExpandedTag(pack.tag)
+      if (pack.beatmapsetIds.length > 0) return
+      setDetailLoadingTag(pack.tag)
+      try {
+        await ensurePackDetail(pack)
+      } catch {
+        setPackErrors((prev) => ({
+          ...prev,
+          [pack.tag]: "This pack's contents could not be loaded — try again in a moment.",
+        }))
+      } finally {
+        setDetailLoadingTag(null)
+      }
+    },
+    [expandedTag, ensurePackDetail],
+  )
+
+  /** One set from an expanded pack, through the same sequential loop. */
+  const downloadSet = useCallback(
+    async (
+      pack: BeatmapPack,
+      item: { id: number; artist: string; title: string },
+    ) => {
+      if (progress?.active) return
+      await downloadSets([item], pack.name)
+    },
+    [downloadSets, progress],
+  )
+
   const downloadPack = useCallback(
     async (pack: BeatmapPack) => {
       if (progress?.active) return
@@ -531,6 +640,17 @@ function CollectionsReal() {
         delete next[pack.tag]
         return next
       })
+      // The API's `url` field IS the pack's download URL (osu! API
+      // docs, BeatmapPack object: "The download url of the beatmap
+      // pack"), so Download opens the single archive in a new tab.
+      // It is never fetched or iframed from here, and nothing is
+      // recorded per set for an archive open.
+      if (pack.url) {
+        if (typeof globalThis.window !== 'undefined') {
+          globalThis.window.open(pack.url, '_blank', 'noopener,noreferrer')
+        }
+        return
+      }
       try {
         const full = await ensurePackDetail(pack)
         if (full.beatmapsetIds.length === 0) {
@@ -551,58 +671,33 @@ function CollectionsReal() {
     [downloadSets, ensurePackDetail, progress],
   )
 
-  const downloadAll = useCallback(
-    async (list: BeatmapPack[], label: string) => {
-      if (progress?.active || list.length === 0) return
-      cancelRef.current = false
-      const byId = new Map<number, { id: number; artist: string; title: string }>()
-      for (const pack of list) {
-        const full = await ensurePackDetail(pack)
-        for (const item of packToItems(full)) {
-          if (!byId.has(item.id)) byId.set(item.id, item)
-        }
-        if (cancelRef.current) break
-      }
-      if (byId.size === 0) {
-        setError('None of these packs exposed downloadable contents just now — try again in a moment.')
-        return
-      }
-      await downloadSets([...byId.values()], label)
-    },
-    [downloadSets, ensurePackDetail, progress],
+  // Packs render in chunks (batch 12, part 10): the fetched list is
+  // never rendered whole. Group headers are computed over the
+  // visible slice only. The API carries no next-page cursor in its
+  // response (docs list only `beatmap_packs`), so pagination is
+  // client-side over the fetched array.
+  const { visible: visiblePacks, remaining: remainingPacks } = paginatePackList(
+    packs,
+    visibleCount,
   )
-
-  const grouped = groupPacks(packs)
-  const visiblePacks = PACK_PERIOD_ORDER.flatMap((period) => grouped[period])
+  const visibleGrouped = groupPacks(visiblePacks)
   const busy = progress?.active ?? false
 
   return (
     <div className="flex flex-col w-full gap-space-lg">
       <section className="flex flex-col gap-space-md">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
-          <div className="flex flex-col">
-            <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm uppercase tracking-widest mb-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
-              <span>Beatmap Packs</span>
-              <span className="text-outline-variant">•</span>
-              <span>Bulk Downloads</span>
-            </div>
-            <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Collections</h1>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm uppercase tracking-widest mb-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+            <span>Beatmap Packs</span>
           </div>
-          <button
-            className="flex items-center gap-1.5 px-space-md py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all disabled:opacity-60 flex-shrink-0"
-            type="button"
-            disabled={busy || visiblePacks.length === 0}
-            onClick={() => void downloadAll(visiblePacks, 'All visible packs')}
-          >
-            <span className="material-symbols-outlined text-[18px]">download</span>
-            <span>Download all visible packs</span>
-          </button>
+          <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Collections</h1>
         </div>
         <p className="font-body-sm text-body-sm text-on-surface-variant -mt-1">
           Whole beatmap packs — weekly, monthly and yearly — from osu!&apos;s public pack listing.
-          Downloading a pack hands every set to your browser&apos;s download manager, one at a time.
-          The &quot;Download without video&quot; setting in Settings applies here too.
+          View a pack to see its contents; Download opens the pack&apos;s archive, or downloads
+          every map in it when no archive link is provided.
+          The &quot;Download without video&quot; setting in Settings applies to per-map downloads here too.
         </p>
       </section>
 
@@ -657,30 +752,23 @@ function CollectionsReal() {
 
       {!loading &&
         PACK_PERIOD_ORDER.map((period) => {
-          const list = grouped[period]
+          const list = visibleGrouped[period]
           if (list.length === 0) return null
           return (
             <section key={period} className="flex flex-col gap-space-md">
-              <div className="flex items-center justify-between gap-space-md">
-                <h2 className="font-headline-sm text-headline-sm text-on-surface">
-                  {PACK_PERIOD_LABELS[period]}
-                </h2>
-                <button
-                  className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void downloadAll(list, PACK_PERIOD_LABELS[period])}
-                >
-                  <span className="material-symbols-outlined text-[16px]">download</span>
-                  <span>Download all ({list.length} packs)</span>
-                </button>
-              </div>
+              <h2 className="font-headline-sm text-headline-sm text-on-surface">
+                {PACK_PERIOD_LABELS[period]}
+              </h2>
               <div className="flex flex-col gap-3">
                 {list.map((pack) => (
                   <PackCard
                     key={pack.tag}
                     pack={pack}
                     onDownload={(p) => void downloadPack(p)}
+                    onToggleView={(p) => void toggleView(p)}
+                    onDownloadSet={(p, item) => void downloadSet(p, item)}
+                    expanded={expandedTag === pack.tag}
+                    detailLoading={detailLoadingTag === pack.tag}
                     downloading={busy}
                     error={packErrors[pack.tag] ?? null}
                   />
@@ -689,6 +777,19 @@ function CollectionsReal() {
             </section>
           )
         })}
+
+      {!loading && !error && remainingPacks > 0 && (
+        <div className="flex items-center justify-center">
+          <button
+            className="flex items-center gap-1.5 px-space-md py-2.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all"
+            type="button"
+            onClick={() => setVisibleCount((c) => c + PACKS_PAGE_SIZE)}
+          >
+            <span className="material-symbols-outlined text-[18px]">expand_more</span>
+            <span>Show more packs ({remainingPacks} more)</span>
+          </button>
+        </div>
+      )}
 
       <RankedListsSection seenKeyValue={key} />
 
@@ -703,10 +804,12 @@ function CollectionsReal() {
 
 export default function Collections() {
   const { tier } = useAuth()
-  const { username: sidebarName } = useSidebarIdentity()
+  const { username: sidebarName, pp: sidebarPp, avatarUrl: sidebarAvatarUrl } =
+    useSidebarIdentity()
   const identity = {
     username: sidebarName ?? 'Loading…',
-    pp: 0,
+    pp: sidebarPp,
+    avatarUrl: sidebarAvatarUrl ?? undefined,
     tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
   }
   if (!isProxyConfigured) {

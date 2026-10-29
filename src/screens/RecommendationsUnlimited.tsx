@@ -1214,7 +1214,7 @@ export default function RecommendationsUnlimited() {
   }
   if (status === 'loading') {
     return (
-      <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: 0, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
+      <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: null, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
         <LoadingState label="Loading your profile before starting the feed…" />
       </AppShell>
     )

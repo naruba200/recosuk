@@ -1202,7 +1202,7 @@ export default function Stats() {
       <AppShell
         identity={{
           username: identity?.username ?? 'Loading…',
-          pp: 0,
+          pp: null,
           tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
         }}
       >

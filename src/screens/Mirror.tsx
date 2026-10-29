@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import AppShell from '../components/AppShell'
 import BeatmapRow from '../components/BeatmapRow'
 import LoadingState from '../components/LoadingState'
+import MenuSelect from '../components/MenuSelect'
 import UserTagPicker from '../components/UserTagPicker'
 import { isProxyConfigured } from '../lib/osu'
 import { GAME_MODES, MODE_LABELS, type GameMode } from '../lib/mode'
@@ -1187,26 +1188,21 @@ function MirrorReal() {
                 </button>
               </div>
             </div>
-            {/* Toolbar controls: styled sort pill (short labels,
-                narrower than the old bare select), advanced
-                filters tune button, icon-only refresh, and the
-                grid/list view switcher. Filter/sort/refresh
-                behaviour is unchanged — only the presentation. */}
+            {/* Toolbar controls: custom sort dropdown (MenuSelect —
+                the native select's OS popup could not be styled
+                and washed out on dark themes), advanced filters
+                tune button, icon-only refresh, and the grid/list
+                view switcher. Filter/sort/refresh behaviour is
+                unchanged — only the presentation. */}
             <div className="flex flex-wrap items-center gap-2 flex-shrink-0" role="toolbar" aria-label="Mirror controls">
-              <label className="relative flex items-center h-9 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm hover:bg-surface-bright transition-colors cursor-pointer focus-within:ring-2 focus-within:ring-primary">
-                <span className="text-on-surface-variant mr-1.5">Sort:</span>
-                <select
-                  aria-label="Sort results"
-                  className="appearance-none bg-transparent text-on-surface font-semibold focus:outline-none cursor-pointer w-24 sm:w-28 truncate"
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as MirrorSort)}
-                >
-                  {MIRROR_SORTS.map((s) => (
-                    <option key={s.value} value={s.value}>{s.shortLabel}</option>
-                  ))}
-                </select>
-                <span className="material-symbols-outlined absolute right-2 text-on-surface-variant text-[18px] pointer-events-none">arrow_drop_down</span>
-              </label>
+              <MenuSelect
+                options={MIRROR_SORTS.map((s) => ({ value: s.value, label: s.shortLabel }))}
+                value={sort}
+                onChange={(v) => setSort(v as MirrorSort)}
+                prefix="Sort:"
+                ariaLabel="Sort results"
+                buttonClassName="relative flex items-center h-9 w-44 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm hover:bg-surface-bright transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              />
               <button
                 className={`relative flex items-center justify-center w-9 h-9 rounded-full transition-colors ${drawerShown || filtersActive ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant hover:text-on-surface'}`}
                 type="button"
@@ -1655,13 +1651,15 @@ function RangeSlider({
 
 export default function Mirror() {
   const { tier } = useAuth()
-  const { username: sidebarName } = useSidebarIdentity()
+  const { username: sidebarName, pp: sidebarPp, avatarUrl: sidebarAvatarUrl } =
+    useSidebarIdentity()
   if (!isProxyConfigured) return <MirrorDemo />
   return (
     <AppShell
       identity={{
         username: sidebarName ?? 'Loading…',
-        pp: 0,
+        pp: sidebarPp,
+        avatarUrl: sidebarAvatarUrl ?? undefined,
         tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'mirror browsing',
       }}
     >

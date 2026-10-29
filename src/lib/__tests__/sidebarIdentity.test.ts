@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { resolveSidebarIdentity } from '../profileService'
+import {
+  avatarUrlForUserId,
+  resolveSidebarIdentity,
+  resolveSidebarPpAvatar,
+  storedSkillProfilePp,
+} from '../profileService'
 
 describe('resolveSidebarIdentity', () => {
   it('prefers the fetched profile name over everything else', () => {
@@ -104,5 +109,86 @@ describe('resolveSidebarIdentity', () => {
         resolving: false,
       }),
     ).toBe('Guest')
+  })
+})
+
+describe('storedSkillProfilePp / avatarUrlForUserId (batch 12, part 11)', () => {
+  it('reads a finite non-negative pp, including a real 0', () => {
+    expect(storedSkillProfilePp({ pp: 5284 })).toBe(5284)
+    expect(storedSkillProfilePp({ pp: 0 })).toBe(0)
+    expect(storedSkillProfilePp({ pp: 96.5 })).toBe(96.5)
+  })
+
+  it('returns null for missing, malformed, or impossible pp values', () => {
+    expect(storedSkillProfilePp(null)).toBeNull()
+    expect(storedSkillProfilePp(undefined)).toBeNull()
+    expect(storedSkillProfilePp('5284')).toBeNull()
+    expect(storedSkillProfilePp([1, 2])).toBeNull()
+    expect(storedSkillProfilePp({})).toBeNull()
+    expect(storedSkillProfilePp({ pp: '5284' })).toBeNull()
+    expect(storedSkillProfilePp({ pp: Number.NaN })).toBeNull()
+    expect(storedSkillProfilePp({ pp: -5 })).toBeNull()
+  })
+
+  it('builds the avatar URL only for usable ids', () => {
+    expect(avatarUrlForUserId(123456)).toBe('https://a.ppy.sh/123456')
+    expect(avatarUrlForUserId(null)).toBeNull()
+    expect(avatarUrlForUserId(undefined)).toBeNull()
+    expect(avatarUrlForUserId(0)).toBeNull()
+    expect(avatarUrlForUserId(-2)).toBeNull()
+    expect(avatarUrlForUserId(Number.NaN)).toBeNull()
+  })
+})
+
+describe('resolveSidebarPpAvatar (batch 12, part 11)', () => {
+  it('prefers the account stored profile for the current mode over the guest profile', () => {
+    expect(
+      resolveSidebarPpAvatar({
+        accountSkillProfiles: { osu: { pp: 5284 }, mania: { pp: 1200 } },
+        guestSkillProfile: { pp: 999 },
+        accountUserId: 111,
+        guestUserId: 222,
+        mode: 'mania',
+      }),
+    ).toEqual({ pp: 1200, avatarUrl: 'https://a.ppy.sh/111' })
+  })
+
+  it('falls back to the guest profile and guest id when the account has nothing stored', () => {
+    expect(
+      resolveSidebarPpAvatar({
+        accountSkillProfiles: {},
+        guestSkillProfile: { pp: 750 },
+        accountUserId: null,
+        guestUserId: 222,
+        mode: 'osu',
+      }),
+    ).toEqual({ pp: 750, avatarUrl: 'https://a.ppy.sh/222' })
+    expect(
+      resolveSidebarPpAvatar({
+        accountSkillProfiles: { osu: { pp: 100 } },
+        guestSkillProfile: { pp: 750 },
+        mode: 'taiko',
+      }),
+    ).toEqual({ pp: 750, avatarUrl: null })
+  })
+
+  it('uses the pending-link id for the avatar when no account/guest id is known', () => {
+    expect(
+      resolveSidebarPpAvatar({ pendingUserId: 333, mode: 'osu' }),
+    ).toEqual({ pp: null, avatarUrl: 'https://a.ppy.sh/333' })
+  })
+
+  it('returns nulls for unlinked users with nothing stored', () => {
+    expect(resolveSidebarPpAvatar({ mode: 'fruits' })).toEqual({
+      pp: null,
+      avatarUrl: null,
+    })
+    expect(
+      resolveSidebarPpAvatar({
+        accountSkillProfiles: null,
+        guestSkillProfile: 'not-a-profile',
+        mode: 'osu',
+      }),
+    ).toEqual({ pp: null, avatarUrl: null })
   })
 })

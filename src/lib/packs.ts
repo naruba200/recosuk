@@ -34,7 +34,10 @@ export interface BeatmapPack {
   /** Pack tag, e.g. the identifier the detail endpoint takes. */
   tag: string
   name: string
-  /** Link to the pack's page, when the API provides one. */
+  /** The pack's download URL (single archive), when the API provides
+   * one — osu! API docs, BeatmapPack object: `url` is "The download
+   * url of the beatmap pack." Absent on list entries that carry no
+   * archive link; the Download button then falls back to per-map. */
   url?: string
   /** Release date string, when the API provides one. */
   date?: string
@@ -147,6 +150,48 @@ export function groupPacks(packs: BeatmapPack[]): Record<PackPeriod, BeatmapPack
   }
   for (const pack of packs) grouped[packPeriod(pack)].push(pack)
   return grouped
+}
+
+/** Packs shown before "Show more" (batch 12, part 10). */
+export const PACKS_PAGE_SIZE = 12
+
+/**
+ * Client-side chunking over the fetched list, in period order
+ * (weekly → monthly → yearly → curated). The packs API carries no
+ * next-page cursor in its response (the docs list only
+ * `beatmap_packs`), so there is nothing to fetch on demand —
+ * "Show more" reveals the next chunk of what was already fetched.
+ * Returns the visible slice plus how many packs remain hidden.
+ */
+export function paginatePackList(
+  packs: BeatmapPack[],
+  shown: number,
+): { visible: BeatmapPack[]; remaining: number } {
+  const grouped = groupPacks(packs)
+  const ordered = PACK_PERIOD_ORDER.flatMap((period) => grouped[period])
+  const visible = ordered.slice(0, Math.max(0, shown))
+  return { visible, remaining: Math.max(0, ordered.length - visible.length) }
+}
+
+/** How a pack's Download button behaves (batch 12, part 10). */
+export type PackDownloadKind = 'archive' | 'all-maps'
+
+/** 'archive' when the API provides the pack download URL, else
+ * per-map sequential download. Never guessed: only a present,
+ * non-empty `url` counts as an archive. */
+export function packDownloadKind(pack: BeatmapPack): PackDownloadKind {
+  return pack.url ? 'archive' : 'all-maps'
+}
+
+/** Button label that matches the behaviour exactly: the archive
+ * case says "Download pack", the per-map case names the count once
+ * the contents are known. */
+export function packDownloadLabel(pack: BeatmapPack): string {
+  if (pack.url) return 'Download pack'
+  if (pack.beatmapsetIds.length > 0) {
+    return `Download all (${pack.beatmapsetIds.length} maps)`
+  }
+  return 'Download all maps'
 }
 
 const PACKS_TTL_MS = 60 * 60 * 1000

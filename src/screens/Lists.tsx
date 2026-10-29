@@ -1023,10 +1023,12 @@ function ListsReal({ userId, username }: { userId: string; username: string | nu
 
 export default function Lists() {
   const { user, tier } = useAuth()
-  const { username: sidebarName } = useSidebarIdentity()
+  const { username: sidebarName, pp: sidebarPp, avatarUrl: sidebarAvatarUrl } =
+    useSidebarIdentity()
   const pageIdentity = {
     username: sidebarName ?? 'Loading…',
-    pp: 0,
+    pp: sidebarPp,
+    avatarUrl: sidebarAvatarUrl ?? undefined,
     tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
   }
   const isReal = tier === 'account' && !!user && isSupabaseConfigured

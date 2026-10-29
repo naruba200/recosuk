@@ -1153,7 +1153,7 @@ export default function Recommendations() {
   }
   if (status === 'loading') {
     return (
-      <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: 0, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
+      <AppShell identity={{ username: identity?.username ?? 'Loading…', pp: null, tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier' }}>
         <LoadingState label="Loading your profile before generating recommendations…" />
       </AppShell>
     )

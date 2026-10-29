@@ -13,8 +13,12 @@ import {
   groupPacks,
   normalizePack,
   normalizePackList,
+  packDownloadKind,
+  packDownloadLabel,
   packPeriod,
   PACKS_EMPTY_TTL_MS,
+  PACKS_PAGE_SIZE,
+  paginatePackList,
   type BeatmapPack,
 } from '../packs'
 import { dataCache } from '../dataCache'
@@ -246,5 +250,111 @@ describe('packPeriod grouping', () => {
     expect(grouped.monthly.map((p) => p.name)).toEqual(['Monthly B'])
     expect(grouped.yearly.map((p) => p.name)).toEqual(['Yearly C'])
     expect(grouped.curated.map((p) => p.name)).toEqual(['Random D'])
+  })
+})
+
+describe('paginatePackList (batch 12, part 10)', () => {
+  function pack(name: string, tag = ''): BeatmapPack {
+    return { tag, name, beatmapsetIds: [] }
+  }
+
+  function many(count: number): BeatmapPack[] {
+    return Array.from({ length: count }, (_, i) => {
+      const period = ['Weekly', 'Monthly', 'Yearly', 'Random'][i % 4]
+      return pack(`${period} Pack ${i + 1}`, `P${i + 1}`)
+    })
+  }
+
+  it('caps the first chunk at PACKS_PAGE_SIZE in period order', () => {
+    const { visible, remaining } = paginatePackList(many(30), PACKS_PAGE_SIZE)
+    expect(PACKS_PAGE_SIZE).toBe(12)
+    expect(visible).toHaveLength(12)
+    expect(remaining).toBe(18)
+    // Period order wins over fetch order: weeklies first.
+    expect(visible[0].name).toBe('Weekly Pack 1')
+    expect(visible.map((p) => p.name)).toEqual([
+      'Weekly Pack 1',
+      'Weekly Pack 5',
+      'Weekly Pack 9',
+      'Weekly Pack 13',
+      'Weekly Pack 17',
+      'Weekly Pack 21',
+      'Weekly Pack 25',
+      'Weekly Pack 29',
+      'Monthly Pack 2',
+      'Monthly Pack 6',
+      'Monthly Pack 10',
+      'Monthly Pack 14',
+    ])
+  })
+
+  it('reveals the next chunk and reports exhaustion', () => {
+    const all = many(30)
+    const second = paginatePackList(all, PACKS_PAGE_SIZE * 2)
+    expect(second.visible).toHaveLength(24)
+    expect(second.remaining).toBe(6)
+    expect(second.visible.slice(12).map((p) => p.name)).toEqual([
+      'Monthly Pack 18',
+      'Monthly Pack 22',
+      'Monthly Pack 26',
+      'Monthly Pack 30',
+      'Yearly Pack 3',
+      'Yearly Pack 7',
+      'Yearly Pack 11',
+      'Yearly Pack 15',
+      'Yearly Pack 19',
+      'Yearly Pack 23',
+      'Yearly Pack 27',
+      'Random Pack 4',
+    ])
+    const exhausted = paginatePackList(all, 30)
+    expect(exhausted.visible).toHaveLength(30)
+    expect(exhausted.remaining).toBe(0)
+    const over = paginatePackList(all, 999)
+    expect(over.visible).toHaveLength(30)
+    expect(over.remaining).toBe(0)
+  })
+
+  it('keeps group headers intact: grouping the visible slice preserves periods', () => {
+    const { visible } = paginatePackList(many(30), PACKS_PAGE_SIZE)
+    const grouped = groupPacks(visible)
+    expect(grouped.weekly).toHaveLength(8)
+    expect(grouped.monthly).toHaveLength(4)
+    expect(grouped.yearly).toHaveLength(0)
+    expect(grouped.curated).toHaveLength(0)
+  })
+
+  it('handles empty and non-positive counts', () => {
+    expect(paginatePackList([], 12)).toEqual({ visible: [], remaining: 0 })
+    expect(paginatePackList(many(5), 0)).toEqual({ visible: [], remaining: 5 })
+    expect(paginatePackList(many(5), -3).visible).toEqual([])
+  })
+})
+
+describe('packDownloadKind / packDownloadLabel (batch 12, part 10)', () => {
+  it('archive kind + "Download pack" label when the API provides a url', () => {
+    const pack: BeatmapPack = {
+      tag: 'S1',
+      name: 'Pack',
+      url: 'https://osu.ppy.sh/beatmaps/packs/S1/download',
+      beatmapsetIds: [1, 2, 3],
+    }
+    expect(packDownloadKind(pack)).toBe('archive')
+    expect(packDownloadLabel(pack)).toBe('Download pack')
+  })
+
+  it('all-maps kind with the count once contents are known', () => {
+    const pack: BeatmapPack = { tag: 'S1', name: 'Pack', beatmapsetIds: [1, 2, 3] }
+    expect(packDownloadKind(pack)).toBe('all-maps')
+    expect(packDownloadLabel(pack)).toBe('Download all (3 maps)')
+  })
+
+  it('all-maps kind with a count-less label before contents load, and empty url counts as absent', () => {
+    expect(packDownloadLabel({ tag: 'S1', name: 'Pack', beatmapsetIds: [] })).toBe(
+      'Download all maps',
+    )
+    expect(
+      packDownloadKind({ tag: 'S1', name: 'Pack', url: '', beatmapsetIds: [] }),
+    ).toBe('all-maps')
   })
 })

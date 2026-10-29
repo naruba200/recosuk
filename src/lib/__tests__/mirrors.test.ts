@@ -8,7 +8,8 @@ import { MIRRORS, mirrorById } from '../mirrors'
  * "catboy style" in the hinai mirror FAQ, mirror.hinamizawa.ai).
  * Beatconnect / Nerinyan / Sayobot fall back to the full file with
  * noVideo on — no shape is guessed for them. The official source
- * never takes a file URL at all.
+ * uses `?noVideo=1` (batch 12, verified from osu!'s own client
+ * source, `DownloadBeatmapSetRequest.cs`).
  */
 describe('mirror URLs', () => {
   it('builds the full-file URL for every mirror by default', () => {
@@ -37,8 +38,14 @@ describe('mirror URLs', () => {
     )
   })
 
-  it('leaves the official osu! URL untouched by noVideo', () => {
+  it('adds ?noVideo=1 to the official osu! URL with noVideo on, plain URL otherwise', () => {
     expect(mirrorById('official').url(42, { noVideo: true })).toBe(
+      'https://osu.ppy.sh/beatmapsets/42/download?noVideo=1',
+    )
+    expect(mirrorById('official').url(42, { noVideo: false })).toBe(
+      'https://osu.ppy.sh/beatmapsets/42/download',
+    )
+    expect(mirrorById('official').url(42)).toBe(
       'https://osu.ppy.sh/beatmapsets/42/download',
     )
   })
