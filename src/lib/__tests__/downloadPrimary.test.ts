@@ -56,6 +56,12 @@ describe('resolvePrimaryDownload', () => {
       kind: 'auto',
       mirrorId: 'sayobot',
     })
+    // hinai (batch AH) is a valid priority pick.
+    setPriority('hinai')
+    expect(resolvePrimaryDownload('auto', false)).toEqual({
+      kind: 'auto',
+      mirrorId: 'hinai',
+    })
   })
 
   it('auto with no-video on and no custom priority resolves to catboy first', () => {

@@ -72,6 +72,33 @@ describe('downloadManager (native browser downloads)', () => {
     expect(startBrowserDownload).toHaveBeenCalledWith('https://catboy.best/d/42n')
   })
 
+  // hinai (batch AH): an explicit hinai pick hands off the streaming
+  // endpoint in-page, and with noVideo on it uses the verified
+  // ?noVideo=1 form and reports noVideoApplied: true honestly.
+  it('uses the explicitly picked hinai streaming endpoint', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'hinai' })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'hinai', noVideoApplied: false })
+    expect(startBrowserDownload).toHaveBeenCalledWith(
+      'https://mirror.hinamizawa.ai/api/v1/hinai/d/42',
+    )
+  })
+
+  it('with noVideo, an explicit hinai pick uses ?noVideo=1', () => {
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({ startBrowserDownload, record: vi.fn() })
+
+    const result = manager.startDownload({ ...REQ, mirrorId: 'hinai', noVideo: true })
+
+    expect(result).toEqual({ status: 'started', mirrorId: 'hinai', noVideoApplied: true })
+    expect(startBrowserDownload).toHaveBeenCalledWith(
+      'https://mirror.hinamizawa.ai/api/v1/hinai/d/42?noVideo=1',
+    )
+  })
+
   it('never calls fetch — the browser downloader does the fetching', () => {
     const fetchSpy = vi.fn(() => {
       throw new Error('fetch must not be called from the download path')

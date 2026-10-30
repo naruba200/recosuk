@@ -127,7 +127,8 @@ describe('scheduleBulkDownload (staggered dock register)', () => {
 
   it('registers one dock item per set, in order, through the real download register', () => {
     const handOff = vi.fn()
-    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn() })
+    const openOfficial = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn(), openOfficial })
     const register = useDownloadQueue.getState().register
     const onSettled = vi.fn()
 
@@ -139,7 +140,14 @@ describe('scheduleBulkDownload (staggered dock register)', () => {
     vi.advanceTimersByTime(BULK_DOWNLOAD_STAGGER_MS)
     expect(useDownloadQueue.getState().items.map((i) => i.beatmapsetId)).toEqual([10, 20, 30])
     expect(useDownloadQueue.getState().dockOpen).toBe(true)
+    // Bulk routes through the same handoff as single downloads:
+    // Auto with beatconnect first hands off via the iframe,
+    // one per set.
     expect(handOff).toHaveBeenCalledTimes(3)
+    expect(handOff).toHaveBeenNthCalledWith(1, 'https://beatconnect.io/b/10')
+    expect(handOff).toHaveBeenNthCalledWith(2, 'https://beatconnect.io/b/20')
+    expect(handOff).toHaveBeenNthCalledWith(3, 'https://beatconnect.io/b/30')
+    expect(openOfficial).not.toHaveBeenCalled()
     expect(onSettled).toHaveBeenCalledTimes(1)
   })
 })

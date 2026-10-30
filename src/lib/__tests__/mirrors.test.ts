@@ -4,10 +4,12 @@ import { MIRRORS, mirrorById } from '../mirrors'
 /**
  * Mirror URL builder, incl. the no-video variants (QA batch 2).
  *
- * Only catboy's no-video form is verified (the `{id}n` suffix, named
- * "catboy style" in the hinai mirror FAQ, mirror.hinamizawa.ai).
- * Beatconnect / Nerinyan / Sayobot fall back to the full file with
- * noVideo on — no shape is guessed for them. The official source
+ * Only catboy's and hinai's no-video forms are verified
+ * (catboy's `{id}n` suffix, named "catboy style" in the hinai
+ * mirror FAQ, mirror.hinamizawa.ai; hinai's `?noVideo=1`,
+ * verified from hinai's own docs, batch AH). Beatconnect /
+ * Nerinyan / Sayobot fall back to the full file with noVideo
+ * on — no shape is guessed for them. The official source
  * uses `?noVideo=1` (batch 12, verified from osu!'s own client
  * source, `DownloadBeatmapSetRequest.cs`).
  */
@@ -20,10 +22,19 @@ describe('mirror URLs', () => {
     expect(mirrorById('sayobot').url(42)).toBe(
       'https://txy1.sayobot.cn/beatmaps/download/full/42',
     )
+    // hinai (batch AH): the STREAMING endpoint, not the /d/{id}
+    // JSON resolver. Verified live 2026-10-30 (200, attachment,
+    // 2,840,455 bytes for id 1, PK zip magic).
+    expect(mirrorById('hinai').url(42)).toBe(
+      'https://mirror.hinamizawa.ai/api/v1/hinai/d/42',
+    )
   })
 
-  it('uses the verified {id}n no-video form for catboy only', () => {
+  it('uses the verified {id}n no-video form for catboy and ?noVideo=1 for hinai', () => {
     expect(mirrorById('catboy').url(42, { noVideo: true })).toBe('https://catboy.best/d/42n')
+    expect(mirrorById('hinai').url(42, { noVideo: true })).toBe(
+      'https://mirror.hinamizawa.ai/api/v1/hinai/d/42?noVideo=1',
+    )
   })
 
   it('falls back to the full file for unverified mirrors with noVideo on', () => {

@@ -30,6 +30,14 @@ import { getMirrorPriority, MIRROR_PRIORITY_DEFAULT } from './downloadSettings'
  *   so the iframe path can never be used for it by mistake.
  *   Official downloads are not available via the API, and the
  *   official origin is never fetched from the page.
+ * - BeatConnect's anonymous direct links have an hourly per-IP
+ *   limit + captcha (live-verified 2026-10-30): when the limit
+ *   is hit /b/{id} answers with an HTML page instead of the
+ *   file, the frame refuses the page (X-Frame-Options: deny),
+ *   no download, dock stuck on "Downloading". There is no
+ *   in-page workaround — the dock Retry cycles to the next
+ *   mirror, and hinai (last in the native order) is the
+ *   fallback for exactly that case.
  * - No fallback chain is possible with native downloads: the page
  *   cannot tell whether the browser's download succeeded, so Auto
  *   always uses the first mirror in the order and the menu lets the
@@ -38,15 +46,21 @@ import { getMirrorPriority, MIRROR_PRIORITY_DEFAULT } from './downloadSettings'
  *   success cannot be observed from the page.
  */
 
-/** Mirrors that serve the .osz file directly, in preference order. */
-export const NATIVE_MIRROR_ORDER = ['beatconnect', 'catboy', 'nerinyan', 'sayobot'] as const
+/** Mirrors that serve the .osz file directly, in preference order.
+ * hinai sits LAST (fallback position, batch AH): the default order
+ * stays beatconnect first. Its eight-source cascade is the safety
+ * net when the earlier mirrors rate-limit or 503. */
+export const NATIVE_MIRROR_ORDER = ['beatconnect', 'catboy', 'nerinyan', 'sayobot', 'hinai'] as const
 
 /**
  * Auto order when "Download without video" is on: catboy goes first,
- * because it is the only mirror whose no-video URL form is verified
- * (see mirrors.ts). The other mirrors still serve the full file.
+ * because it is the only mirror whose no-video URL form was verified
+ * when this order was written (see mirrors.ts). hinai's ?noVideo=1
+ * form is verified too (batch AH) but hinai stays last — fallback
+ * position, same as the plain order. The other mirrors still serve
+ * the full file.
  */
-export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan', 'sayobot'] as const
+export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan', 'sayobot', 'hinai'] as const
 
 /**
  * The native mirror order actually used for a download, resolved
@@ -60,11 +74,12 @@ export const NATIVE_MIRROR_ORDER_NO_VIDEO = ['catboy', 'beatconnect', 'nerinyan'
  * priority defines the order. When the user has set NO custom
  * priority ('balanced', missing, or an unknown/stale value), the
  * built-in defaults apply — catboy first when no-video is on
- * (it is the only mirror whose no-video URL form is verified),
- * beatconnect first otherwise. When a custom priority IS set
- * (a native mirror id), it wins as the base order in BOTH cases:
- * the chosen mirror goes first and the rest keep their default
- * relative order. Per-mirror no-video URL shaping is unchanged
+ * (its `{id}n` form was the first verified no-video form;
+ * hinai's `?noVideo=1` is verified too, batch AH, but hinai
+ * stays last as the fallback), beatconnect first otherwise.
+ * When a custom priority IS set (a native mirror id), it wins
+ * as the base order in BOTH cases: the chosen mirror goes
+ * first and the rest keep their default relative order. Per-mirror no-video URL shaping is unchanged
  * (see mirrors.ts): catboy still serves its `{id}n` file wherever
  * it sits in the order, and the other mirrors still fall back
  * to the full file.
@@ -148,8 +163,9 @@ export interface DownloadResult {
   /** The mirror the download was handed to. */
   mirrorId: string
   /** True only when the handed-to mirror actually serves a no-video
-   *  file (today: catboy only — official never routes through here;
-   *  its `?noVideo=1` is applied to the tab URL by the queue).
+   *  file (catboy's {id}n form, hinai's ?noVideo=1 — both verified;
+   *  official never routes through here; its `?noVideo=1` is
+   *  applied to the tab URL by the queue).
    *  Never claim a no-video copy otherwise. */
   noVideoApplied: boolean
 }
@@ -204,7 +220,8 @@ export function createDownloadManager(deps: DownloadManagerDeps = {}) {
         'Official downloads must open in a new tab via the download queue (openOfficial) — the hidden-iframe handoff cannot carry the osu! session.',
       )
     }
-    const noVideoApplied = request.noVideo === true && mirror.id === 'catboy'
+    const noVideoApplied =
+      request.noVideo === true && (mirror.id === 'catboy' || mirror.id === 'hinai')
     startBrowserDownload(mirror.url(request.beatmapsetId, { noVideo: request.noVideo }))
     // Recorded on click: native downloads report no completion.
     void record(request.seenKeyValue, request.beatmapsetId, mirror.id)

@@ -87,19 +87,25 @@ afterEach(() => {
 })
 
 describe('download register (batch 6, part 1)', () => {
-  it('hands the first mirror URL to the browser and records the download, with no fetch at all', async () => {
+  // Auto with beatconnect first: the download hands off via the
+  // hidden iframe and the click is still recorded, with no fetch
+  // at all. The dock row stays "Downloading" with no observable
+  // completion, exactly like every other native mirror.
+  it('Auto with beatconnect first hands off the iframe, records the download, with no fetch at all', async () => {
     const handOff = vi.fn()
+    const openOfficial = vi.fn()
     const record = vi.fn()
     const fetchFn = vi.fn(async () => {
       throw new Error('the download itself must never fetch')
     })
-    configureDownloadQueue({ startBrowserDownload: handOff, record, folderDeps: { fetchFn } })
+    configureDownloadQueue({ startBrowserDownload: handOff, record, openOfficial, folderDeps: { fetchFn } })
 
     const id = useDownloadQueue.getState().register(REQ)
     await waitForCopy(id)
 
     expect(handOff).toHaveBeenCalledTimes(1)
-    expect(handOff).toHaveBeenCalledWith(expect.stringContaining('beatconnect.io/b/42'))
+    expect(handOff).toHaveBeenCalledWith('https://beatconnect.io/b/42')
+    expect(openOfficial).not.toHaveBeenCalled()
     expect(record).toHaveBeenCalledWith('test', 42, 'beatconnect')
     expect(fetchFn).not.toHaveBeenCalled()
     const item = useDownloadQueue.getState().items[0]
@@ -134,10 +140,16 @@ describe('download register (batch 6, part 1)', () => {
 
   it('retry re-hands-off via the NEXT mirror in the order and re-records it (batch 8)', () => {
     const handOff = vi.fn()
+    const openOfficial = vi.fn()
     const record = vi.fn()
-    configureDownloadQueue({ startBrowserDownload: handOff, record })
+    configureDownloadQueue({ startBrowserDownload: handOff, record, openOfficial })
 
     const id = useDownloadQueue.getState().register(REQ)
+    // The first attempt is BeatConnect via the iframe; the Retry
+    // cycles to catboy via the iframe.
+    expect(handOff).toHaveBeenCalledTimes(1)
+    expect(handOff).toHaveBeenCalledWith('https://beatconnect.io/b/42')
+    expect(openOfficial).not.toHaveBeenCalled()
     useDownloadQueue.getState().retry(id)
 
     expect(handOff).toHaveBeenCalledTimes(2)
@@ -150,7 +162,7 @@ describe('download register (batch 6, part 1)', () => {
     expect(item.triedMirrorIds).toEqual(['beatconnect', 'catboy'])
   })
 
-  it('successive retries walk the display order, opening the official tab on wrap-around, then native again', () => {
+  it('successive retries walk the display order, tabbing official only, iframes for the rest', () => {
     const handOff = vi.fn()
     const openOfficial = vi.fn()
     configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn(), openOfficial })
@@ -162,32 +174,37 @@ describe('download register (batch 6, part 1)', () => {
     state().retry(id)
     state().retry(id)
     state().retry(id)
+    state().retry(id)
 
-    // Four native iframe handoffs, then the official step opens
-    // the tab (batch 14: no iframe for official), then native
-    // again from the top of the native order.
-    expect(handOff).toHaveBeenCalledTimes(5)
-    expect(handOff).toHaveBeenNthCalledWith(1, expect.stringContaining('beatconnect.io/b/42'))
+    // The first attempt is BeatConnect via the iframe; the
+    // retries walk catboy, nerinyan, sayobot, hinai via the
+    // iframe, then the official step opens the tab, then the
+    // cycle wraps to BeatConnect via the iframe again.
+    expect(openOfficial).toHaveBeenCalledTimes(1)
+    expect(openOfficial).toHaveBeenCalledWith('https://osu.ppy.sh/beatmapsets/42/download')
+    expect(handOff).toHaveBeenCalledTimes(6)
+    expect(handOff).toHaveBeenNthCalledWith(1, 'https://beatconnect.io/b/42')
     expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('catboy.best/d/42'))
     expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('api.nerinyan.moe/d/42'))
     expect(handOff).toHaveBeenNthCalledWith(4, expect.stringContaining('txy1.sayobot.cn/beatmaps/download/full/42'))
-    expect(openOfficial).toHaveBeenCalledTimes(1)
-    expect(openOfficial).toHaveBeenCalledWith('https://osu.ppy.sh/beatmapsets/42/download')
-    expect(handOff).toHaveBeenNthCalledWith(5, expect.stringContaining('beatconnect.io/b/42'))
+    expect(handOff).toHaveBeenNthCalledWith(5, expect.stringContaining('mirror.hinamizawa.ai/api/v1/hinai/d/42'))
+    expect(handOff).toHaveBeenNthCalledWith(6, 'https://beatconnect.io/b/42')
     expect(state().items[0].triedMirrorIds).toEqual([
       'beatconnect',
       'catboy',
       'nerinyan',
       'sayobot',
+      'hinai',
       'official',
       'beatconnect',
     ])
     expect(state().items[0].mirrorIdUsed).toBe('beatconnect')
   })
 
-  it('no-video retries walk the no-video order (catboy first, then full-file mirrors)', () => {
+  it('no-video retries walk the no-video order (catboy first, then beatconnect, then full-file mirrors)', () => {
     const handOff = vi.fn()
-    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn() })
+    const openOfficial = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn(), openOfficial })
 
     const id = useDownloadQueue.getState().register({ ...REQ, noVideo: true })
     const state = () => useDownloadQueue.getState()
@@ -195,13 +212,15 @@ describe('download register (batch 6, part 1)', () => {
     state().retry(id)
 
     expect(handOff).toHaveBeenNthCalledWith(1, 'https://catboy.best/d/42n')
-    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('beatconnect.io/b/42'))
-    expect(handOff).toHaveBeenNthCalledWith(2, expect.not.stringContaining('42n'))
+    // BeatConnect via the iframe: the plain /b/{id} link — no
+    // guessed no-video form.
+    expect(handOff).toHaveBeenNthCalledWith(2, 'https://beatconnect.io/b/42')
     expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('api.nerinyan.moe/d/42'))
+    expect(openOfficial).not.toHaveBeenCalled()
     expect(state().items[0].triedMirrorIds).toEqual(['catboy', 'beatconnect', 'nerinyan'])
   })
 
-  it('an explicit mirror pick retries to the next mirror after the pick, then the official tab, then native again', () => {
+  it('an explicit mirror pick retries to the next mirror after the pick, then hinai, then the official tab, then beatconnect', () => {
     const handOff = vi.fn()
     const openOfficial = vi.fn()
     configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn(), openOfficial })
@@ -211,15 +230,18 @@ describe('download register (batch 6, part 1)', () => {
     state().retry(id)
     state().retry(id)
     state().retry(id)
+    state().retry(id)
 
     expect(handOff).toHaveBeenNthCalledWith(1, expect.stringContaining('api.nerinyan.moe/d/42'))
     expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('txy1.sayobot.cn/beatmaps/download/full/42'))
+    expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('mirror.hinamizawa.ai/api/v1/hinai/d/42'))
+    expect(handOff).toHaveBeenNthCalledWith(4, 'https://beatconnect.io/b/42')
     expect(openOfficial).toHaveBeenCalledTimes(1)
     expect(openOfficial).toHaveBeenCalledWith('https://osu.ppy.sh/beatmapsets/42/download')
-    expect(handOff).toHaveBeenNthCalledWith(3, expect.stringContaining('beatconnect.io/b/42'))
     expect(state().items[0].triedMirrorIds).toEqual([
       'nerinyan',
       'sayobot',
+      'hinai',
       'official',
       'beatconnect',
     ])
@@ -231,8 +253,11 @@ describe('download register (batch 6, part 1)', () => {
     expect(nextRetryMirrorId({ ...base, triedMirrorIds: ['official'] })).toBe('beatconnect')
     expect(nextRetryMirrorId({ ...base, triedMirrorIds: ['beatconnect'] })).toBe('catboy')
     expect(nextRetryMirrorId({ ...base, triedMirrorIds: ['beatconnect', 'catboy', 'nerinyan', 'sayobot'] })).toBe(
-      'official',
+      'hinai',
     )
+    expect(
+      nextRetryMirrorId({ ...base, triedMirrorIds: ['beatconnect', 'catboy', 'nerinyan', 'sayobot', 'hinai'] }),
+    ).toBe('official')
     expect(
       nextRetryMirrorId({ ...base, noVideo: true, triedMirrorIds: ['catboy'] }),
     ).toBe('beatconnect')
@@ -241,7 +266,7 @@ describe('download register (batch 6, part 1)', () => {
     ).toBe('catboy')
     expect(
       nextRetryMirrorId({ ...base, triedMirrorIds: [], mirrorId: 'sayobot' }),
-    ).toBe('official')
+    ).toBe('hinai')
   })
 
   it('display order puts official first; native orders are unchanged', () => {
@@ -251,6 +276,7 @@ describe('download register (batch 6, part 1)', () => {
       'catboy',
       'nerinyan',
       'sayobot',
+      'hinai',
     ])
     expect([...displayOrderFor(true)]).toEqual([
       'official',
@@ -258,13 +284,15 @@ describe('download register (batch 6, part 1)', () => {
       'beatconnect',
       'nerinyan',
       'sayobot',
+      'hinai',
     ])
-    expect([...NATIVE_MIRROR_ORDER]).toEqual(['beatconnect', 'catboy', 'nerinyan', 'sayobot'])
+    expect([...NATIVE_MIRROR_ORDER]).toEqual(['beatconnect', 'catboy', 'nerinyan', 'sayobot', 'hinai'])
     expect([...NATIVE_MIRROR_ORDER_NO_VIDEO]).toEqual([
       'catboy',
       'beatconnect',
       'nerinyan',
       'sayobot',
+      'hinai',
     ])
   })
 
@@ -276,6 +304,7 @@ describe('download register (batch 6, part 1)', () => {
       'beatconnect',
       'catboy',
       'sayobot',
+      'hinai',
     ])
     expect(nextRetryMirrorId({
       noVideo: false,
@@ -338,18 +367,76 @@ describe('download register (batch 6, part 1)', () => {
     expect(handOff).not.toHaveBeenCalled()
     state().retry(id)
 
-    // Retry advances to the next mirror in display order — the
-    // official tab is not re-opened; natives take over.
+    // Retry advances to the next mirror in display order —
+    // beatconnect, via the iframe; the official tab is not
+    // re-opened.
     expect(openOfficial).toHaveBeenCalledTimes(1)
     expect(handOff).toHaveBeenCalledTimes(1)
-    expect(handOff).toHaveBeenCalledWith(expect.stringContaining('beatconnect.io/b/42'))
+    expect(handOff).toHaveBeenCalledWith('https://beatconnect.io/b/42')
     expect(state().items[0].triedMirrorIds).toEqual(['official', 'beatconnect'])
 
     state().retry(id)
     expect(handOff).toHaveBeenCalledTimes(2)
-    expect(handOff).toHaveBeenCalledWith(expect.stringContaining('catboy.best/d/42'))
+    expect(handOff).toHaveBeenNthCalledWith(2, expect.stringContaining('catboy.best/d/42'))
     expect(openOfficial).toHaveBeenCalledTimes(1)
     expect(state().items[0].triedMirrorIds).toEqual(['official', 'beatconnect', 'catboy'])
+  })
+
+  // An explicit BeatConnect pick hands off the plain /b/{id}
+  // link via the iframe — never a guessed no-video form —
+  // records the attempt, and the row stays "Downloading" with
+  // no observable completion.
+  it("register with mirrorId 'beatconnect' hands off the iframe, records, and never fetches", () => {
+    const handOff = vi.fn()
+    const openOfficial = vi.fn()
+    const record = vi.fn()
+    const fetchFn = vi.fn(async () => {
+      throw new Error('the download itself must never fetch')
+    })
+    configureDownloadQueue({
+      startBrowserDownload: handOff,
+      record,
+      openOfficial,
+      folderDeps: { fetchFn },
+    })
+
+    useDownloadQueue.getState().register({ ...REQ, mirrorId: 'beatconnect' })
+
+    expect(handOff).toHaveBeenCalledTimes(1)
+    expect(handOff).toHaveBeenCalledWith('https://beatconnect.io/b/42')
+    expect(openOfficial).not.toHaveBeenCalled()
+    expect(record).toHaveBeenCalledWith('test', 42, 'beatconnect')
+    expect(fetchFn).not.toHaveBeenCalled()
+    const item = useDownloadQueue.getState().items[0]
+    expect(item.status).toBe('browser')
+    expect(item.mirrorIdUsed).toBe('beatconnect')
+    expect(item.triedMirrorIds).toEqual(['beatconnect'])
+  })
+
+  it("register with mirrorId 'beatconnect' and noVideo hands off the plain iframe URL, never a guessed no-video form", () => {
+    const handOff = vi.fn()
+    const openOfficial = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn(), openOfficial })
+
+    useDownloadQueue.getState().register({ ...REQ, mirrorId: 'beatconnect', noVideo: true })
+
+    expect(handOff).toHaveBeenCalledTimes(1)
+    expect(handOff).toHaveBeenCalledWith('https://beatconnect.io/b/42')
+    expect(openOfficial).not.toHaveBeenCalled()
+    expect(useDownloadQueue.getState().items[0].mirrorIdUsed).toBe('beatconnect')
+  })
+
+  it("register with mirrorId 'hinai' hands off the streaming endpoint via the iframe", () => {
+    const handOff = vi.fn()
+    const openOfficial = vi.fn()
+    configureDownloadQueue({ startBrowserDownload: handOff, record: vi.fn(), openOfficial })
+
+    useDownloadQueue.getState().register({ ...REQ, mirrorId: 'hinai' })
+
+    expect(handOff).toHaveBeenCalledTimes(1)
+    expect(handOff).toHaveBeenCalledWith('https://mirror.hinamizawa.ai/api/v1/hinai/d/42')
+    expect(openOfficial).not.toHaveBeenCalled()
+    expect(useDownloadQueue.getState().items[0].mirrorIdUsed).toBe('hinai')
   })
 
   it('retry from an official no-video attempt goes catboy-first', () => {
@@ -396,7 +483,9 @@ describe('download register (batch 6, part 1)', () => {
       folderDeps: { fetchFn },
     })
 
-    const id = useDownloadQueue.getState().register(REQ)
+    // An explicit iframe mirror pick reaches the throwing
+    // handoff directly, so the row is marked failed.
+    const id = useDownloadQueue.getState().register({ ...REQ, mirrorId: 'catboy' })
     // No copy runs on a failed handoff, so no copy outcome ever
     // lands — poll the row directly instead of waitForCopy.
     await new Promise((r) => setTimeout(r, 50))

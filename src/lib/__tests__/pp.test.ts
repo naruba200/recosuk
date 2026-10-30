@@ -6,6 +6,8 @@ import {
   aggregatePpRange,
   formatPpRange,
   getPpRange,
+  isValidPpDifficultyInput,
+  isValidRosuModule,
   MemoryPpCache,
   ppCacheKey,
   ROSU_PP_CALCULATOR_ID,
@@ -253,6 +255,168 @@ describe('getPpRange orchestration (fake engine + fake fetch)', () => {
     expect(await getPpRange([], { engine: spying, fetchOsuFile: fetchImpl })).toBeNull()
     expect(engineCalled).toBe(false)
     expect(fetchCalls).toHaveLength(0)
+  })
+})
+
+describe('live-failure hardening (2026-10-30 M_ID report)', () => {
+  // The live console showed `TypeError: Cannot read properties of
+  // undefined (reading 'M_ID')` + repeated osu-proxy 400s on landing
+  // through the lazy PP path. Diagnosis (2026-10-30) proved both named
+  // suspects dead — the live function HAS getBeatmapFile (200 for real
+  // ids) and the bundler glue has NO init export to miss (3-line entry,
+  // wasm set at module top level, top-level await in the built chunk)
+  // — and 'M_ID' appears in no artifact of the current deploy, so the
+  // exact origin could not be reproduced. These tests pin the contract
+  // regardless: every failure mode below must resolve to null with no
+  // throw, and no malformed difficulty may ever reach the network.
+  const engine: PpEngine = {
+    computeMaxPp: (_text, mode) =>
+      ({ osu: 100.4, taiko: 50.6, fruits: 30.2, mania: 10.8 })[mode],
+  }
+
+  let backend: PpCacheBackend
+
+  beforeEach(() => {
+    backend = new MemoryPpCache()
+    __setPpCacheBackendForTests(backend)
+  })
+
+  afterEach(() => {
+    __setPpCacheBackendForTests(null)
+  })
+
+  it('proxy 400 (fetch throws) resolves null, no throw', async () => {
+    const failingFetch = async (_id: number): Promise<string | null> => {
+      const err = new Error('Request failed with status code 400')
+      throw err
+    }
+    const diffs: PpDifficultyInput[] = [
+      { beatmapId: 11, mode: 'osu', checksum: 'cs11' },
+      { beatmapId: 12, mode: 'mania', checksum: 'cs12' },
+    ]
+    let range: unknown
+    await expect(
+      (async () => {
+        range = await getPpRange(diffs, { engine, fetchOsuFile: failingFetch })
+      })(),
+    ).resolves.toBeUndefined()
+    expect(range).toBeNull()
+  })
+
+  it('a rejected engine promise (chunk/WASM load failure) resolves null, no throw', async () => {
+    const diffs: PpDifficultyInput[] = [{ beatmapId: 13, mode: 'mania', checksum: 'cs13' }]
+    const fetchSpy = async (_id: number): Promise<string | null> => fixtureText('mania')
+    await expect(
+      getPpRange(diffs, {
+        engine: Promise.reject(new Error('Failed to fetch dynamically imported module')),
+        fetchOsuFile: fetchSpy,
+      }),
+    ).resolves.toBeNull()
+  })
+
+  it('malformed difficulties resolve null and never touch the network', async () => {
+    const fetchCalls: number[] = []
+    const fetchSpy = async (id: number): Promise<string | null> => {
+      fetchCalls.push(id)
+      return fixtureText('mania')
+    }
+    const bad = [
+      undefined,
+      null,
+      { beatmapId: 0, mode: 'mania' },
+      { beatmapId: -5, mode: 'mania' },
+      { beatmapId: Number.NaN, mode: 'mania' },
+      { beatmapId: 14, mode: 'unknown' },
+      { mode: 'mania' },
+    ] as unknown as PpDifficultyInput[]
+    for (const input of bad) {
+      await expect(getPpRange([input], { engine, fetchOsuFile: fetchSpy })).resolves.toBeNull()
+    }
+    expect(fetchCalls).toHaveLength(0)
+  })
+
+  it('one malformed difficulty does not poison the valid ones', async () => {
+    const fetchCalls: number[] = []
+    const fetchSpy = async (id: number): Promise<string | null> => {
+      fetchCalls.push(id)
+      return fixtureText('mania')
+    }
+    const diffs = [
+      { beatmapId: 15, mode: 'mania', checksum: 'cs15' },
+      undefined,
+      { beatmapId: 0, mode: 'mania' },
+    ] as unknown as PpDifficultyInput[]
+    const range = await getPpRange(diffs, { engine, fetchOsuFile: fetchSpy })
+    expect(range).toEqual({ min: 11, max: 11 })
+    expect(fetchCalls).toEqual([15])
+  })
+
+  it('non-array input resolves null without touching the engine or fetch', async () => {
+    let engineCalled = false
+    const spying: PpEngine = {
+      computeMaxPp: () => {
+        engineCalled = true
+        return 1
+      },
+    }
+    const fetchSpy = async (_id: number): Promise<string | null> => fixtureText('mania')
+    await expect(
+      getPpRange(undefined as unknown as PpDifficultyInput[], {
+        engine: spying,
+        fetchOsuFile: fetchSpy,
+      }),
+    ).resolves.toBeNull()
+    expect(engineCalled).toBe(false)
+  })
+
+  it('isValidPpDifficultyInput accepts valid input and rejects the rest', () => {
+    expect(isValidPpDifficultyInput({ beatmapId: 1, mode: 'mania' })).toBe(true)
+    expect(isValidPpDifficultyInput({ beatmapId: 1, mode: 'fruits' })).toBe(true)
+    expect(isValidPpDifficultyInput(undefined)).toBe(false)
+    expect(isValidPpDifficultyInput('1')).toBe(false)
+    expect(isValidPpDifficultyInput({ beatmapId: 1.5, mode: 'mania' })).toBe(false)
+    expect(isValidPpDifficultyInput({ beatmapId: 1, mode: 'catch' })).toBe(false)
+  })
+
+  it('isValidRosuModule rejects a broken/stale module and accepts the real one', async () => {
+    expect(isValidRosuModule(null)).toBe(false)
+    expect(isValidRosuModule({})).toBe(false)
+    expect(isValidRosuModule({ Beatmap: () => undefined })).toBe(false)
+    const rosu = await import('rosu-pp-js')
+    expect(isValidRosuModule(rosu)).toBe(true)
+  })
+
+  it('real engine: garbage (non-.osu) text resolves null, no throw', async () => {
+    const fetchCalls: number[] = []
+    const fetchSpy = async (id: number): Promise<string | null> => {
+      fetchCalls.push(id)
+      return 'this is not a beatmap file'
+    }
+    const diffs: PpDifficultyInput[] = [
+      { beatmapId: 778, mode: 'mania', checksum: 'live-garbage-1' },
+    ]
+    await expect(getPpRange(diffs, { fetchOsuFile: fetchSpy })).resolves.toBeNull()
+    expect(fetchCalls).toEqual([778])
+  })
+
+  it('real engine: compute-after-load works (module is initialised before first use)', async () => {
+    // The bundler glue has no init export to await; the built chunk's
+    // top-level await performs initialisation, so `await import` is
+    // the whole contract. This pins that a compute immediately after
+    // load succeeds instead of throwing an undefined-wasm read.
+    const fetchCalls: number[] = []
+    const fetchSpy = async (id: number): Promise<string | null> => {
+      fetchCalls.push(id)
+      return fixtureText('mania')
+    }
+    const diffs: PpDifficultyInput[] = [
+      { beatmapId: 777, mode: 'mania', checksum: 'live-mania-1' },
+    ]
+    const range = await getPpRange(diffs, { fetchOsuFile: fetchSpy })
+    expect(range).not.toBeNull()
+    expect(Number.isFinite(range!.min)).toBe(true)
+    expect(Number.isFinite(range!.max)).toBe(true)
+    expect(fetchCalls).toEqual([777])
   })
 })
 

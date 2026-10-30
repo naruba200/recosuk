@@ -35,10 +35,11 @@ import { modeLabel, type GameMode } from '../lib/mode'
  *   the attempt in the dock, so Retry cycles on from official
  *   to the native mirrors. A view may opt into `primary="auto"`
  *   instead (Recommendations, user decision 2026-10-30): the
- *   main button then hands off in-page via the native Auto path
- *   — no tab opens — and official moves to the expand menu only.
- *   The Auto first mirror is the resolved order's order[0]
- *   (BeatConnect first with default settings), never hardcoded.
+ *   main button then uses the native Auto path — the resolved
+ *   order[0] (BeatConnect first with default settings), never
+ *   hardcoded. Under Auto, the resolved order[0] hands off
+ *   in-page via the hidden iframe. Official stays available in
+ *   the expand menu.
  * - Expand menu: official first, then Auto (native order), then
  *   each native mirror — except under `primary="auto"`, where
  *   Auto comes first and official second. The official entry is
@@ -108,7 +109,7 @@ export default function DownloadButton({
   // official. Under primary="auto" (Recommendations) the main
   // button instead uses the native Auto path — start() with no
   // mirror id, which hands off in-page via the resolved
-  // order[0] — and no tab opens.
+  // order[0] (BeatConnect first with default settings).
   const primaryDownload = resolvePrimaryDownload(primary, noVideo)
   const startOfficial = () => start('official')
   const startPrimary = () =>
@@ -212,13 +213,13 @@ export default function DownloadButton({
                   onClick={() => start(mirror.id)}
                 >
                   {mirror.name}
-                  {noVideo && mirror.id === 'catboy' ? ' (no video)' : ''}
+                  {noVideo && (mirror.id === 'catboy' || mirror.id === 'hinai') ? ' (no video)' : ''}
                 </button>
               )
             })}
             <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">Full .osz set · {modeLabel(mode)} difficulty shown</span>
             {noVideo && (
-              <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">No-video: catboy serves its no-video file and osu! official uses ?noVideo=1; other mirrors serve the full file.</span>
+              <span className="px-2 py-1 font-label-sm text-[10px] text-on-surface-variant">No-video: catboy and hinai serve their no-video files and osu! official uses ?noVideo=1; other mirrors serve the full file.</span>
             )}
           </div>
         )}

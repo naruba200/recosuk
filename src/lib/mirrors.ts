@@ -15,6 +15,22 @@ import { seenStore } from './seenStore'
  *   Nerinyan    https://api.nerinyan.moe/d/{id}
  *   Beatconnect https://beatconnect.io/b/{id}
  *   Sayobot     https://txy1.sayobot.cn/beatmaps/download/full/{id}
+ *   hinai       https://mirror.hinamizawa.ai/api/v1/hinai/d/{id}
+ *               (the STREAMING endpoint — verified live 2026-10-30:
+ *               200, application/octet-stream, Content-Disposition
+ *               attachment, 2,840,455 bytes for id 1, PK zip magic.
+ *               Do NOT use https://mirror.hinamizawa.ai/d/{id}:
+ *               that is a JSON resolver — it returns
+ *               {"success":true,"download_url":...}, not a file.
+ *               The streaming endpoint is capped at 1000 req/min
+ *               per IP per hinai's FAQ — effectively unlimited for
+ *               a person — and its eight-source cascade keeps
+ *               serving when other mirrors rate-limit. Its
+ *               response carries X-Frame-Options: SAMEORIGIN, the
+ *               same attachment+XFO caveat as BeatConnect: the
+ *               mechanism says an attachment download should not
+ *               be blocked, but real-browser behaviour is
+ *               live-unverified — see the test plan §AH.)
  *
  * No-video variants (QA batch 2, researched 2026-10-29):
  *   catboy.best https://catboy.best/d/{id}n — the `{id}n` suffix IS
@@ -41,6 +57,11 @@ import { seenStore } from './seenStore'
  *     osu-api-extended wiki confirms these hosts support a no-video
  *     CONCEPT, but gives no URL shape — do not guess one here. If a
  *     shape is verified later, add it with its source cited.
+ *   hinai       https://mirror.hinamizawa.ai/api/v1/hinai/d/{id}?noVideo=1
+ *     — verified from hinai's own docs (mirror.hinamizawa.ai,
+ *     read 2026-10-30): four no-video formats are supported with
+ *     priority ?n=0 > ?noVideo=1 > ?no_video=true > {id}n suffix.
+ *     The app uses ?noVideo=1, the same param style as official.
  *   official: `?noVideo=1` (batch 12, verified from osu!'s own game
  *     client source: `DownloadBeatmapSetRequest.cs` builds the
  *     target as `beatmapsets/{id}/download` plus `?noVideo=1` when
@@ -89,6 +110,12 @@ export const MIRRORS: MirrorSource[] = [
     id: 'sayobot',
     name: 'Sayobot',
     url: (id) => `https://txy1.sayobot.cn/beatmaps/download/full/${id}`,
+  },
+  {
+    id: 'hinai',
+    name: 'hinai',
+    url: (id, opts) =>
+      `https://mirror.hinamizawa.ai/api/v1/hinai/d/${id}${opts?.noVideo ? '?noVideo=1' : ''}`,
   },
 ]
 

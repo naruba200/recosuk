@@ -45,8 +45,8 @@ describe('resolveNativeMirrorOrder defaults', () => {
 
   it("treats 'balanced' as no custom priority in both cases", () => {
     setPriority('balanced')
-    expect([...resolveNativeMirrorOrder(false)]).toEqual(['beatconnect', 'catboy', 'nerinyan', 'sayobot'])
-    expect([...resolveNativeMirrorOrder(true)]).toEqual(['catboy', 'beatconnect', 'nerinyan', 'sayobot'])
+    expect([...resolveNativeMirrorOrder(false)]).toEqual(['beatconnect', 'catboy', 'nerinyan', 'sayobot', 'hinai'])
+    expect([...resolveNativeMirrorOrder(true)]).toEqual(['catboy', 'beatconnect', 'nerinyan', 'sayobot', 'hinai'])
   })
 })
 
@@ -58,6 +58,7 @@ describe('resolveNativeMirrorOrder with a custom priority', () => {
       'beatconnect',
       'catboy',
       'sayobot',
+      'hinai',
     ])
     setPriority('sayobot')
     expect([...resolveNativeMirrorOrder(false)]).toEqual([
@@ -65,11 +66,30 @@ describe('resolveNativeMirrorOrder with a custom priority', () => {
       'beatconnect',
       'catboy',
       'nerinyan',
+      'hinai',
     ])
     setPriority('catboy')
     expect([...resolveNativeMirrorOrder(false)]).toEqual([
       'catboy',
       'beatconnect',
+      'nerinyan',
+      'sayobot',
+      'hinai',
+    ])
+    // hinai (batch AH): the new mirror is a valid priority pick —
+    // first in the order, the rest keep their default relative order.
+    setPriority('hinai')
+    expect([...resolveNativeMirrorOrder(false)]).toEqual([
+      'hinai',
+      'beatconnect',
+      'catboy',
+      'nerinyan',
+      'sayobot',
+    ])
+    expect([...resolveNativeMirrorOrder(true)]).toEqual([
+      'hinai',
+      'beatconnect',
+      'catboy',
       'nerinyan',
       'sayobot',
     ])
@@ -82,6 +102,7 @@ describe('resolveNativeMirrorOrder with a custom priority', () => {
       'beatconnect',
       'catboy',
       'nerinyan',
+      'hinai',
     ])
   })
 })
@@ -116,6 +137,7 @@ describe('display order and Retry cycling follow the custom order', () => {
       'beatconnect',
       'catboy',
       'nerinyan',
+      'hinai',
     ])
     expect([...displayOrderFor(true)]).toEqual([
       'official',
@@ -123,6 +145,7 @@ describe('display order and Retry cycling follow the custom order', () => {
       'beatconnect',
       'catboy',
       'nerinyan',
+      'hinai',
     ])
   })
 
@@ -135,6 +158,12 @@ describe('display order and Retry cycling follow the custom order', () => {
       nextRetryMirrorId({
         ...base,
         triedMirrorIds: ['official', 'sayobot', 'beatconnect', 'catboy', 'nerinyan'],
+      }),
+    ).toBe('hinai')
+    expect(
+      nextRetryMirrorId({
+        ...base,
+        triedMirrorIds: ['official', 'sayobot', 'beatconnect', 'catboy', 'nerinyan', 'hinai'],
       }),
     ).toBe('official')
   })
@@ -192,6 +221,24 @@ describe('consumers follow the resolved order', () => {
     expect(startBrowserDownload).toHaveBeenCalledWith('https://catboy.best/d/42n')
   })
 
+  it('startDownload with no-video and hinai priority uses ?noVideo=1', () => {
+    setPriority('hinai')
+    const startBrowserDownload = vi.fn()
+    const manager = createDownloadManager({
+      startBrowserDownload,
+      record: () => {},
+    })
+    const result = manager.startDownload({
+      beatmapsetId: 42,
+      seenKeyValue: 'guest:test',
+      noVideo: true,
+    })
+    expect(result).toEqual({ status: 'started', mirrorId: 'hinai', noVideoApplied: true })
+    expect(startBrowserDownload).toHaveBeenCalledWith(
+      'https://mirror.hinamizawa.ai/api/v1/hinai/d/42?noVideo=1',
+    )
+  })
+
   it('Songs-folder copy fetch order follows the custom priority', () => {
     setPriority('sayobot')
     const attempts = mirrorAttemptUrls({ beatmapsetId: 42, artist: 'A', title: 'T' })
@@ -200,10 +247,12 @@ describe('consumers follow the resolved order', () => {
       'beatconnect',
       'catboy',
       'nerinyan',
+      'hinai',
     ])
     expect(attempts[0].url).toBe('https://txy1.sayobot.cn/beatmaps/download/full/42')
     expect(attempts[1].url).toBe('https://beatconnect.io/b/42')
     expect(attempts[2].url).toBe('https://catboy.best/d/42')
+    expect(attempts[4].url).toBe('https://mirror.hinamizawa.ai/api/v1/hinai/d/42')
   })
 
   it('Songs-folder copy with no-video and a custom priority still tries catboy no-video first for catboy', () => {

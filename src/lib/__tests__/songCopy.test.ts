@@ -101,7 +101,7 @@ describe('copySetToSongsFolder (mocked fetch + handle)', () => {
       { fetchFn: fetchFn as unknown as typeof fetch },
     )
     expect(outcome.status).toBe('failed')
-    expect(fetchFn).toHaveBeenCalledTimes(4)
+    expect(fetchFn).toHaveBeenCalledTimes(5)
     expect(writable.write).not.toHaveBeenCalled()
   })
 
@@ -158,9 +158,10 @@ describe('copySetToSongsFolder (mocked fetch + handle)', () => {
       { fetchFn: fetchFn as unknown as typeof fetch },
     )
     expect(outcome.status).toBe('failed')
-    // catboy: n + full (2). The other three mirrors have no no-video
-    // variant, so their identical URLs dedupe to 1 call each.
-    expect(fetchFn).toHaveBeenCalledTimes(5)
+    // catboy: n + full (2). hinai: ?noVideo=1 + full (2). The
+    // other three mirrors have no no-video variant, so their
+    // identical URLs dedupe to 1 call each.
+    expect(fetchFn).toHaveBeenCalledTimes(7)
   })
 
   it('streams the response body when one is present', async () => {

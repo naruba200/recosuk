@@ -45,14 +45,22 @@ import {
  * first, then the natives), one entry per attempt.
  *
  * Official steps ALWAYS open in a new tab (batch 14, reverting
- * batch 13): the hidden-iframe handoff cannot carry the osu!
- * session — the browser withholds the session cookie on
- * cross-site iframe navigations (SameSite), osu! redirects the
- * frame to its homepage, and the homepage refuses framing
- * (X-Frame-Options: sameorigin). Live-verified 2026-10-29 with
- * a signed-in user: no download, console X-Frame-Options error.
- * A top-level tab navigation DOES send the cookie, so the tab
- * open is the only working official path.
+ * batch 13): the hidden-iframe handoff cannot carry a session
+ * cookie (SameSite). osu! sees the frame as logged out,
+ * redirects it to the homepage, and the homepage refuses
+ * framing (X-Frame-Options: sameorigin) — live-verified
+ * 2026-10-29 with a signed-in user: no download, console
+ * X-Frame-Options error. A top-level tab navigation DOES send
+ * the session cookie, so the tab open is the only working path
+ * for official.
+ *
+ * (BeatConnect's anonymous direct links separately have an
+ * hourly per-IP limit + captcha — live-verified 2026-10-30:
+ * when the limit is hit /b/{id} answers with an HTML page
+ * instead of the file and the frame refuses it. There is no
+ * in-page workaround: the dock Retry cycles to the next
+ * mirror, and hinai — last in the native order — is the
+ * fallback for exactly that case.)
  */
 
 export type DownloadQueueStatus = 'browser' | 'failed'
@@ -99,11 +107,14 @@ export interface DownloadQueueDeps extends DownloadManagerDeps {
   folderDeps?: SongCopyDeps
   /** Clock for the registered time. Defaults to Date.now. */
   now?: () => number
-  /** Opens the official osu! download in a new tab. Defaults to
-   * `window.open` (guarded: no-ops without a window, e.g. tests).
-   * Injected in tests. Used for EVERY official attempt (batch 14):
-   * the iframe handoff cannot carry the osu! session, so the tab
-   * open is the official path on first attempts and Retries alike. */
+  /** Official-tab opener (batch 14). Defaults to `window.open`
+   * (guarded: no-ops without a window, e.g. tests). Injected
+   * in tests. Used for EVERY official attempt: the hidden-iframe
+   * handoff cannot carry a session cookie (SameSite) — a
+   * top-level tab navigation sends the cookie, so a signed-in
+   * user downloads. Kept under the historical name
+   * `openOfficial` so the existing call sites and tests need
+   * no rename. */
   openOfficial?: (url: string) => void
 }
 
@@ -134,8 +145,8 @@ export function mirrorOrderFor(noVideo: boolean): readonly string[] {
  * The display order a row's Retry cycles through (batch 12, part
  * 9): osu! official FIRST, then the native mirrors in the
  * resolved order, wrapping to official after the last native
- * mirror. Every step opens the official URL in a new tab (batch
- * 14); native steps use the iframe handoff.
+ * mirror. Official steps open in a new tab (batch 14); the
+ * native steps use the iframe handoff.
  */
 export function displayOrderFor(noVideo: boolean): readonly string[] {
   return resolveDisplayMirrorOrder(noVideo)
@@ -253,22 +264,22 @@ function defaultOpenOfficialTab(url: string): void {
  * the row with its outcome. The copy's fetch is the copy itself —
  * plain single-stream via attemptSongsCopy, never the chunked path.
  *
- * Official (batch 14, reverting batch 13): EVERY official attempt
- * opens the official download URL in a NEW TAB via the injectable
- * `openOfficial` seam. The hidden-iframe handoff CANNOT work for
- * official: the browser withholds the osu! session cookie on
- * cross-site iframe navigations (SameSite), so osu! sees the
- * frame as logged out, redirects it to the homepage, and the
- * homepage refuses framing (X-Frame-Options: sameorigin) —
- * live-verified 2026-10-29 with a signed-in user (no download,
- * console X-Frame-Options error). A top-level tab navigation
- * DOES send the cookie, so the tab open is the only working
+ * Official (batch 14, reverting batch 13): EVERY official
+ * attempt opens in a NEW TAB via the injectable tab opener
+ * seam. The hidden-iframe handoff CANNOT work for official
+ * (the browser withholds the osu! session cookie on cross-site
+ * iframe navigations (SameSite), so osu! sees the frame as
+ * logged out, redirects it to the homepage, and the homepage
+ * refuses framing (X-Frame-Options: sameorigin) — live-verified
+ * 2026-10-29 with a signed-in user (no download, console
+ * X-Frame-Options error)). A top-level tab navigation DOES
+ * send the session cookie, so the tab open is the only working
  * official path. The page never sees session cookies and must
  * not ask for them.
- * Either way, NO Songs-folder copy fetch runs for official:
- * the authed osu! origin is not fetchable from the page. The
- * row still records the attempt, so Retry can cycle on from
- * official to the native mirrors.
+ * NO Songs-folder copy fetch runs for official: the authed
+ * osu! origin is not fetchable from the page. The row still
+ * records the attempt, so Retry can cycle on from official to
+ * the other mirrors.
  */
 function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void {
   const manager = createDownloadManager({
@@ -276,20 +287,27 @@ function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void 
     record: deps.record,
   })
   // A Retry passes the next mirror explicitly; the first attempt
-  // uses the explicit pick (or Auto order[0]) as before.
+  // uses the explicit pick (or Auto order[0]) as before. Resolve
+  // Auto up front so the tab-vs-iframe decision below sees the
+  // mirror the download will actually use.
   const effectiveMirrorId = mirrorOverride ?? item.mirrorId
-  // Official always opens in a new tab (batch 14): the iframe
-  // handoff cannot carry the osu! session (see the comment above
-  // handOffAndCopy). The tab opener is injectable for tests.
-  if (effectiveMirrorId === 'official') {
-    const openOfficial = deps.openOfficial ?? defaultOpenOfficialTab
-    const url = mirrorById('official').url(item.beatmapsetId, {
+  const resolvedMirrorId =
+    effectiveMirrorId ?? resolveNativeMirrorOrder(item.noVideo)[0]
+  // Official ALWAYS opens in a new tab (batch 14) via the
+  // injectable tab opener seam. The hidden-iframe handoff cannot
+  // carry a session cookie (SameSite): official sees the frame
+  // as logged out (live-verified 2026-10-29). A top-level tab
+  // navigation sends the session cookie, so a signed-in user
+  // downloads.
+  if (resolvedMirrorId === 'official') {
+    const openTab = deps.openOfficial ?? defaultOpenOfficialTab
+    const url = mirrorById(resolvedMirrorId).url(item.beatmapsetId, {
       noVideo: item.noVideo,
     })
     try {
-      openOfficial(url)
+      openTab(url)
       const record = deps.record ?? recordDownload
-      void record(item.seenKeyValue, item.beatmapsetId, 'official')
+      void record(item.seenKeyValue, item.beatmapsetId, resolvedMirrorId)
     } catch (err) {
       patchItem(item.id, {
         status: 'failed',
@@ -299,29 +317,32 @@ function handOffAndCopy(item: DownloadQueueItem, mirrorOverride?: string): void 
     }
     patchItem(item.id, {
       status: 'browser',
-      mirrorIdUsed: 'official',
-      triedMirrorIds: [...(item.triedMirrorIds ?? []), 'official'],
+      mirrorIdUsed: resolvedMirrorId,
+      triedMirrorIds: [...(item.triedMirrorIds ?? []), resolvedMirrorId],
     })
+    // Official never runs the Songs-folder copy (the authed osu!
+    // origin is not fetchable from the page).
     return
-  }
-  try {
-    const result = manager.startDownload({
-      beatmapsetId: item.beatmapsetId,
-      mirrorId: effectiveMirrorId,
-      seenKeyValue: item.seenKeyValue,
-      noVideo: item.noVideo,
-    })
-    patchItem(item.id, {
-      status: 'browser',
-      mirrorIdUsed: result.mirrorId,
-      triedMirrorIds: [...(item.triedMirrorIds ?? []), result.mirrorId],
-    })
-  } catch (err) {
-    patchItem(item.id, {
-      status: 'failed',
-      note: err instanceof Error ? err.message : String(err),
-    })
-    return
+  } else {
+    try {
+      const result = manager.startDownload({
+        beatmapsetId: item.beatmapsetId,
+        mirrorId: effectiveMirrorId,
+        seenKeyValue: item.seenKeyValue,
+        noVideo: item.noVideo,
+      })
+      patchItem(item.id, {
+        status: 'browser',
+        mirrorIdUsed: result.mirrorId,
+        triedMirrorIds: [...(item.triedMirrorIds ?? []), result.mirrorId],
+      })
+    } catch (err) {
+      patchItem(item.id, {
+        status: 'failed',
+        note: err instanceof Error ? err.message : String(err),
+      })
+      return
+    }
   }
 
   const copyRequest: SongCopyRequest = {

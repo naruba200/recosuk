@@ -1,4 +1,4 @@
-import type { GameMode } from './mode'
+import { isGameMode, type GameMode } from './mode'
 import type { Beatmap, Performance, PerformanceAttributes } from 'rosu-pp-js'
 import { proxyCall } from './osu'
 
@@ -365,10 +365,39 @@ function computeWithRosu(rosu: RosuModule, osuText: string, mode: GameMode): num
 
 let realEnginePromise: Promise<PpEngine> | null = null
 
+/**
+ * Shape check for the dynamically imported rosu-pp-js module.
+ *
+ * The bundler glue (`rosu_pp_js.js`) is 3 lines and has NO init
+ * export to await: it imports the .wasm as an ES module and calls
+ * `__wbg_set_wasm` at module top level, and the built chunk awaits
+ * instantiation (top-level await) before the module resolves — so
+ * `await import('rosu-pp-js')` already returns a fully-initialised
+ * module. Verified against the installed glue 2026-10-30; do NOT
+ * add an init call (there is none to call). This check exists for
+ * the opposite failure: a broken/stale chunk resolving to a module
+ * without the classes the engine needs. That used to surface as a
+ * confusing TypeError deep in the compute call; now it fails here,
+ * and the caller degrades to `—`.
+ */
+export function isValidRosuModule(mod: unknown): mod is RosuModule {
+  if (!mod || typeof mod !== 'object') return false
+  const m = mod as Partial<RosuModule>
+  return (
+    typeof m.Beatmap === 'function' &&
+    typeof m.Performance === 'function' &&
+    !!m.GameMode &&
+    typeof (m.GameMode as { Osu?: unknown }).Osu === 'number'
+  )
+}
+
 function loadRealEngine(): Promise<PpEngine> {
   if (!realEnginePromise) {
     realEnginePromise = (async (): Promise<PpEngine> => {
       const rosu = await import('rosu-pp-js')
+      if (!isValidRosuModule(rosu)) {
+        throw new Error('rosu-pp-js module shape is unexpected')
+      }
       return { computeMaxPp: (osuText, mode) => computeWithRosu(rosu, osuText, mode) }
     })()
     realEnginePromise.catch(() => {
@@ -390,6 +419,10 @@ export interface PpComputeDeps {
 }
 
 async function defaultFetchOsuFile(beatmapId: number): Promise<string | null> {
+  // Never send an invalid id to the proxy: the function 400s on it
+  // and the console fills with failed requests for a row that could
+  // never compute. A bad id is a local null, not a network call.
+  if (!Number.isInteger(beatmapId) || beatmapId <= 0) return null
   try {
     const res = await proxyCall<{ beatmapId: number; osuFile: string }>('getBeatmapFile', {
       beatmapId,
@@ -454,11 +487,27 @@ async function computeAndCache(
   }
 }
 
+/** A difficulty the PP path may safely touch: numeric positive id + known mode. */
+export function isValidPpDifficultyInput(input: unknown): input is PpDifficultyInput {
+  if (!input || typeof input !== 'object') return false
+  const { beatmapId, mode } = input as Partial<PpDifficultyInput>
+  return (
+    typeof beatmapId === 'number' &&
+    Number.isInteger(beatmapId) &&
+    beatmapId > 0 &&
+    isGameMode(mode)
+  )
+}
+
 function dedupedCompute(
   input: PpDifficultyInput,
   engine: PpEngine,
   fetchOsuFile: (beatmapId: number) => Promise<string | null>,
 ): Promise<number | null> {
+  // A malformed difficulty (undefined entry, bad id, unknown mode)
+  // must never throw out of the range computation: it is a local
+  // null, and the other difficulties still compute.
+  if (!isValidPpDifficultyInput(input)) return Promise.resolve(null)
   const key = ppCacheKey(input)
   const existing = ppInflight.get(key)
   if (existing) return existing
@@ -479,7 +528,7 @@ export async function getPpRange(
   difficulties: readonly PpDifficultyInput[],
   deps: PpComputeDeps = {},
 ): Promise<PpRange | null> {
-  if (difficulties.length === 0) return null
+  if (!Array.isArray(difficulties) || difficulties.length === 0) return null
   const values: (number | null)[] = await Promise.all(
     difficulties.map((d) => readCachedPp(d).catch(() => null)),
   )
@@ -496,12 +545,17 @@ export async function getPpRange(
     }
     if (engine) {
       const fetchFn = deps.fetchOsuFile ?? defaultFetchOsuFile
-      const computed = await Promise.all(
-        missingIdx.map((i) => dedupedCompute(difficulties[i], engine as PpEngine, fetchFn)),
-      )
-      computed.forEach((pp, j) => {
-        values[missingIdx[j]] = pp
-      })
+      try {
+        const computed = await Promise.all(
+          missingIdx.map((i) => dedupedCompute(difficulties[i], engine as PpEngine, fetchFn)),
+        )
+        computed.forEach((pp, j) => {
+          values[missingIdx[j]] = pp
+        })
+      } catch {
+        // A compute failure must never reject the range: keep the
+        // cache hits (and nulls) already collected above.
+      }
     }
   }
   return aggregatePpRange(values)

@@ -39,7 +39,7 @@ export default function Settings() {
   const resolvedOrder = resolveNativeMirrorOrder(noVideo)
   // A stale/unknown stored value resolves to the default order;
   // show the matching 'balanced' label instead of a blank button.
-  const priorityValue = ['balanced', 'catboy', 'nerinyan', 'sayobot'].includes(mirrorPriority)
+  const priorityValue = ['balanced', 'catboy', 'nerinyan', 'sayobot', 'hinai'].includes(mirrorPriority)
     ? mirrorPriority
     : 'balanced'
   const fsaSupported = isFileSystemAccessSupported()
@@ -361,6 +361,7 @@ export default function Settings() {
                         { value: 'catboy', label: 'Priority: catboy first' },
                         { value: 'nerinyan', label: 'Priority: nerinyan first' },
                         { value: 'sayobot', label: 'Priority: sayobot first' },
+                        { value: 'hinai', label: 'Priority: hinai first' },
                       ]}
                       value={priorityValue}
                       onChange={setMirrorPriority}
