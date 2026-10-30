@@ -25,13 +25,16 @@ import { usePreviewPlayer } from '../lib/previewPlayer'
  * audio playing but no player, and no visible player with
  * nothing playing. Closing the footer calls stop().
  *
- * Download rows show ONE STATUS WORD ONLY (batch 7, item 2):
- * `Downloading` once handed to the browser (or `Failed`), plus
- * the Songs-folder copy outcome as one word (`Copied` /
- * `Copy failed`) where it ran. No mirror name, no-video flag,
- * timestamp, or sentences — browser downloads expose no progress
- * to the page, so there is no percentage, no byte count, and no
- * rate — never faked.
+ * Download rows show the REAL state (batch AI): `Downloading
+ * 45%` while a fetch is in flight with a known total (bytes
+ * counted off the wire), `Downloading 1.2 MB` while the total
+ * is unknown (an honest indeterminate state — never a faked
+ * percentage), `Downloaded` on success, `Failed` with the
+ * mirror's reason when every fetchable mirror failed, and
+ * `Downloading (unverified)` for iframe/tab handoffs (BeatConnect
+ * / official), where the page cannot see whether the file
+ * arrived. The Songs-folder copy outcome still shows as one
+ * word (`Copied` / `Copy failed`) where it ran.
  */
 
 function formatTime(seconds: number): string {
@@ -41,12 +44,31 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function QueueRow({ item }: { item: DownloadQueueItem }) {
   const retry = useDownloadQueue((s) => s.retry)
-  // Batch 7, item 2: one status word only. The handoff is
-  // synchronous, so there is no observable "Starting" transient —
-  // a handed-off row reads "Downloading" from registration.
-  const statusWord = item.status === 'failed' ? 'Failed' : 'Downloading'
+  // Batch AI: the status word is the observed state, never a
+  // guess. A fetch row counts real bytes; an iframe row cannot
+  // be verified, and says so.
+  const statusWord =
+    item.status === 'failed'
+      ? 'Failed'
+      : item.status === 'downloaded'
+        ? 'Downloaded'
+        : item.status === 'downloading'
+          ? item.progress && item.progress.total !== null && item.progress.total > 0
+            ? `Downloading ${Math.floor((item.progress.received / item.progress.total) * 100)}%`
+            : item.progress && item.progress.received > 0
+              ? `Downloading ${formatBytes(item.progress.received)}`
+              : 'Downloading'
+          : 'Downloading (unverified)'
+  const statusDetail =
+    item.status === 'failed' && item.note ? ` — ${item.note}` : ''
   const copyWord =
     item.copied === 'copied' ? ' · Copied' : item.copied === 'failed' ? ' · Copy failed' : ''
   // Batch 8: Retry advances to the next mirror, so its tooltip
@@ -54,11 +76,19 @@ function QueueRow({ item }: { item: DownloadQueueItem }) {
   // after each click as the next mirror advances. Visible text
   // stays "Retry" (batch 7 one-word rule for rows).
   const nextMirrorName = mirrorNameFor(nextRetryMirrorId(item))
+  const statusIcon =
+    item.status === 'downloaded'
+      ? 'download_done'
+      : item.status === 'downloading'
+        ? 'downloading'
+        : item.status === 'failed'
+          ? 'error'
+          : 'open_in_new'
   return (
     <div className="flex flex-col gap-1 px-3 py-2 rounded-lg bg-surface-container">
       <div className="flex items-center gap-2 min-w-0">
         <span className="material-symbols-outlined text-[16px] flex-shrink-0 text-on-surface-variant">
-          {item.status === 'browser' ? 'open_in_new' : 'error'}
+          {statusIcon}
         </span>
         <span className="font-label-md text-label-md text-on-surface truncate flex-1 min-w-0">{item.title}</span>
         <span className="font-label-sm text-label-sm text-on-surface-variant truncate flex-shrink-0">{item.artist}</span>
@@ -74,6 +104,7 @@ function QueueRow({ item }: { item: DownloadQueueItem }) {
       </div>
       <p className="font-label-sm text-label-sm text-on-surface-variant truncate">
         {statusWord}
+        {statusDetail}
         {copyWord}
       </p>
     </div>

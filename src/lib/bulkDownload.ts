@@ -1,27 +1,31 @@
 import type { RegisterRequest } from './downloadQueue'
 
 /**
- * "Download all" for list-detail views (batch 11, part 7): hand
- * every set to the browser downloader through the EXISTING dock
- * register (`useDownloadQueue.register`), so every item appears
- * in the dock window with the same mirror order + no-video
- * behaviour as a per-song DownloadButton click. There is NO
- * fetch, NO progress reporting (native downloads report none),
- * and NO fake progress — the dock rows say "Downloading" exactly
- * as single downloads do.
+ * "Download all" for list-detail views (batch 11, part 7; real
+ * queue batch AI): hand every set to the download register so
+ * every item appears in the dock window with the same mirror
+ * order + no-video behaviour as a per-song DownloadButton click.
  *
- * STAGGER MECHANISM: the first set registers synchronously, in
- * the click handler itself (the browser handoff stays in the
- * user-gesture call stack); each following set registers from a
- * chained `setTimeout` exactly BULK_DOWNLOAD_STAGGER_MS later.
- * The chain is O(1) per step and yields to the event loop
- * between handoffs, so a 50-set list never blocks the UI and the
- * browser is never asked for 50 hidden iframes in one tick.
- * `cancel()` stops the chain; already-registered items stay
- * registered (their browser downloads are already handed off
- * and cannot be recalled). `onSettled` fires exactly once when
- * the last item registers or the chain is cancelled, so the
- * caller can re-enable its button.
+ * REAL QUEUE (batch AI): items register through the pump below,
+ * at most BULK_DOWNLOAD_CONCURRENCY (3) in flight at once, with
+ * at least BULK_DOWNLOAD_STAGGER_MS (250ms) between registrations
+ * — the old courtesy gap stays, so the browser is never asked
+ * for 50 handoffs in one tick. A slot frees when the item's
+ * register settles (RegisterRequest.onSettled: the fetch
+ * actually finished/failed, or the iframe handoff landed), and
+ * the pump registers the next pending item. Each item carries a
+ * REAL state in the dock (progress / Downloaded / Failed /
+ * "Downloading (unverified)" for iframe rows) instead of a
+ * permanent "Downloading".
+ *
+ * The first set still registers synchronously, in the click
+ * handler itself. `cancel()` stops the pending registrations;
+ * already-registered items stay registered (their downloads
+ * are already handed off or in flight and cannot be recalled).
+ * `onSettled` fires exactly once when the last item REGISTERS
+ * or the chain is cancelled — the pre-AI semantics, preserved:
+ * callers re-enable their button once every set is handed to
+ * the queue, not once every download finishes.
  *
  * Sets are deduped by beatmapset_id (first occurrence wins) —
  * a list must never hand the same file to the browser twice.
@@ -38,6 +42,14 @@ import type { RegisterRequest } from './downloadQueue'
 
 /** Gap between staggered handoffs: 250ms, inside the 200–300ms spec. */
 export const BULK_DOWNLOAD_STAGGER_MS = 250
+
+/**
+ * Max downloads in flight at once. 3 is enough to use the
+ * connection without holding many whole files in memory at
+ * once — each in-flight fetch is buffered as a Blob before
+ * saving, so the cap is also a memory bound.
+ */
+export const BULK_DOWNLOAD_CONCURRENCY = 3
 
 export interface BulkDownloadItem {
   beatmapsetId: number
@@ -56,6 +68,8 @@ export interface BulkDownloadOptions {
   /** Gap between handoffs; tests inject a smaller value or rely
    * on fake timers with the default. */
   staggerMs?: number
+  /** Max downloads in flight; tests may lower it. */
+  concurrency?: number
   /** Fires once when the chain finishes or is cancelled. */
   onSettled?: () => void
 }
@@ -68,6 +82,7 @@ export function scheduleBulkDownload(
   opts: BulkDownloadOptions,
 ): BulkDownloadCancel {
   const staggerMs = opts.staggerMs ?? BULK_DOWNLOAD_STAGGER_MS
+  const concurrency = opts.concurrency ?? BULK_DOWNLOAD_CONCURRENCY
   const deduped: BulkDownloadItem[] = []
   const seen = new Set<number>()
   for (const item of items) {
@@ -88,33 +103,61 @@ export function scheduleBulkDownload(
   }
 
   let index = 0
+  let inFlight = 0
   let cancelled = false
   let timer: ReturnType<typeof setTimeout> | null = null
+  let lastRegisterAt = 0
 
-  const registerNext = () => {
-    if (cancelled) {
+  const schedulePump = (ms: number) => {
+    if (timer !== null) return
+    timer = setTimeout(() => {
+      timer = null
+      pump()
+    }, ms)
+  }
+
+  const pump = () => {
+    if (cancelled || settled) return
+    if (index >= deduped.length) {
       settle()
       return
     }
+    if (inFlight >= concurrency) return
+    if (index > 0) {
+      // Minimum gap between registrations (the old stagger
+      // courtesy): never burst handoffs in one tick.
+      const gap = staggerMs - (Date.now() - lastRegisterAt)
+      if (gap > 0) {
+        schedulePump(gap)
+        return
+      }
+    }
     const item = deduped[index]
     index += 1
+    inFlight += 1
+    lastRegisterAt = Date.now()
     opts.register({
       beatmapsetId: item.beatmapsetId,
       artist: item.artist,
       title: item.title,
       seenKeyValue: opts.seenKeyValue,
       noVideo: opts.noVideo,
+      // A freed slot registers the next pending item.
+      onSettled: () => {
+        inFlight -= 1
+        pump()
+      },
     })
     if (index >= deduped.length) {
       settle()
       return
     }
-    timer = setTimeout(registerNext, staggerMs)
+    schedulePump(staggerMs)
   }
 
   // First handoff synchronously, in the click handler; the rest
-  // follow on the chained timer.
-  registerNext()
+  // follow through the pump (timer-paced, slot-gated).
+  pump()
 
   return () => {
     if (cancelled) return

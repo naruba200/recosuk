@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   attemptSongsCopy,
+  copyBlobToSongsFolder,
   copySetToSongsFolder,
+  prepareSongsFolderCopy,
   resetSongsCopySessionFlags,
   songsFolderFilename,
 } from '../songCopy'
@@ -268,5 +270,160 @@ describe('attemptSongsCopy orchestration', () => {
       reason: 'Songs folder permission was not granted',
     })
     expect(fetchFn).not.toHaveBeenCalled()
+  })
+})
+
+describe('copyBlobToSongsFolder (batch AI: reuse the downloaded bytes)', () => {
+  beforeEach(() => {
+    resetSongsCopySessionFlags()
+    useDownloadSettings.getState().setAutoCopy(true)
+    ;(globalThis as { window?: unknown }).window = { showDirectoryPicker: vi.fn() }
+  })
+
+  afterEach(() => {
+    useDownloadSettings.getState().setAutoCopy(false)
+    const w = globalThis as { window?: unknown }
+    delete w.window
+  })
+
+  it('writes the given Blob with the osu!-style filename — no fetch at all', async () => {
+    const { handle, written, writable, fileHandle } = mockHandle()
+    const fetchFn = vi.fn(async () => {
+      throw new Error('the blob copy must never fetch')
+    })
+    const blob = new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3])], {
+      type: 'application/octet-stream',
+    })
+
+    const outcome = await copyBlobToSongsFolder(
+      { beatmapsetId: 42, artist: 'Camellia', title: 'Exit This Earth', mirrorId: 'hinai' },
+      blob,
+      {
+        fetchFn: fetchFn as unknown as typeof fetch,
+        loadHandle: async () => handle,
+        ensurePermission: async () => true,
+      },
+    )
+
+    expect(outcome).toEqual({
+      status: 'copied',
+      mirrorId: 'hinai',
+      filename: '42 Camellia - Exit This Earth.osz',
+    })
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(handle.getFileHandle).toHaveBeenCalledWith(
+      '42 Camellia - Exit This Earth.osz',
+      { create: true },
+    )
+    expect(fileHandle.createWritable).toHaveBeenCalledTimes(1)
+    expect(written).toHaveLength(1)
+    expect(written[0]).toBe(blob)
+    expect(writable.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a write failure honestly and aborts the stream', async () => {
+    const { handle, writable } = mockHandle()
+    writable.write.mockRejectedValueOnce(new Error('disk full'))
+    const blob = new Blob([new Uint8Array([1])])
+    const outcome = await copyBlobToSongsFolder(
+      { beatmapsetId: 42, artist: 'A', title: 'T' },
+      blob,
+      { loadHandle: async () => handle, ensurePermission: async () => true },
+    )
+    expect(outcome).toEqual({ status: 'failed', reason: 'disk full' })
+    expect(writable.abort).toHaveBeenCalledTimes(1)
+    expect(writable.close).not.toHaveBeenCalled()
+  })
+
+  it('skips when auto-copy is off, without touching the folder', async () => {
+    useDownloadSettings.getState().setAutoCopy(false)
+    const loadHandle = vi.fn(async () => null)
+    const outcome = await copyBlobToSongsFolder(
+      { beatmapsetId: 42, artist: 'A', title: 'T' },
+      new Blob([new Uint8Array([1])]),
+      { loadHandle },
+    )
+    expect(outcome).toEqual({ status: 'skipped', reason: 'auto-copy is off' })
+    expect(loadHandle).not.toHaveBeenCalled()
+  })
+})
+
+describe('prepareSongsFolderCopy', () => {
+  beforeEach(() => {
+    resetSongsCopySessionFlags()
+    useDownloadSettings.getState().setAutoCopy(true)
+    ;(globalThis as { window?: unknown }).window = { showDirectoryPicker: vi.fn() }
+  })
+
+  afterEach(() => {
+    useDownloadSettings.getState().setAutoCopy(false)
+    const w = globalThis as { window?: unknown }
+    delete w.window
+  })
+
+  it('returns the stored handle when everything is set up', async () => {
+    const { handle } = mockHandle()
+    const loadHandle = vi.fn(async () => handle)
+    const prepared = await prepareSongsFolderCopy({
+      loadHandle,
+      ensurePermission: async () => true,
+    })
+    expect(prepared).toEqual({ ready: true, handle })
+    expect(loadHandle).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips when auto-copy is off, without touching the handle', async () => {
+    useDownloadSettings.getState().setAutoCopy(false)
+    const loadHandle = vi.fn(async () => null)
+    const prepared = await prepareSongsFolderCopy({ loadHandle })
+    expect(prepared).toEqual({
+      ready: false,
+      outcome: { status: 'skipped', reason: 'auto-copy is off' },
+    })
+    expect(loadHandle).not.toHaveBeenCalled()
+  })
+
+  it('skips when the browser has no folder picker', async () => {
+    const w = globalThis as { window?: unknown }
+    delete w.window
+    const prepared = await prepareSongsFolderCopy({ loadHandle: vi.fn(async () => null) })
+    expect(prepared).toEqual({
+      ready: false,
+      outcome: { status: 'skipped', reason: 'this browser cannot pick folders' },
+    })
+  })
+
+  it('fails on permission denial', async () => {
+    const { handle } = mockHandle()
+    const prepared = await prepareSongsFolderCopy({
+      loadHandle: async () => handle,
+      ensurePermission: async () => false,
+    })
+    expect(prepared).toEqual({
+      ready: false,
+      outcome: { status: 'failed', reason: 'Songs folder permission was not granted' },
+    })
+  })
+
+  it('prompts once when no folder is set, then never nags again in the session', async () => {
+    const pickFolder = vi.fn(async () => null)
+    const first = await prepareSongsFolderCopy({
+      loadHandle: async () => null,
+      pickFolder,
+    })
+    expect(first).toEqual({
+      ready: false,
+      outcome: { status: 'skipped', reason: 'no Songs folder chosen' },
+    })
+    expect(pickFolder).toHaveBeenCalledTimes(1)
+    const second = await prepareSongsFolderCopy({
+      loadHandle: async () => null,
+      pickFolder,
+    })
+    expect(second).toEqual({
+      ready: false,
+      outcome: { status: 'skipped', reason: 'no Songs folder chosen' },
+    })
+    expect(pickFolder).toHaveBeenCalledTimes(1)
   })
 })

@@ -193,6 +193,99 @@ export function resetSongsCopySessionFlags(): void {
 }
 
 /**
+ * Resolve the Songs folder for a copy: checks the toggle, the
+ * browser, the stored handle (prompting the picker once when the
+ * toggle is on but no folder is set), and permission. Shared by
+ * attemptSongsCopy (which fetches its own bytes) and the
+ * fetch-download path (which hands over the bytes it already
+ * downloaded — no second fetch). Never throws; every outcome is
+ * an honest status.
+ */
+export type SongsFolderReady =
+  | { ready: true; handle: FileSystemDirectoryHandle }
+  | { ready: false; outcome: SongCopyOutcome }
+
+export async function prepareSongsFolderCopy(
+  deps: SongCopyDeps = {},
+): Promise<SongsFolderReady> {
+  if (!getAutoCopy()) return { ready: false, outcome: { status: 'skipped', reason: 'auto-copy is off' } }
+  if (!isFileSystemAccessSupported()) {
+    return { ready: false, outcome: { status: 'skipped', reason: 'this browser cannot pick folders' } }
+  }
+  const loadHandle = deps.loadHandle ?? songsFolderStore.loadHandle
+  const ensurePermission = deps.ensurePermission ?? ensureFolderPermission
+  const pickFolder = deps.pickFolder ?? (() => pickSongsFolder())
+
+  let handle = await loadHandle()
+  if (!handle) {
+    if (pickerDeclinedThisSession) {
+      return { ready: false, outcome: { status: 'skipped', reason: 'no Songs folder chosen' } }
+    }
+    handle = await pickFolder()
+    if (!handle) {
+      pickerDeclinedThisSession = true
+      return { ready: false, outcome: { status: 'skipped', reason: 'no Songs folder chosen' } }
+    }
+  }
+  if (!(await ensurePermission(handle))) {
+    return { ready: false, outcome: { status: 'failed', reason: 'Songs folder permission was not granted' } }
+  }
+  return { ready: true, handle }
+}
+
+/** Write already-downloaded bytes into the folder (no fetch).
+ * The Blob is written directly (FileSystemWritableFileStream
+ * accepts a Blob); piping a Response body would need a real
+ * WritableStream and buys nothing — the bytes are already in
+ * memory. */
+export async function writeBlobToFolder(
+  handle: FileSystemDirectoryHandle,
+  filename: string,
+  blob: Blob,
+): Promise<void> {
+  const fileHandle = await handle.getFileHandle(filename, { create: true })
+  const writable = await fileHandle.createWritable()
+  try {
+    await writable.write(blob)
+    await writable.close()
+  } catch (err) {
+    try {
+      await writable.abort()
+    } catch {
+      /* abort is best-effort */
+    }
+    throw err
+  }
+}
+
+/**
+ * Copy bytes the download path already fetched (batch AI): the
+ * same .osz that was just saved to the Downloads folder is
+ * written into the Songs folder — one fetch serves both, the
+ * copy never downloads the file a second time. The filename
+ * follows the existing osu!-style convention (songsFolderFilename),
+ * exactly as the fetch-own copy does.
+ */
+export async function copyBlobToSongsFolder(
+  request: SongCopyRequest,
+  blob: Blob,
+  deps: SongCopyDeps = {},
+): Promise<SongCopyOutcome> {
+  const prepared = await prepareSongsFolderCopy(deps)
+  if (!prepared.ready) return prepared.outcome
+  const filename = songsFolderFilename(request)
+  try {
+    await writeBlobToFolder(prepared.handle, filename, blob)
+    return { status: 'copied', mirrorId: request.mirrorId ?? 'download', filename }
+  } catch (err) {
+    // A write failure is a folder problem, not a mirror problem:
+    // retrying other mirrors would fetch the same bytes into the
+    // same failing folder. Report it honestly.
+    return { status: 'failed', reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
  * Full auto-copy attempt for one download: checks the toggle, the
  * browser, the stored handle (prompting the picker once when the
  * toggle is on but no folder is set), permission, then the copy.
@@ -202,29 +295,8 @@ export async function attemptSongsCopy(
   request: SongCopyRequest,
   deps: SongCopyDeps = {},
 ): Promise<SongCopyOutcome> {
-  if (!getAutoCopy()) return { status: 'skipped', reason: 'auto-copy is off' }
-  if (!isFileSystemAccessSupported()) {
-    return { status: 'skipped', reason: 'this browser cannot pick folders' }
-  }
-  const loadHandle = deps.loadHandle ?? songsFolderStore.loadHandle
-  const ensurePermission = deps.ensurePermission ?? ensureFolderPermission
-  const pickFolder =
-    deps.pickFolder ?? (() => pickSongsFolder())
-
-  let handle = await loadHandle()
-  if (!handle) {
-    if (pickerDeclinedThisSession) {
-      return { status: 'skipped', reason: 'no Songs folder chosen' }
-    }
-    handle = await pickFolder()
-    if (!handle) {
-      pickerDeclinedThisSession = true
-      return { status: 'skipped', reason: 'no Songs folder chosen' }
-    }
-  }
-  if (!(await ensurePermission(handle))) {
-    return { status: 'failed', reason: 'Songs folder permission was not granted' }
-  }
-  return copySetToSongsFolder(request, handle, deps)
+  const prepared = await prepareSongsFolderCopy(deps)
+  if (!prepared.ready) return prepared.outcome
+  return copySetToSongsFolder(request, prepared.handle, deps)
 }
 

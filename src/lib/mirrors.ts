@@ -124,6 +124,23 @@ export function mirrorById(id: string): MirrorSource {
 }
 
 /**
+ * Mirrors the page may FETCH from directly (batch AI, 2026-10-30):
+ * their download responses carry `Access-Control-Allow-Origin: *`,
+ * verified live with an Origin + Range probe (final redirect hops
+ * included for nerinyan/sayobot). A fetch gives the page real
+ * progress, real success/failure, and automatic fallback to the
+ * next mirror — the hidden-iframe handoff can do none of those.
+ * BeatConnect allows ONLY https://collections.osustuff.ri.mk
+ * (same probe), so fetch is blocked there and the iframe handoff
+ * stays; official is never fetched (login-required, tab-only).
+ */
+export const FETCHABLE_MIRROR_IDS = ['hinai', 'catboy', 'sayobot', 'nerinyan'] as const
+
+export function isFetchableMirror(id: string): boolean {
+  return (FETCHABLE_MIRROR_IDS as readonly string[]).includes(id)
+}
+
+/**
  * Record a download: always into the local seen set (feeds the
  * recommendation dedupe for every tier, §13.2.4), and for signed-in
  * accounts also into download_history (best-effort, PLAN-v2 M6).

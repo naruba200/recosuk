@@ -2,19 +2,18 @@ import { MIRRORS, recordDownload, type MirrorSource } from './mirrors'
 import { getMirrorPriority, MIRROR_PRIORITY_DEFAULT } from './downloadSettings'
 
 /**
- * Beatmap downloads, the fast way (QA fix): the previous implementation
- * fetched the .osz through JavaScript, streamed it chunk by chunk, and
- * buffered the whole file into a Blob before saving. That is
- * single-threaded and memory-bound, and it was abysmally slow.
- *
- * The mirror sites are fast because they do none of that: they link
- * the file and let the BROWSER's native downloader fetch it. This
- * service copies them — it points a hidden iframe at the mirror URL,
- * the page never navigates, and the browser's download manager takes
- * over at full speed. There is deliberately NO fetch() in this module
- * (and no progress bar: native downloads report no progress to the
- * page, so the dock row says "Downloading" and must not
- * fake a percentage).
+ * Beatmap downloads (batch AI, 2026-10-30): this manager keeps
+ * the mirror order resolution and the hidden-iframe handoff.
+ * The iframe handoff is now ONLY for mirrors the page cannot
+ * fetch (BeatConnect — CORS-blocked — and, via the queue, the
+ * official tab): CORS-open mirrors (hinai, catboy, sayobot,
+ * nerinyan) are fetched in-page by lib/fetchDownload.ts, which
+ * gives real progress, real success/failure, and automatic
+ * fallback to the next mirror. The old comment below about
+ * "no fetch in this module" still holds for THIS module —
+ * the fetch lives in fetchDownload.ts and is orchestrated by
+ * the download queue — but the dock rows no longer have to say
+ * "Downloading" forever: fetch rows report their real state.
  *
  * Honest limits (do not soften these in UI copy):
  * - The OFFICIAL osu! source NEVER uses the iframe handoff
@@ -37,13 +36,14 @@ import { getMirrorPriority, MIRROR_PRIORITY_DEFAULT } from './downloadSettings'
  *   no download, dock stuck on "Downloading". There is no
  *   in-page workaround — the dock Retry cycles to the next
  *   mirror, and hinai (last in the native order) is the
- *   fallback for exactly that case.
- * - No fallback chain is possible with native downloads: the page
- *   cannot tell whether the browser's download succeeded, so Auto
- *   always uses the first mirror in the order and the menu lets the
- *   user pick another one explicitly.
- * - The download is recorded (seen set + history) on click, since
- *   success cannot be observed from the page.
+ *   fallback for exactly that case. A BeatConnect row now says
+ *   "Downloading (unverified)" so the limit is visible as a
+ *   row that never confirms, instead of a row that claims a
+ *   download is in progress.
+ * - The iframe download is recorded (seen set + history) on
+ *   click, since success cannot be observed from the page.
+ *   The FETCH path records only on actual success (the queue
+ *   does it, not startDownload).
  */
 
 /** Mirrors that serve the .osz file directly, in preference order.

@@ -11,20 +11,19 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * follows the existing row action suite.
  *
  * Downloads go through the DOWNLOAD REGISTER (batch 6, part 1):
- * the button hands the set to the browser's native downloader via
- * a hidden iframe (batch 2/3) and registers the click in the
- * bottom-right dock window. There is NO in-app fetch, NO chunked
- * fetch, and NO Blob save for the download itself — the browser's
- * downloader is the only mechanism, and it reports no progress to
- * the page, so the dock row shows status text only.
- * The finished state is ICON-ONLY (QA batch 2): the button flips
- * to a redo icon (batch 6, part 5 — clicking it re-triggers the
- * browser download, same as a fresh click) and shows no done-state
- * text at all.
+ * CORS-open mirrors are fetched in-page (batch AI) so the dock
+ * row shows real progress and a real Downloaded/Failed state;
+ * BeatConnect hands off via a hidden iframe and official opens
+ * in a new tab, and their rows honestly say the download was
+ * handed off but cannot be verified. The finished state is
+ * ICON-ONLY (QA batch 2): the button flips to a redo icon
+ * (batch 6, part 5 — clicking it re-triggers the download, same
+ * as a fresh click) and shows no done-state text at all.
  *
- * Songs-folder auto-copy (opt-in) still runs from the register
- * via its own plain single-stream fetch — that fetch is the copy,
- * not the download (see lib/downloadQueue.ts).
+ * Songs-folder auto-copy (opt-in) runs from the register: for a
+ * fetch download it reuses the SAME bytes just downloaded (no
+ * second fetch); for an iframe handoff it fetches its own copy
+ * (see lib/downloadQueue.ts).
  *
  * - Main button: osu! OFFICIAL first by default (batch 12,
  *   part 9) — the official download opens in a NEW TAB
@@ -108,8 +107,10 @@ export default function DownloadButton({
   // and tracks the attempt, so the dock Retry cycle starts from
   // official. Under primary="auto" (Recommendations) the main
   // button instead uses the native Auto path — start() with no
-  // mirror id, which hands off in-page via the resolved
-  // order[0] (BeatConnect first with default settings).
+  // mirror id, which downloads in-page via the resolved
+  // order[0] (BeatConnect first with default settings — the
+  // hidden-iframe handoff, honestly "Downloading (unverified)";
+  // a fetchable mirror first downloads via fetch instead).
   const primaryDownload = resolvePrimaryDownload(primary, noVideo)
   const startOfficial = () => start('official')
   const startPrimary = () =>
@@ -132,13 +133,17 @@ export default function DownloadButton({
   // Mirror-only suppression (batch 11, part 3) was removed in
   // §AE: it was the reason the Mirror icon never flipped after
   // a download.
-  const isDone = downloaded || latest?.status === 'browser'
+  const isDone = downloaded || latest?.status === 'browser' || latest?.status === 'downloaded'
   // The one exception to icon-only: a failed Songs-folder copy must
   // stay visible (the dock row says it too, but the dock can be
-  // hidden while this row stays on screen).
+  // hidden while this row stays on screen). The wording names
+  // what actually happened: a fetch download DID finish, an
+  // iframe handoff only started.
   const copyFailedNote =
     latest?.copied === 'failed'
-      ? 'Browser download started — the Songs-folder copy failed. Check Settings.'
+      ? latest.status === 'downloaded'
+        ? 'Downloaded — the Songs-folder copy failed. Check Settings.'
+        : 'Browser download started — the Songs-folder copy failed. Check Settings.'
       : null
 
   return (
