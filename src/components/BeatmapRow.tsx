@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { GameMode } from '../lib/mode'
 import { modeLabel } from '../lib/mode'
+import type { DownloadPrimary } from '../lib/downloadManager'
 import type { RecCandidate } from '../lib/recommend'
 import { applyTagAllowlist, essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
 import { usePreviewPlayer } from '../lib/previewPlayer'
@@ -54,6 +55,13 @@ interface BeatmapRowProps {
   /** Unlimited feed only: renders the Skip (✕) action. */
   onSkip?: () => void
   onDownloaded?: () => void
+  /**
+   * Which source the DownloadButton's main button uses first.
+   * Default 'official' — Mirror, Welcome Recs, Collections
+   * and Lists pass nothing. Recommendations passes 'auto'
+   * (user decision 2026-10-30).
+   */
+  downloadPrimary?: DownloadPrimary
   /** Ranked compilation lists only: renders the #N rank badge and
    *  the play count. Absent everywhere else — rows stay unchanged. */
   rank?: number
@@ -365,6 +373,7 @@ export default function BeatmapRow({
   tagAllowlist,
   onSkip,
   onDownloaded,
+  downloadPrimary,
   rank,
   feedback = null,
   containing = [],
@@ -558,6 +567,7 @@ export default function BeatmapRow({
             seenKeyValue={seenKeyValue}
             downloaded={downloaded}
             onDownloaded={onDownloaded}
+            primary={downloadPrimary}
           />
           {caps.canSave && user ? (
             <div className="relative">

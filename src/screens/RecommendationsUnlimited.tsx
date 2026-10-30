@@ -1235,6 +1235,7 @@ export function FeedReal({
               containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
               onFeedbackChange={rowMaps.onFeedbackChange}
               onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
+              downloadPrimary="auto"
             />
           ))}
 

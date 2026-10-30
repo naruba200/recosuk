@@ -1199,6 +1199,7 @@ function RecommendationsReal({
               containing={rowMaps.containingBySet.get(c.beatmapsetId) ?? []}
               onFeedbackChange={rowMaps.onFeedbackChange}
               onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
+              downloadPrimary="auto"
             />
           ))}
           {/* Part 4 + batch 7, item 3 — Renew: rendered at the bottom

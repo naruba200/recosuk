@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { mirrorById } from '../lib/mirrors'
+import { resolvePrimaryDownload, type DownloadPrimary } from '../lib/downloadManager'
 import { useDownloadSettings } from '../lib/downloadSettings'
 import { displayOrderFor, mirrorNameFor, useDownloadQueue } from '../lib/downloadQueue'
 import { modeLabel, type GameMode } from '../lib/mode'
@@ -25,16 +26,24 @@ import { modeLabel, type GameMode } from '../lib/mode'
  * via its own plain single-stream fetch — that fetch is the copy,
  * not the download (see lib/downloadQueue.ts).
  *
- * - Main button: osu! OFFICIAL first (batch 12, part 9) — the
- *   official download opens in a NEW TAB (batch 14, reverting
- *   batch 13: the hidden-iframe handoff cannot carry the osu!
- *   session — X-Frame-Options + SameSite, live-verified failure
- *   2026-10-29 — while a top-level tab navigation sends the
- *   cookie) and registers the attempt in the dock, so Retry
- *   cycles on from official to the native mirrors.
+ * - Main button: osu! OFFICIAL first by default (batch 12,
+ *   part 9) — the official download opens in a NEW TAB
+ *   (batch 14, reverting batch 13: the hidden-iframe handoff
+ *   cannot carry the osu! session — X-Frame-Options +
+ *   SameSite, live-verified failure 2026-10-29 — while a
+ *   top-level tab navigation sends the cookie) and registers
+ *   the attempt in the dock, so Retry cycles on from official
+ *   to the native mirrors. A view may opt into `primary="auto"`
+ *   instead (Recommendations, user decision 2026-10-30): the
+ *   main button then hands off in-page via the native Auto path
+ *   — no tab opens — and official moves to the expand menu only.
+ *   The Auto first mirror is the resolved order's order[0]
+ *   (BeatConnect first with default settings), never hardcoded.
  * - Expand menu: official first, then Auto (native order), then
- *   each native mirror. The official entry is a register action,
- *   not a bare link, so its attempt is tracked like any other.
+ *   each native mirror — except under `primary="auto"`, where
+ *   Auto comes first and official second. The official entry is
+ *   a register action, not a bare link, so its attempt is
+ *   tracked like any other.
  */
 
 interface DownloadButtonProps {
@@ -45,6 +54,14 @@ interface DownloadButtonProps {
   seenKeyValue: string
   downloaded?: boolean
   onDownloaded?: () => void
+  /**
+   * Which source the main button uses first. Default
+   * 'official' — every existing caller keeps official-first
+   * unless it opts in. 'auto' (Recommendations only) hands
+   * off in-page via the first native mirror in the resolved
+   * order; official stays available in the expand menu.
+   */
+  primary?: DownloadPrimary
 }
 
 export default function DownloadButton({
@@ -55,6 +72,7 @@ export default function DownloadButton({
   seenKeyValue,
   downloaded = false,
   onDownloaded,
+  primary = 'official',
 }: DownloadButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const noVideo = useDownloadSettings((s) => s.noVideo)
@@ -84,15 +102,27 @@ export default function DownloadButton({
   }
 
   // Primary action (batch 12, part 9; batch 14): osu! official
-  // first. The register opens the official URL in a new tab
-  // (the iframe handoff cannot carry the osu! session) and
-  // tracks the attempt, so the dock Retry cycle starts from
-  // official.
+  // first by default. The register opens the official URL in a
+  // new tab (the iframe handoff cannot carry the osu! session)
+  // and tracks the attempt, so the dock Retry cycle starts from
+  // official. Under primary="auto" (Recommendations) the main
+  // button instead uses the native Auto path — start() with no
+  // mirror id, which hands off in-page via the resolved
+  // order[0] — and no tab opens.
+  const primaryDownload = resolvePrimaryDownload(primary, noVideo)
   const startOfficial = () => start('official')
+  const startPrimary = () =>
+    primaryDownload.kind === 'auto' ? start() : startOfficial()
+  const primaryName =
+    primaryDownload.kind === 'auto'
+      ? mirrorNameFor(primaryDownload.mirrorId)
+      : 'osu! official'
 
-  // Picker order: official pinned first (the entry above),
-  // then the native mirrors in the resolved order — the user's
+  // Picker order: official pinned first by default (the entry
+  // above), then the native mirrors in the resolved order — the
   // Mirror Route Priority from Settings, or the built-in default.
+  // Under primary="auto" the Auto entry comes first and official
+  // second; the native list itself never changes.
   const nativeOrder = displayOrderFor(noVideo).filter((id) => id !== 'official')
   const autoFirstName = mirrorNameFor(nativeOrder[0] ?? null)
 
@@ -116,9 +146,9 @@ export default function DownloadButton({
         <button
           className={`w-9 h-9 rounded-full ${isDone ? 'bg-surface-container-highest text-tertiary hover:bg-secondary hover:text-on-secondary' : 'bg-surface-container hover:bg-secondary hover:text-on-secondary text-on-surface'} flex items-center justify-center transition-all shadow-sm`}
           aria-label={isDone ? 'Download again' : 'Download .osz'}
-          title={isDone ? 'Download again from osu! official' : 'Download .osz from osu! official'}
+          title={isDone ? `Download again from ${primaryName}` : `Download .osz from ${primaryName}`}
           type="button"
-          onClick={startOfficial}
+          onClick={startPrimary}
         >
           <span className="material-symbols-outlined text-[18px]">
             {isDone ? 'replay' : 'download'}
@@ -135,21 +165,43 @@ export default function DownloadButton({
         {menuOpen && (
           <div className="absolute right-0 top-11 z-30 w-56 rounded-DEFAULT bg-surface-container-high shadow-xl p-1.5 flex flex-col">
             <span className="px-2 py-1 font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant">Download via</span>
-            <button
-              className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
-              type="button"
-              onClick={startOfficial}
-            >
-              osu! official
-              {noVideo ? ' (no video)' : ''}
-            </button>
-            <button
-              className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
-              type="button"
-              onClick={() => start()}
-            >
-              {`Auto — ${autoFirstName} first${noVideo ? ' (no video)' : ''}`}
-            </button>
+            {primaryDownload.kind === 'auto' ? (
+              <>
+                <button
+                  className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
+                  type="button"
+                  onClick={() => start()}
+                >
+                  {`Auto — ${autoFirstName} first${noVideo ? ' (no video)' : ''}`}
+                </button>
+                <button
+                  className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
+                  type="button"
+                  onClick={startOfficial}
+                >
+                  osu! official
+                  {noVideo ? ' (no video)' : ''}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
+                  type="button"
+                  onClick={startOfficial}
+                >
+                  osu! official
+                  {noVideo ? ' (no video)' : ''}
+                </button>
+                <button
+                  className="px-2 py-1.5 rounded hover:bg-surface-container-highest text-on-surface font-label-md text-label-md text-left"
+                  type="button"
+                  onClick={() => start()}
+                >
+                  {`Auto — ${autoFirstName} first${noVideo ? ' (no video)' : ''}`}
+                </button>
+              </>
+            )}
             {nativeOrder.map((mirrorId) => {
               const mirror = mirrorById(mirrorId)
               return (

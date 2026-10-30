@@ -84,6 +84,43 @@ export function resolveNativeMirrorOrder(noVideo: boolean): readonly string[] {
 }
 
 /**
+ * Which source the DownloadButton's main button uses first.
+ * 'official' = osu! official in a new tab (the long-standing
+ * default, kept everywhere unless a view opts in). 'auto' = the
+ * first native mirror in the resolved order (Recommendations,
+ * user decision 2026-10-30: BeatConnect first with default
+ * settings — the resolved order, never hardcoded).
+ */
+export type DownloadPrimary = 'official' | 'auto'
+
+export interface PrimaryDownload {
+  kind: DownloadPrimary
+  /**
+   * The native mirror the Auto primary hands off to — order[0]
+   * of resolveNativeMirrorOrder(noVideo). 'official' when the
+   * primary is official. Never null: the native order always
+   * has a first entry.
+   */
+  mirrorId: string
+}
+
+/**
+ * Pure decision for the DownloadButton main action, given the
+ * view's primary choice and the no-video flag. The order itself
+ * is never recomputed here: it comes from resolveNativeMirrorOrder
+ * (Mirror Route Priority + no-video rule), so the button follows
+ * the user's setting exactly — with default settings
+ * (balanced, no-video off) Auto resolves to BeatConnect.
+ */
+export function resolvePrimaryDownload(
+  primary: DownloadPrimary,
+  noVideo: boolean,
+): PrimaryDownload {
+  if (primary === 'official') return { kind: 'official', mirrorId: 'official' }
+  return { kind: 'auto', mirrorId: resolveNativeMirrorOrder(noVideo)[0] }
+}
+
+/**
  * Display order: osu! official FIRST, then the resolved native
  * order. Drives the DownloadButton menu and the dock Retry
  * cycle. Official is only ever handed off when explicitly
