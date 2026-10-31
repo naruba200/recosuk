@@ -3,10 +3,13 @@
 // rendered unchanged when no osu! account is linked or the proxy is
 // not configured. The real variant at the bottom renders the same
 // design with the linked player's live data via useProfileData().
+import { useState } from 'react'
 import AppShell from '../components/AppShell'
 import LoadingState from '../components/LoadingState'
 import AccBandChart from '../components/AccBandChart'
-import { useProfileData, type ProfileData } from '../lib/profileService'
+import RecentPlaysSection from '../components/RecentPlaysSection'
+import { useProfileData, useSnapshots, type ProfileData } from '../lib/profileService'
+import { useCapabilities } from '../lib/capabilities'
 import { useModeStore } from '../lib/modeStore'
 import { MODE_LABELS } from '../lib/mode'
 import { fmtAcc, fmtInt, fmtSr } from '../lib/interpretations'
@@ -707,6 +710,17 @@ function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () =
       ? Math.round((p.comfortAccuracy - p.ceilingAccuracy) * 10) / 10
       : null
   const topPlays = data.topPlays.slice(0, 3)
+  const caps = useCapabilities()
+  // Snapshots reload after a sync (same snapToken pattern as Stats):
+  // the new snapshot row is written best-effort by persistProfile, so
+  // the refetch may land just before the insert — the next mount or
+  // sync picks it up, matching Stats behaviour.
+  const [snapToken, setSnapToken] = useState(0)
+  const snapshots = useSnapshots(mode, snapToken)
+  const handleRefresh = () => {
+    onRefresh()
+    setSnapToken((n) => n + 1)
+  }
 
   return (
     <div className="flex flex-col w-full">
@@ -775,7 +789,7 @@ function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () =
                 </div>
               </div>
               <div className="flex items-center gap-space-sm pt-2 xl:pt-0">
-                <button className="flex items-center gap-2 px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md font-semibold hover:brightness-110 active:scale-95 transition-all shadow-[0_0_16px_rgba(164,118,255,0.3)]" type="button" onClick={onRefresh}>
+                <button className="flex items-center gap-2 px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md font-semibold hover:brightness-110 active:scale-95 transition-all shadow-[0_0_16px_rgba(164,118,255,0.3)]" type="button" onClick={handleRefresh}>
                   <span className="material-symbols-outlined text-[18px]">sync</span>
                   <span>Sync now</span>
                 </button>
@@ -922,6 +936,19 @@ function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () =
             </div>
           </div>
         )}
+        {/* Recent plays (§AJ): below the main grid so it shows for
+            starters too — same left-column width as the top plays. */}
+        <div className="mt-space-lg grid grid-cols-1 lg:grid-cols-12 gap-space-lg">
+          <div className="lg:col-span-8">
+            <RecentPlaysSection
+              plays={data.recentPlays}
+              currentPp={p.pp}
+              snapshots={snapshots}
+              isAccount={caps.isAccount}
+              modeLabel={MODE_LABELS[mode]}
+            />
+          </div>
+        </div>
       </div>
     </div>
   )
