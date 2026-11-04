@@ -721,6 +721,17 @@ function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () =
     onRefresh()
     setSnapToken((n) => n + 1)
   }
+  // Freshness cue (§AK): the profile's generatedAt stamp moves on
+  // every refetch — manual or automatic — so this is only ever
+  // shown after a real generation, never faked.
+  const generatedMs = Date.parse(p.generatedAt)
+  const updatedLabel = Number.isFinite(generatedMs)
+    ? new Date(generatedMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null
+  const updatedTitle =
+    Number.isFinite(generatedMs)
+      ? `Last refreshed ${new Date(generatedMs).toLocaleDateString()} ${new Date(generatedMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      : null
 
   return (
     <div className="flex flex-col w-full">
@@ -788,11 +799,14 @@ function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () =
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-space-sm pt-2 xl:pt-0">
+              <div className="flex flex-col items-end gap-1 pt-2 xl:pt-0">
                 <button className="flex items-center gap-2 px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md font-semibold hover:brightness-110 active:scale-95 transition-all shadow-[0_0_16px_rgba(164,118,255,0.3)]" type="button" onClick={handleRefresh}>
                   <span className="material-symbols-outlined text-[18px]">sync</span>
                   <span>Sync now</span>
                 </button>
+                {updatedLabel && (
+                  <span className="font-label-sm text-label-sm text-on-surface-variant" title={updatedTitle ?? undefined}>Updated {updatedLabel}</span>
+                )}
               </div>
             </div>
           </div>

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import { isProxyConfigured, OsuServiceError, proxyCall, type OsuScore, type OsuUser } from './osu'
 import { computeSkillProfile, type MostPlayedEntry, type SkillProfile } from './skillProfile'
+import { createProfileWatcher, type ProfileWatcher } from './profileWatcher'
 import { getGuestSession, useGuestStore } from './guestStore'
 import { useAuth } from './auth'
 import { useModeStore } from './modeStore'
@@ -98,6 +100,12 @@ export function readPendingLink(): PendingLink | null {
 const cache = new Map<string, ProfileData>()
 const inflight = new Map<string, Promise<ProfileData>>()
 
+// Single-owner guard for the new-play watcher (§AK): useProfileData is
+// mounted by seven screens, but only one instance may poll at a time.
+// The owner is a requestKey (username:mode); navigating away releases
+// it so the next screen's instance can take over.
+let profileWatcherOwner: string | null = null
+
 function cacheKey(username: string, mode: GameMode): string {
   return `${username.toLowerCase()}:${mode}`
 }
@@ -175,12 +183,14 @@ export function getCachedProfile(username: string, mode: GameMode): ProfileData 
  * resolves true when a write happened, false otherwise; never throws.
  * `snapshot` inserts a stat_snapshots row (accounts only) — pass it for
  * explicit generations/refreshes, not passive loads.
+ * `client` is an injection seam for tests (the lists service takes its
+ * client the same way); callers omit it and the module client is used.
  */
 export async function persistProfile(
   identity: Identity,
   mode: GameMode,
   data: ProfileData,
-  opts: { snapshot?: boolean } = {},
+  opts: { snapshot?: boolean; client?: SupabaseClient | null } = {},
 ): Promise<boolean> {
   try {
     const guest = getGuestSession()
@@ -188,19 +198,20 @@ export async function persistProfile(
       useGuestStore.getState().setSkillProfile(mode, data.skillProfile)
       return true
     }
-    if (!supabase) return false
-    const { data: authData } = await supabase.auth.getUser()
+    const db = opts.client ?? supabase
+    if (!db) return false
+    const { data: authData } = await db.auth.getUser()
     const userId = authData.user?.id
     if (!userId) return false
 
-    const { data: row } = await supabase
+    const { data: row } = await db
       .from('profiles')
       .select('skill_profiles')
       .eq('id', userId)
       .maybeSingle()
     const existing =
       (row?.skill_profiles as Partial<Record<GameMode, unknown>> | null) ?? {}
-    await supabase.from('profiles').upsert(
+    await db.from('profiles').upsert(
       {
         id: userId,
         osu_username: identity.username,
@@ -211,7 +222,7 @@ export async function persistProfile(
       { onConflict: 'id' },
     )
     if (opts.snapshot) {
-      await supabase.from('stat_snapshots').insert({
+      await db.from('stat_snapshots').insert({
         user_id: userId,
         mode,
         pp: data.skillProfile.pp,
@@ -478,6 +489,9 @@ export function useProfileData(mode: GameMode): UseProfileData {
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [error, setError] = useState<string | null>(null)
   const runRef = useRef(0)
+  // True while a profile fetch is in flight — lets the auto-refresh
+  // skip a redundant refetch instead of stacking on a manual one.
+  const loadInFlightRef = useRef(false)
 
   const pending = readPendingLink()
   const identity: Identity | null = (() => {
@@ -522,30 +536,47 @@ export function useProfileData(mode: GameMode): UseProfileData {
   }
 
   const load = useCallback(
-    async (force: boolean, snapshot: boolean) => {
-      if (!username || !isProxyConfigured) return
+    async (
+      force: boolean,
+      snapshot: boolean,
+      quiet = false,
+    ): Promise<ProfileData | null> => {
+      if (!username || !isProxyConfigured) return null
       const run = ++runRef.current
       const cached = getCachedProfile(username, mode)
       if (cached && !force) {
         setData(cached)
         setStatus(cached.skillProfile.isStarter ? 'empty' : 'ready')
-        return
+        return cached
       }
       // Uncached load (new mode, or explicit refresh): clear the old
       // mode's data so the loading state shows instead of stale rows.
-      setData(null)
-      setStatus('loading')
-      setError(null)
+      // A quiet (background) load keeps the current data on screen
+      // instead — the user never asked for it, so the page must not
+      // blank to a spinner, and a failed background load must not
+      // flip the screen to the error panel either.
+      if (!quiet) {
+        setData(null)
+        setStatus('loading')
+        setError(null)
+      }
+      loadInFlightRef.current = true
       try {
         const fresh = await fetchProfileData(username, mode, force)
-        if (runRef.current !== run) return
+        if (runRef.current !== run) return null
         setData(fresh)
         setStatus(fresh.skillProfile.isStarter ? 'empty' : 'ready')
         if (identity) void persistProfile(identity, mode, fresh, { snapshot })
+        return fresh
       } catch {
-        if (runRef.current !== run) return
-        setStatus('error')
-        setError('Could not load your osu! data just now — the proxy or osu! may be unreachable.')
+        if (runRef.current !== run) return null
+        if (!quiet) {
+          setStatus('error')
+          setError('Could not load your osu! data just now — the proxy or osu! may be unreachable.')
+        }
+        return null
+      } finally {
+        loadInFlightRef.current = false
       }
     },
     // identity is derived per render; username+tier capture what matters
@@ -570,6 +601,78 @@ export function useProfileData(mode: GameMode): UseProfileData {
   const refresh = useCallback(() => {
     void load(true, true)
   }, [load])
+
+  // Auto-refresh on new plays (§AK). The watcher is a stable,
+  // framework-free instance per hook mount; user id / mode / refresh
+  // are read through refs so it never needs recreating, and the
+  // owner guard above keeps exactly one instance polling.
+  const autoRefresh = useCallback(() => {
+    // LOAD-BEARING: snapshot=false. Auto-refresh must NEVER write a
+    // stat_snapshots row — snapshots stay explicit ("Sync now" /
+    // generation) so the Dashboard recent-plays total keeps its
+    // baseline. Pinned by src/lib/__tests__/profileService.test.ts
+    // (persistProfile with snapshot:false inserts no row).
+    if (loadInFlightRef.current) return
+    void load(true, false, true)
+  }, [load])
+
+  const userIdRef = useRef<number | null>(null)
+  const modeRef = useRef(mode)
+  const autoRefreshRef = useRef(autoRefresh)
+  const ownsWatcherRef = useRef(false)
+  const watcherRef = useRef<ProfileWatcher | null>(null)
+  if (watcherRef.current === null) {
+    watcherRef.current = createProfileWatcher({
+      getUserId: () => userIdRef.current,
+      getMode: () => modeRef.current,
+      probeRecentPlays: (uid, m) =>
+        proxyCall<OsuScore[]>('getRecentPlays', { userId: uid, mode: m }),
+      onNewPlay: () => autoRefreshRef.current(),
+    })
+  }
+  useEffect(() => {
+    userIdRef.current = data?.user.id ?? identity?.osuUserId ?? null
+    modeRef.current = mode
+    autoRefreshRef.current = autoRefresh
+  })
+
+  useEffect(() => {
+    const watcher = watcherRef.current
+    if (!watcher || !isProxyConfigured || !username || !data || !requestKey) return
+    if (profileWatcherOwner !== null && profileWatcherOwner !== requestKey) return
+    profileWatcherOwner = requestKey
+    ownsWatcherRef.current = true
+    watcher.setKnownPlays(data.recentPlays, requestKey)
+    watcher.start()
+    return () => {
+      if (ownsWatcherRef.current && profileWatcherOwner === requestKey) {
+        watcher.stop()
+        profileWatcherOwner = null
+        ownsWatcherRef.current = false
+      }
+    }
+    // Re-running on data change restarts the watcher (and its 5-minute
+    // cadence) from the fresh data — a refetch just happened, so the
+    // next probe is a full interval away.
+  }, [username, mode, data, requestKey])
+
+  // Focus / visibility return: check once when the user comes back to
+  // the tab (covers "played maps, came back"). The watcher's own
+  // cooldown + in-flight guards keep this from spamming the proxy.
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden) watcherRef.current?.checkNow()
+    }
+    const onFocus = () => {
+      watcherRef.current?.checkNow()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
 
   return { status, data, error, identity, refresh }
 }
