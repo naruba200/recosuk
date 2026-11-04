@@ -32,8 +32,16 @@ export default function RecFiltersPanel({
 }: Props) {
   const set = (patch: Partial<RecFilters>) => onDraftChange({ ...draft, ...patch })
 
+  // Independent scroll (§AL): the rail scrolls inside its own box so
+  // its bottom (Apply/Reset) stays reachable without moving the list.
+  // max-h is the sticky offset (top-20 = 5rem) + 1rem bottom gap, in
+  // dynamic viewport units so mobile URL bars don't clip it.
+  // The list keeps window scroll — back-to-top, keep-place, Renew
+  // scroll-to-top and the feed sentinel are all window-based and
+  // untouched. Scrollbars follow the app-wide hidden rule in
+  // index.css; the box still scrolls by wheel/touch, like the dock.
   return (
-    <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-space-md bg-surface-container-low p-space-md rounded-lg shadow-md sticky top-20">
+    <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-space-md bg-surface-container-low p-space-md rounded-lg shadow-md sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain">
       <div className="flex items-center justify-between pb-space-xs">
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">

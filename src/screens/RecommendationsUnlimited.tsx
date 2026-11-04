@@ -36,7 +36,7 @@ const DEMO_IDENTITY = {
   tierLabel: 'free tier',
 }
 
-function RecommendationsUnlimitedDemo() {
+export function RecommendationsUnlimitedDemo() {
   return (
     <AppShell identity={DEMO_IDENTITY}>
         <div className="flex flex-col w-full">
@@ -87,7 +87,7 @@ function RecommendationsUnlimitedDemo() {
           {/* Dual Column Layout: Left Filter Rail & Main Stream */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start mt-space-sm">
             {/* LEFT FILTER PANEL (approx 280px-300px on desktop) */}
-            <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-space-md bg-surface-container-low p-space-md rounded-lg shadow-md sticky top-20">
+            <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-space-md bg-surface-container-low p-space-md rounded-lg shadow-md sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain">
               <div className="flex items-center justify-between pb-space-xs">
                 <div className="flex flex-col">
                   <div className="flex items-center gap-1.5">
