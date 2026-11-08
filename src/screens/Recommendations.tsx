@@ -33,6 +33,7 @@ import { supabase } from '../lib/supabase'
 import { loadModeBoostFor } from '../lib/feedback'
 import { useCapabilities } from '../lib/capabilities'
 import { useRowMaps } from '../lib/useRowMaps'
+import { listLoadingState } from '../lib/listLoadingState'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
@@ -850,6 +851,14 @@ function RecommendationsReal({
   const [totalMatched, setTotalMatched] = useState<number | null>(null)
   const [diagnostics, setDiagnostics] = useState<GenerationDiagnostics | null>(null)
   const [busy, setBusy] = useState(false)
+  // Batch AM: true only while a Renew-initiated run is in flight —
+  // the Renew handler clears the stale batch at press time, so the
+  // list area shows the spinner instead of the old maps.
+  const [renewing, setRenewing] = useState(false)
+  // Batch AM: the batch displayed before a Renew press, kept so a
+  // failed Renew restores it instead of blanking the page. Written
+  // by the Renew handler only; cleared when the run settles.
+  const preRenewItemsRef = useRef<RecCandidate[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const runRef = useRef(0)
   // Snapshot of the served set BEFORE the currently displayed
@@ -964,9 +973,21 @@ function RecommendationsReal({
         }
       } catch {
         if (runRef.current !== run) return
+        // Batch AM: a failed Renew restores the batch it cleared at
+        // press time — a failed press never blanks the page. The
+        // ref is only ever written by the Renew handler, so other
+        // callers keep the current behaviour (error panel, rows
+        // untouched).
+        if (preRenewItemsRef.current) {
+          setItems(preRenewItemsRef.current)
+        }
         setError('The recommendation search failed just now — osu! or the proxy may be busy. Try regenerating.')
       } finally {
-        if (runRef.current === run) setBusy(false)
+        if (runRef.current === run) {
+          setBusy(false)
+          setRenewing(false)
+          preRenewItemsRef.current = null
+        }
       }
     },
     [key, mode, profile, user?.id],
@@ -995,6 +1016,9 @@ function RecommendationsReal({
       onDraftChange(start)
     }
     setItems([])
+    // Batch AM: a mode change is not a Renew run — clear the flag so
+    // a Renew superseded by a mode switch still shows skeletons.
+    setRenewing(false)
     setTotalMatched(null)
     void generate(start, count)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1036,6 +1060,9 @@ function RecommendationsReal({
   // rendered list get chips — the rest of the skillset
   // vocabulary stays hidden on this screen.
   const tagAllowlist = useMemo(() => mostUsedEssentialTags(visibleItems), [visibleItems])
+  // Batch AM: which loading state the list area shows (spinner for
+  // a Renew run, skeletons otherwise) — resolved once per render.
+  const loadingState = listLoadingState({ busy, renewing, itemCount: items.length, error })
 
   return (
     <div className="flex flex-col w-full">
@@ -1080,13 +1107,13 @@ function RecommendationsReal({
           onApply={() => { onFiltersChange(draft); void generate(draft, count) }}
           profile={profile}
           mode={mode}
-          appliedCount={items.length}
+          appliedCount={renewing ? null : items.length}
         />
         <main className="lg:col-span-8 xl:col-span-9 flex flex-col gap-space-md">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-space-xs py-1">
             <div className="flex items-center gap-space-sm">
               <h2 className="font-headline-sm text-headline-sm text-on-surface">
-                Training your {profile.srCeiling.toFixed(1)}★ gap — {items.length} maps
+                Training your {profile.srCeiling.toFixed(1)}★ gap — {renewing ? '…' : `${items.length} maps`}
               </h2>
               {totalMatched !== null && (
                 <span className="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[10px]">~{totalMatched.toLocaleString('en-US')} sets match on osu!</span>
@@ -1125,7 +1152,17 @@ function RecommendationsReal({
               </div>
             </div>
           )}
-          {busy && items.length === 0 && !error && (
+          {loadingState === 'spinner' && (
+            <div className="flex flex-col items-center gap-space-sm py-space-xl" role="status" aria-live="polite" aria-label="Finding your next batch">
+              {/* Batch AM: Renew spinner — the progress_activity icon
+                  is the codebase's loading icon (same as LoadingState's
+                  label row), spun with animate-spin; the skeleton
+                  cards stay for first load / mode change. */}
+              <span className="material-symbols-outlined text-primary text-[40px] animate-spin">progress_activity</span>
+              <p className="font-body-sm text-body-sm text-on-surface-variant">Finding your next batch…</p>
+            </div>
+          )}
+          {loadingState === 'skeletons' && (
             <LoadingState label="Searching osu! and scoring your window…" />
           )}
           {!busy && !error && items.length === 0 && (
@@ -1226,6 +1263,15 @@ function RecommendationsReal({
                 title="Show the next fresh batch — maps you haven't seen yet, in the fixed ranking order"
                 onClick={() => {
                   window.scrollTo({ top: 0, behavior: 'smooth' })
+                  // Batch AM: clear the stale batch at press time —
+                  // the list area shows the Renew spinner while the
+                  // run is in flight instead of the old maps. The
+                  // batch is saved for a failure restore in
+                  // generate(); the spent-cursor re-show is
+                  // unaffected (it re-shows lastWindowRef on success).
+                  preRenewItemsRef.current = items
+                  setItems([])
+                  setRenewing(true)
                   void generate(filters, count)
                 }}
               >
