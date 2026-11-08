@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { GAME_MODES, MODE_LABELS } from '../lib/mode'
 import { MODE_ACCENTS, MODE_PILL_LABELS, useModeStore } from '../lib/modeStore'
@@ -26,14 +26,12 @@ export interface ShellIdentity {
 }
 
 const NAV: { path: string; icon: string; label: string }[] = [
-  { path: 'dashboard', icon: 'grid_view', label: 'Dashboard' },
-  { path: 'stats', icon: 'insights', label: 'Stats' },
+  { path: 'profile', icon: 'person', label: 'Profile' },
   { path: 'recommendations', icon: 'auto_awesome', label: 'Recommendations' },
-  { path: 'mirror', icon: 'compare_arrows', label: 'Mirror' },
+  { path: 'beatmaps', icon: 'compare_arrows', label: 'Beatmaps' },
   { path: 'collections', icon: 'inventory_2', label: 'Collections' },
   { path: 'lists', icon: 'queue_music', label: 'Lists' },
   { path: 'history', icon: 'history', label: 'History' },
-  { path: 'settings', icon: 'tune', label: 'Settings' },
 ]
 
 export function ModePills() {
@@ -130,6 +128,142 @@ function SidebarAuthControl() {
   )
 }
 
+/**
+ * Top-right profile menu (§AN): the identity pill is the
+ * trigger. Hover opens it on desktop, tap toggles it on touch.
+ * Items: Profile, Settings, and Log out (Sign in for guests).
+ * Guests see Profile/Settings as locked items — tapping one
+ * opens the account prompt, the same as the locked buttons
+ * elsewhere. Closes on Escape, outside click, or after picking
+ * an item.
+ */
+function ProfileMenu({ identity }: { identity: ShellIdentity }) {
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+  const [hover, setHover] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const open = hover || pinned
+
+  const close = () => {
+    setHover(false)
+    setPinned(false)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    const onPointerDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) close()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointerDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointerDown)
+    }
+  }, [open])
+
+  const go = (path: string) => {
+    close()
+    navigate(path)
+  }
+
+  const onAuthAction = async () => {
+    close()
+    if (user) await signOut()
+    navigate('/auth?mode=signin')
+  }
+
+  const items: { label: string; icon: string; locked: boolean; action: () => void }[] = [
+    {
+      label: 'Profile',
+      icon: 'person',
+      locked: !user,
+      action: () => (user ? go('/profile') : go('/auth')),
+    },
+    {
+      label: 'Settings',
+      icon: 'tune',
+      locked: !user,
+      action: () => (user ? go('/settings') : go('/auth')),
+    },
+  ]
+
+  return (
+    <div
+      className="relative"
+      ref={rootRef}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setPinned((p) => !p)}
+        className="flex items-center gap-space-sm pl-space-sm py-1 pr-1.5 rounded-full bg-surface-container-high hover:bg-surface-container transition-colors"
+      >
+        <div className="flex flex-col text-right">
+          <span className="font-label-sm text-label-sm text-on-surface leading-none">
+            {identity.username}
+          </span>
+          <span className="font-label-sm text-[10px] text-on-surface-variant leading-none mt-0.5">
+            {identity.tierLabel}
+          </span>
+        </div>
+        {identity.avatarUrl ? (
+          <img className="w-8 h-8 rounded-full object-cover" alt="" src={identity.avatarUrl} />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+            <span className="material-symbols-outlined text-on-primary text-[18px]">person</span>
+          </div>
+        )}
+        <span className="material-symbols-outlined text-on-surface-variant text-[18px]">menu</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-2 w-48 rounded-DEFAULT bg-surface-container-high shadow-[0_8px_24px_rgb(var(--c-shadow)_/_0.5)] py-1 z-50"
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              onClick={item.action}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left font-label-md text-label-md transition-colors ${
+                item.locked
+                  ? 'text-on-surface-variant opacity-70 hover:bg-surface-container'
+                  : 'text-on-surface hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {item.locked ? 'lock' : item.icon}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+          <div className="mx-2 my-1 h-px bg-outline-variant/40" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => void onAuthAction()}
+            className="w-full flex items-center gap-2 px-3 py-2 text-left font-label-md text-label-md text-on-surface hover:bg-surface-container transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              {user ? 'logout' : 'login'}
+            </span>
+            <span>{user ? 'Log out' : 'Sign in'}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AppShell({
   identity,
   children,
@@ -152,9 +286,9 @@ export default function AppShell({
       <aside className="fixed left-0 top-0 h-full w-[232px] bg-surface-container-low z-50 flex flex-col justify-between py-space-md shadow-[0_1px_8px_rgb(var(--c-shadow)_/_0.4)]">
         <div className="flex flex-col gap-space-md px-space-md">
           <NavLink
-            to="/dashboard"
-            title="Go to Dashboard"
-            aria-label="RecOsuk — go to Dashboard"
+            to="/profile"
+            title="Go to Profile"
+            aria-label="RecOsuk — go to Profile"
             className="flex items-center gap-space-sm px-space-xs pt-space-xs rounded-DEFAULT hover:opacity-90 transition-opacity cursor-pointer"
           >
             <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center shadow-[0_0_12px_rgb(var(--c-secondary)_/_0.35)]">
@@ -252,23 +386,7 @@ export default function AppShell({
               <span className="material-symbols-outlined text-[16px] text-tertiary">sync</span>
               <span>synced</span>
             </div>
-            <div className="flex items-center gap-space-sm pl-space-sm py-1 pr-1.5 rounded-full bg-surface-container-high">
-              <div className="flex flex-col text-right">
-                <span className="font-label-sm text-label-sm text-on-surface leading-none">
-                  {identity.username}
-                </span>
-                <span className="font-label-sm text-[10px] text-on-surface-variant leading-none mt-0.5">
-                  {identity.tierLabel}
-                </span>
-              </div>
-              {identity.avatarUrl ? (
-                <img className="w-8 h-8 rounded-full object-cover" alt="" src={identity.avatarUrl} />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                  <span className="material-symbols-outlined text-on-primary text-[18px]">person</span>
-                </div>
-              )}
-            </div>
+            <ProfileMenu identity={identity} />
           </div>
         </header>
         <main className={`w-full pt-16 bg-surface min-h-screen px-space-xl py-space-xl${hasPlayer ? ' pb-[120px]' : ''}`}>

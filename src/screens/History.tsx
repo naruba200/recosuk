@@ -1199,7 +1199,7 @@ function HistoryReal({ userId, username }: { userId: string; username: string | 
             <div className="p-space-lg rounded-DEFAULT bg-surface-container-low">
               <p className="font-body-md text-body-md text-on-surface-variant">
                 {rows.length === 0
-                  ? 'No tried or rated maps yet. Rate maps from any recommendation or Mirror card with the star button — your ratings re-weight the next run in that mode.'
+                  ? 'No tried or rated maps yet. Rate maps from any recommendation or Beatmaps card with the star button — your ratings re-weight the next run in that mode.'
                   : 'Nothing in this mode yet. Switch the filter or rate a map in this mode.'}
               </p>
             </div>

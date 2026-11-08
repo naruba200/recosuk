@@ -515,7 +515,7 @@ function ListsDemo() {
                   <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">{' '}In the{' '}
                     <span className="text-primary font-semibold">Recommendations
                     </span>{' '}and{' '}
-                    <span className="text-tertiary font-semibold">Mirror
+                    <span className="text-tertiary font-semibold">Beatmaps
                     </span>{' '}pages, click the bookmark icon on any beatmap card or row to instantly route it into these practice collections.{' '}
                   </p>
                 </div>
@@ -558,7 +558,7 @@ function ListsReal({ userId, username }: { userId: string; username: string | nu
   const register = useDownloadQueue((s) => s.register)
   // Seen key for download recording: the account's osu! username,
   // falling back to a Lists-local key until identity resolves
-  // (same fallback pattern as Mirror/Collections).
+  // (same fallback pattern as Beatmaps/Collections).
   const seenKeyValue = seenKey('account', username ?? 'lists')
   const [lists, setLists] = useState<UserList[] | null>(null)
   const [counts, setCounts] = useState<Record<string, ListItemRow[]>>({})
@@ -734,7 +734,7 @@ function ListsReal({ userId, username }: { userId: string; username: string | nu
   const totalMaps = Object.values(counts).reduce((n, rows) => n + rows.length, 0)
   const anySummaryMissing = detail?.some((d) => d.summary === null) ?? false
   // Re-read on tick so per-song buttons show the done state after
-  // a download (same pattern as Recommendations/Mirror).
+  // a download (same pattern as Recommendations/Beatmaps).
   void downloadedTick
   const downloadedIds = seenStore.load(seenKeyValue).downloaded
 
@@ -790,7 +790,7 @@ function ListsReal({ userId, username }: { userId: string; username: string | nu
       {lists !== null && lists.length === 0 && (
         <div className="p-space-lg rounded-DEFAULT bg-surface-container-low">
           <p className="font-body-md text-body-md text-on-surface-variant">
-            You have no lists yet. Create one above, then save maps from Recommendations or Mirror
+            You have no lists yet. Create one above, then save maps from Recommendations or Beatmaps
             with the bookmark button on any card.
           </p>
         </div>
@@ -937,7 +937,7 @@ function ListsReal({ userId, username }: { userId: string; username: string | nu
                   )}
                   {detail !== null && detail.length === 0 && (
                     <p className="font-body-sm text-body-sm text-on-surface-variant">
-                      This list is empty. Save maps from Recommendations or Mirror with the bookmark
+                      This list is empty. Save maps from Recommendations or Beatmaps with the bookmark
                       button on any card.
                     </p>
                   )}

@@ -450,6 +450,48 @@ export function groupUserTags(tags: readonly UserTag[]): GroupedUserTags[] {
 }
 
 // ---------------------------------------------------------------------------
+// One-section picker visibility (§AN)
+// ---------------------------------------------------------------------------
+
+/**
+ * The picker's default: the TOP tag of each group — the first
+ * tag in the group's wiki order in the bundled vocabulary.
+ * There is NO usage data anywhere in the app, so "top" is wiki
+ * order, not most-used; most-used-by-the-user would need usage
+ * tracking built first. 12 groups carry bundled tags, so the
+ * default is 12 tags.
+ */
+export function defaultVisibleTags(tags: readonly UserTag[]): UserTag[] {
+  return groupUserTags(tags)
+    .filter((g) => g.tags.length > 0)
+    .map((g) => g.tags[0])
+}
+
+/**
+ * Visible tags after a pick: the selected tag + the next 2 in
+ * its own group (wiki order; fewer when the tag sits near the
+ * end of its group), and the top tag of every other group. The
+ * picker still returns a single tag id — selection behaviour is
+ * unchanged.
+ */
+export function expandedVisibleTags(
+  tags: readonly UserTag[],
+  selectedTagId: string,
+): UserTag[] {
+  const out: UserTag[] = []
+  for (const g of groupUserTags(tags)) {
+    if (g.tags.length === 0) continue
+    const idx = g.tags.findIndex((t) => t.id === selectedTagId)
+    if (idx === -1) {
+      out.push(g.tags[0])
+    } else {
+      out.push(...g.tags.slice(idx, idx + 3))
+    }
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Server-side filter clause
 // ---------------------------------------------------------------------------
 

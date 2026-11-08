@@ -11,12 +11,12 @@ describe('resolveRoute', () => {
   })
 
   it('allows a guest session on protected routes', () => {
-    expect(resolveRoute('/dashboard', { ...NONE, isGuest: true })).toBeNull()
-    expect(resolveRoute('/mirror', { ...NONE, isGuest: true })).toBeNull()
+    expect(resolveRoute('/profile', { ...NONE, isGuest: true })).toBeNull()
+    expect(resolveRoute('/beatmaps', { ...NONE, isGuest: true })).toBeNull()
   })
 
   it('allows a signed-in account on protected routes', () => {
-    expect(resolveRoute('/stats', { ...NONE, isAccount: true })).toBeNull()
+    expect(resolveRoute('/profile', { ...NONE, isAccount: true })).toBeNull()
     expect(resolveRoute('/settings', { ...NONE, isAccount: true })).toBeNull()
   })
 
@@ -35,7 +35,28 @@ describe('resolveRoute', () => {
   })
 
   it('ignores trailing slashes and query strings when matching', () => {
-    expect(resolveRoute('/dashboard/', NONE)).toBe('/onboarding')
-    expect(resolveRoute('/stats?mode=mania', NONE)).toBe('/onboarding')
+    expect(resolveRoute('/profile/', NONE)).toBe('/onboarding')
+    expect(resolveRoute('/beatmaps?mode=mania', NONE)).toBe('/onboarding')
+  })
+
+  it('old routes redirect, so they are no longer protected paths (§AN)', () => {
+    // /dashboard, /stats and /mirror are plain redirects in
+    // App.tsx now — the guard never sees them.
+    expect(resolveRoute('/dashboard', NONE)).toBeNull()
+    expect(resolveRoute('/stats', NONE)).toBeNull()
+    expect(resolveRoute('/mirror', NONE)).toBeNull()
+  })
+
+  it('guards the ranked detail page under /collections/ (§AN)', () => {
+    expect(resolveRoute('/collections/ranked/mania/month/2026-11-w1', NONE)).toBe('/onboarding')
+    expect(
+      resolveRoute('/collections/ranked/mania/month/2026-11-w1', { ...NONE, isGuest: true }),
+    ).toBeNull()
+    expect(
+      resolveRoute('/collections/ranked/fruits/year/2026-03', { ...NONE, onboarded: true }),
+    ).toBeNull()
+    // A lookalike path that merely starts with the same letters
+    // is NOT under /collections/.
+    expect(resolveRoute('/collectionsx/ranked', NONE)).toBeNull()
   })
 })

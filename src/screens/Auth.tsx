@@ -123,8 +123,8 @@ export default function Auth() {
       })
       return
     }
-    // Signed in: straight to the dashboard (returning-user flow).
-    navigate('/dashboard')
+    // Signed in: straight to the profile (returning-user flow).
+    navigate('/profile')
   }
 
   // Live password-strength meter (the export's static "Strong" bar

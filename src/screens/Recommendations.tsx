@@ -58,14 +58,6 @@ export function RecommendationsDemo() {
           {/* Page Header Area */}
           <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-lg pb-space-lg">
             <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-space-sm">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-label-sm text-label-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse">
-                  </span>{' '}Generated mode{' '}
-                </span>
-                <span className="text-on-surface-variant font-label-sm text-label-sm">• Calibrated to 5.0★ collapse gap
-                </span>
-              </div>
               <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight">Recommendations
               </h1>
               <p className="font-body-md text-body-md text-on-surface-variant">{' '}Targeted algorithmic drill sets tailored to your rhythm input drift and recovery windows.{' '}
@@ -1068,12 +1060,6 @@ function RecommendationsReal({
     <div className="flex flex-col w-full">
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-lg pb-space-lg">
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-space-sm">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-label-sm text-label-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>Generated mode
-            </span>
-            <span className="text-on-surface-variant font-label-sm text-label-sm">• Calibrated to {profile.srCeiling.toFixed(1)}★ collapse gap</span>
-          </div>
           <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight">Recommendations</h1>
           <p className="font-body-md text-body-md text-on-surface-variant">
             {profile.isStarter
@@ -1423,7 +1409,7 @@ export default function Recommendations() {
           renderBackToTop={false}
         />
       </div>
-      <BackToTop />
+      <BackToTop placement="right" />
     </AppShell>
   )
 }

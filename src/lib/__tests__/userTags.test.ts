@@ -4,6 +4,8 @@ import { proxyCall } from '../osu'
 import {
   appendUserTagClause,
   BUNDLED_USER_TAGS,
+  defaultVisibleTags,
+  expandedVisibleTags,
   groupUserTags,
   loadUserTags,
   normalizeUserTags,
@@ -169,6 +171,44 @@ describe('tagsForMode (per-mode picker filtering)', () => {
       { id: 'other/odd', group: 'other', name: 'odd', description: '', modes: null },
     ])
     expect(grouped.map((g) => g.group)).toEqual(['skillset', 'style', 'other'])
+  })
+})
+
+describe('one-section picker visibility (§AN)', () => {
+  it('defaults to one top tag per group (12 tags, wiki order)', () => {
+    const shown = defaultVisibleTags(BUNDLED_USER_TAGS)
+    expect(shown).toHaveLength(12)
+    // Each tag is the first of its group in the bundled (wiki)
+    // order, and no group repeats.
+    const groups = groupUserTags(BUNDLED_USER_TAGS)
+    expect(shown.map((t) => t.id)).toEqual(groups.map((g) => g.tags[0].id))
+    expect(new Set(shown.map((t) => t.group)).size).toBe(12)
+  })
+
+  it('picking a tag shows it + the next 2 in its group, other groups keep their top tag', () => {
+    const tags: UserTag[] = [
+      { id: 'style/a', group: 'style', name: 'a', description: '', modes: null },
+      { id: 'style/b', group: 'style', name: 'b', description: '', modes: null },
+      { id: 'style/c', group: 'style', name: 'c', description: '', modes: null },
+      { id: 'style/d', group: 'style', name: 'd', description: '', modes: null },
+      { id: 'tech/x', group: 'tech', name: 'x', description: '', modes: null },
+      { id: 'tech/y', group: 'tech', name: 'y', description: '', modes: null },
+    ]
+    // Groups keep wiki order (tech before style); the picked
+    // group expands to the tag + the next 2.
+    expect(expandedVisibleTags(tags, 'style/b').map((t) => t.id)).toEqual([
+      'tech/x',
+      'style/b',
+      'style/c',
+      'style/d',
+    ])
+    // A tag near the end of its group shows only what follows.
+    expect(expandedVisibleTags(tags, 'style/d').map((t) => t.id)).toEqual(['tech/x', 'style/d'])
+    // An unknown id leaves the defaults untouched.
+    expect(expandedVisibleTags(tags, 'nope/nope').map((t) => t.id)).toEqual([
+      'tech/x',
+      'style/a',
+    ])
   })
 })
 

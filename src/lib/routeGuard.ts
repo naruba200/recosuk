@@ -9,15 +9,22 @@
  * App.tsx and is never redirected by this helper.
  */
 export const PROTECTED_PATHS = [
-  '/dashboard',
-  '/stats',
+  '/profile',
   '/recommendations',
-  '/mirror',
+  '/beatmaps',
   '/collections',
   '/lists',
   '/history',
   '/settings',
 ] as const
+
+/**
+ * Prefix-protected routes (§AN): any path under one of these bases
+ * is guarded the same way — the ranked detail page
+ * /collections/ranked/:mode/:granularity/:period lives under
+ * /collections/ and must not render for a fresh visitor.
+ */
+export const PROTECTED_PREFIXES = ['/collections/'] as const
 
 export interface SessionPresence {
   isAccount: boolean
@@ -34,7 +41,10 @@ function basePath(path: string): string {
 /** Returns the redirect target, or null when the route may render. */
 export function resolveRoute(path: string, presence: SessionPresence): string | null {
   const base = basePath(path)
-  if (!(PROTECTED_PATHS as readonly string[]).includes(base)) return null
+  const isProtected =
+    (PROTECTED_PATHS as readonly string[]).includes(base) ||
+    (PROTECTED_PREFIXES as readonly string[]).some((prefix) => base.startsWith(prefix))
+  if (!isProtected) return null
   if (presence.isAccount || presence.isGuest || presence.onboarded) return null
   return '/onboarding'
 }

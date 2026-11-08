@@ -101,7 +101,7 @@ export default function LinkOsu() {
     } catch {
       /* ignore — the entry gate just shows onboarding again */
     }
-    navigate('/dashboard')
+    navigate('/profile')
   }
 
   function pickMode(mode: GameMode) {

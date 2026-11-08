@@ -2,21 +2,28 @@ import { useEffect, useMemo, useState } from 'react'
 import type { GameMode } from '../lib/mode'
 import {
   BUNDLED_USER_TAGS,
+  defaultVisibleTags,
+  expandedVisibleTags,
   findUserTag,
-  groupUserTags,
   loadUserTags,
   tagsForMode,
   type UserTag,
 } from '../lib/userTags'
 
 /**
- * User-tag picker (batch 11, part 4): single-select, grouped by
- * the wiki categories, filtered to the current mode. The
+ * User-tag picker (batch 11, part 4; one-section rework in
+ * batch AN): single-select, filtered to the current mode. The
  * vocabulary starts as the bundled wiki list (so the picker is
  * usable before the Edge Function redeploy) and upgrades to the
  * live `GET /tags` result when it arrives in a recognisable
  * shape — `loadUserTags` falls back to the bundled list on any
  * failure, so there is no error state to show here.
+ *
+ * ONE section (§AN): by default the top tag of each group (12
+ * tags — the first in wiki order; there is no usage data, so
+ * "top" is wiki order, not most-used). Picking a tag shows that
+ * tag + the next 2 in its group, alongside the other groups'
+ * top tags. Selection behaviour is unchanged (one tag id out).
  *
  * A selected tag that the live vocabulary no longer lists for
  * this mode stays visible in the "Selected" row (with its
@@ -25,7 +32,7 @@ import {
  */
 
 interface UserTagPickerProps {
-  /** Current mode; 'all' shows the union (Mirror's all-modes tab). */
+  /** Current mode; 'all' shows the union of every mode's tags. */
   mode: GameMode | 'all'
   /** Selected tag id ("group/name"), or null for no tag filter. */
   value: string | null
@@ -34,7 +41,6 @@ interface UserTagPickerProps {
 
 export default function UserTagPicker({ mode, value, onChange }: UserTagPickerProps) {
   const [tags, setTags] = useState<UserTag[]>(BUNDLED_USER_TAGS)
-  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     let live = true
@@ -47,33 +53,14 @@ export default function UserTagPicker({ mode, value, onChange }: UserTagPickerPr
   }, [])
 
   const visible = useMemo(() => tagsForMode(tags, mode), [tags, mode])
-  const groups = useMemo(() => groupUserTags(visible), [visible])
+  const shown = useMemo(
+    () => (value ? expandedVisibleTags(visible, value) : defaultVisibleTags(visible)),
+    [visible, value],
+  )
   const selected = findUserTag(tags, value) ??
     (value
       ? { id: value, group: value.split('/')[0] ?? 'other', name: value.split('/').slice(1).join('/') || value, description: '', modes: null }
       : undefined)
-
-  // The selected tag's group starts open so the selection is
-  // visible in context; other groups start collapsed (122 tags
-  // would otherwise flood the filter panel / drawer).
-  useEffect(() => {
-    if (selected) {
-      setOpenGroups((prev) => {
-        if (prev.has(selected.group)) return prev
-        const next = new Set(prev)
-        next.add(selected.group)
-        return next
-      })
-    }
-  }, [selected?.group])
-
-  const toggleGroup = (group: string) =>
-    setOpenGroups((prev) => {
-      const next = new Set(prev)
-      if (next.has(group)) next.delete(group)
-      else next.add(group)
-      return next
-    })
 
   const pick = (tag: UserTag) => onChange(value === tag.id ? null : tag.id)
 
@@ -94,52 +81,29 @@ export default function UserTagPicker({ mode, value, onChange }: UserTagPickerPr
           </button>
         </div>
       )}
-      <div className="flex flex-col gap-1 max-h-80 overflow-y-auto pr-1">
-        {groups.map(({ group, label, tags: groupTags }) => {
-          const open = openGroups.has(group)
-          return (
-            <section key={group}>
+      <section aria-label="User tags">
+        <div className="flex flex-wrap gap-1.5 max-h-80 overflow-y-auto pr-1">
+          {shown.map((tag) => {
+            const isSelected = value === tag.id
+            return (
               <button
-                className="w-full flex items-center justify-between py-1 text-left"
+                key={tag.id}
+                className={
+                  isSelected
+                    ? 'px-2.5 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm'
+                    : 'px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm transition-colors'
+                }
                 type="button"
-                aria-expanded={open}
-                onClick={() => toggleGroup(group)}
+                aria-pressed={isSelected}
+                title={tag.description || tag.id}
+                onClick={() => pick(tag)}
               >
-                <span className="font-label-md text-label-md text-on-surface font-bold uppercase tracking-wider">
-                  {label}
-                  <span className="text-on-surface-variant font-normal normal-case tracking-normal"> · {groupTags.length}</span>
-                </span>
-                <span className="material-symbols-outlined text-on-surface-variant text-[18px]">
-                  {open ? 'expand_less' : 'expand_more'}
-                </span>
+                {tag.name}
               </button>
-              {open && (
-                <div className="flex flex-wrap gap-1.5 pb-1">
-                  {groupTags.map((tag) => {
-                    const isSelected = value === tag.id
-                    return (
-                      <button
-                        key={tag.id}
-                        className={
-                          isSelected
-                            ? 'px-2.5 py-1 rounded-full bg-primary-container text-on-primary-container font-label-sm text-label-sm shadow-sm'
-                            : 'px-2.5 py-1 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high font-label-sm text-label-sm transition-colors'
-                        }
-                        type="button"
-                        aria-pressed={isSelected}
-                        title={tag.description || tag.id}
-                        onClick={() => pick(tag)}
-                      >
-                        {tag.name}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </section>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      </section>
       <p className="font-body-sm text-[11px] leading-relaxed text-on-surface-variant">
         User tags are voted by players in lazer. Picking one filters
         the search on osu! itself — maps without enough votes for

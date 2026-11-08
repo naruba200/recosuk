@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import ExampleBlock from '../components/ExampleBlock'
@@ -22,13 +22,21 @@ import { scheduleBulkDownload } from '../lib/bulkDownload'
 import { supabase } from '../lib/supabase'
 import {
   RANKED_WINDOWS,
-  fetchRankedCompilation,
   rankedListName,
   saveCompilationAsList,
   type RankedCompilation,
   type RankedWindow,
   type RankedWindowId,
 } from '../lib/rankedLists'
+import {
+  RANKED_CARD_COMPILE_ERROR,
+  compileCardCompilation,
+  isCompilationFresh,
+  loadStoredCompilation,
+  rankedCardsForWindow,
+  storeCompilation,
+  type RankedPeriodCard,
+} from '../lib/rankedCards'
 import {
   PACK_CATEGORIES,
   PACK_CATEGORY_LABELS,
@@ -55,13 +63,13 @@ import {
  * opens the pack's archive URL when the API provides one (the `url`
  * field IS the pack download URL), and otherwise hands every set to
  * the browser one at a time through the same native browser-download
- * path as Mirror. No pack-level bulk-download buttons: the Ranked
+ * path as Beatmaps. No pack-level bulk-download buttons: the Ranked
  * section's Download All is the only bulk action on this page.
  *
  * The Song-folder copy step (item 8) plugs in through the optional
  * `copySet` seam on the download loop: when the user has auto-copy
  * on, each set is ALSO written into their picked Songs folder.
- * Without it, downloads are browser-only, exactly like Mirror.
+ * Without it, downloads are browser-only, exactly like Beatmaps.
  */
 
 const SAMPLE_PACKS: { name: string; tag: string; sets: number }[] = [
@@ -232,13 +240,107 @@ function PackCard({
 }
 
 /**
- * Ranked compilation lists (batch 9): the top 50 most-played maps
- * ranked inside the selected window, compiled live from osu!
- * search. One list per mode, following the GLOBAL mode state
- * (no mode tabs inside the section). All rows are live data —
- * never sample entries. "Save as list" stores the whole 50 as
- * one M5 user list (account-only; guests see the locked state).
+ * Ranked compilation lists (batch 9, reworked in batch AN): the
+ * top 50 most-played maps ranked inside a period, following the
+ * GLOBAL mode state (no mode tabs inside the section). Week stays
+ * ONE list; month shows 4 cards (the weeks of the current month)
+ * and year 12 cards (the months of the current year); each card
+ * opens a detail page with the song list.
+ *
+ * DATABASE-BACKED (batch AN, migration 003): compiled lists are
+ * stored in the `ranked_compilations` table and read FIRST — a
+ * visit no longer live-compiles 4–12 lists. A missing or stale
+ * card (TTL: week 1h, month 6h, year 24h) compiles live in the
+ * background, one card at a time so a cold visit never fires 12
+ * scans at once, and is stored when it lands. Stale rows stay on
+ * screen while they refresh; a failed recompile never hides them.
+ * All rows are live data — never sample entries. "Save as list"
+ * stores a whole 50 as one M5 user list (account-only; guests
+ * see the locked state) — on the week list here, per card on the
+ * detail page.
  */
+interface CardState {
+  compilation: RankedCompilation | null
+  compiling: boolean
+  error: string | null
+  stale: boolean
+}
+
+const EMPTY_CARD_STATE: CardState = {
+  compilation: null,
+  compiling: true,
+  error: null,
+  stale: false,
+}
+
+/** One period card tile: label, entry count, #1 map cover/title. */
+function RankedCardTile({
+  card,
+  state,
+  onOpen,
+}: {
+  card: RankedPeriodCard
+  state: CardState
+  onOpen: () => void
+}) {
+  const first = state.compilation?.entries[0]
+  const count = state.compilation?.entries.length
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="text-left rounded-2xl bg-surface-container-low overflow-hidden hover:bg-surface-container transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+      aria-label={`${card.label} — ${count != null ? `${count} maps` : 'loading'}`}
+    >
+      {first?.candidate.cover ? (
+        <img
+          src={first.candidate.cover}
+          alt=""
+          className="w-full h-28 object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="w-full h-28 bg-surface-container-high flex items-center justify-center">
+          <span className="material-symbols-outlined text-on-surface-variant text-[32px]">
+            music_note
+          </span>
+        </div>
+      )}
+      <div className="p-space-md flex flex-col gap-1">
+        <p className="font-headline-sm text-headline-sm text-on-surface">{card.label}</p>
+        {state.compiling && !state.compilation && (
+          <p className="font-body-sm text-body-sm text-on-surface-variant">Compiling…</p>
+        )}
+        {state.error && (
+          <p className="font-body-sm text-body-sm text-error">{state.error}</p>
+        )}
+        {state.compilation && (
+          <>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">
+              {count} {count === 1 ? 'map' : 'maps'}
+            </p>
+            {first && (
+              <p className="font-body-sm text-body-sm text-on-surface truncate">
+                #1 {first.candidate.title} — {first.candidate.artist}
+              </p>
+            )}
+            {state.stale && (
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                Updating in the background…
+              </p>
+            )}
+            {state.compilation.partial && (
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                Partial list — the scan stopped early.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </button>
+  )
+}
+
 function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const mode = useModeStore((s) => s.mode)
   const { user } = useAuth()
@@ -247,40 +349,112 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const noVideo = useDownloadSettings((s) => s.noVideo)
   const register = useDownloadQueue((s) => s.register)
   const [windowId, setWindowId] = useState<RankedWindowId>('week')
-  const [compilation, setCompilation] = useState<RankedCompilation | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [refreshSignal, setRefreshSignal] = useState(0)
+  const [cardStates, setCardStates] = useState<Record<string, CardState>>({})
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [downloadedTick, setDownloadedTick] = useState(0)
   const runRef = useRef(0)
+  const lastRefreshRef = useRef(refreshSignal)
 
   const win: RankedWindow =
     RANKED_WINDOWS.find((w) => w.id === windowId) ?? RANKED_WINDOWS[0]
 
-  const load = useCallback(
-    async (fresh: boolean) => {
-      const run = ++runRef.current
-      setLoading(true)
-      setError(null)
-      try {
-        const compiled = await fetchRankedCompilation(mode, win, { fresh })
-        if (runRef.current !== run) return
-        setCompilation(compiled)
-      } catch {
-        if (runRef.current !== run) return
-        setError('Could not compile the ranked list just now — osu! or the proxy may be busy.')
-      } finally {
-        if (runRef.current === run) setLoading(false)
-      }
-    },
-    [mode, win],
-  )
+  // Cards for the current window, fixed at window change; the
+  // rolling week card's end is the visit time, and the DB key
+  // stays stable within the visit. (The visit time is frozen in
+  // state so the memo stays pure — see the oxlint purity rule.)
+  const [visitMs] = useState(() => Date.now())
+  const cards = useMemo(() => rankedCardsForWindow(windowId, visitMs), [windowId, visitMs])
 
+  // DB-first load + sequential background compiles (batch AN).
   useEffect(() => {
-    void load(false)
-  }, [load])
+    const run = ++runRef.current
+    const isRefreshRun = refreshSignal !== lastRefreshRef.current
+    lastRefreshRef.current = refreshSignal
+    setCardStates(Object.fromEntries(cards.map((c) => [c.period, { ...EMPTY_CARD_STATE }])))
+    let cancelled = false
+    void (async () => {
+      const nowMs = Date.now()
+      const reads = await Promise.all(
+        cards.map((c) => loadStoredCompilation(supabase, mode, c.granularity, c.period)),
+      )
+      if (cancelled || runRef.current !== run) return
+      const queue: RankedPeriodCard[] = []
+      const next: Record<string, CardState> = {}
+      cards.forEach((c, i) => {
+        const stored = reads[i]
+        if (
+          stored &&
+          !isRefreshRun &&
+          isCompilationFresh(stored.compiledAtMs, c.window.ttlMs, nowMs)
+        ) {
+          next[c.period] = {
+            compilation: stored.compilation,
+            compiling: false,
+            error: null,
+            stale: false,
+          }
+        } else if (stored) {
+          next[c.period] = {
+            compilation: stored.compilation,
+            compiling: true,
+            error: null,
+            stale: true,
+          }
+          queue.push(c)
+        } else {
+          next[c.period] = { compilation: null, compiling: true, error: null, stale: false }
+          queue.push(c)
+        }
+      })
+      setCardStates(next)
+      // One card at a time: a cold month/year visit compiles up
+      // to 12 lists, and 12 parallel scans would hammer the proxy.
+      for (const card of queue) {
+        if (cancelled || runRef.current !== run) return
+        try {
+          const compiled = await compileCardCompilation(mode, card, {
+            now: nowMs,
+            fresh: isRefreshRun,
+          })
+          if (cancelled || runRef.current !== run) return
+          void storeCompilation(supabase, mode, card.granularity, card.period, compiled, Date.now())
+          if (cancelled || runRef.current !== run) return
+          setCardStates((prev) => ({
+            ...prev,
+            [card.period]: { compilation: compiled, compiling: false, error: null, stale: false },
+          }))
+        } catch {
+          if (cancelled || runRef.current !== run) return
+          setCardStates((prev) => {
+            const cur = prev[card.period]
+            if (cur?.compilation) return { ...prev, [card.period]: { ...cur, compiling: false } }
+            return {
+              ...prev,
+              [card.period]: {
+                compilation: null,
+                compiling: false,
+                error: RANKED_CARD_COMPILE_ERROR,
+                stale: false,
+              },
+            }
+          })
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mode, windowId, refreshSignal, cards])
+
+  // The week view is the single 'current' card rendered as rows.
+  const weekState = windowId === 'week' ? cardStates['current'] : undefined
+  const weekCompilation = weekState?.compilation ?? null
+  const weekLoading = weekState ? weekState.compiling && !weekState.compilation : true
+  const weekError = weekState?.error ?? null
+  const anyCompiling = Object.values(cardStates).some((s) => s.compiling)
 
   useEffect(() => {
     setSaveMessage(null)
@@ -288,7 +462,7 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   }, [mode, windowId])
 
   const saveAsList = useCallback(async () => {
-    if (!user || !compilation || saving) return
+    if (!user || !weekCompilation || saving) return
     setSaving(true)
     setSaveMessage(null)
     setSaveError(null)
@@ -296,7 +470,7 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
       const result = await saveCompilationAsList(supabase, user.id, {
         name: rankedListName(mode, win),
         mode,
-        entries: compilation.entries,
+        entries: weekCompilation.entries,
       })
       setSaveMessage(
         result.added > 0
@@ -309,13 +483,13 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
     } finally {
       setSaving(false)
     }
-  }, [user, compilation, saving, mode, win])
+  }, [user, weekCompilation, saving, mode, win])
 
   // Re-read on tick so rows show the downloaded state after a
-  // download (same pattern as Mirror).
+  // download (same pattern as Beatmaps).
   void downloadedTick
   const downloaded = seenStore.load(seenKeyValue).downloaded
-  const entries = compilation?.entries ?? []
+  const entries = weekCompilation?.entries ?? []
 
   // Batched row state (batch 11, part 5): one feedback query for
   // the global mode + one batched containment lookup, passed to
@@ -371,15 +545,18 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
           <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
           <span>Ranked Lists</span>
           <span className="text-outline-variant">•</span>
-          <span>Live from osu!</span>
+          <span>Stored in the database</span>
         </div>
         <h2 className="font-headline-sm text-headline-sm text-on-surface">
           Top 50 Ranked — {modeLabel(mode)}
         </h2>
         <p className="font-body-sm text-body-sm text-on-surface-variant">
-          The most-played maps ranked in the selected window, compiled live from osu! search —
-          newest-ranked first, then ordered by play count. Follows your current mode (
-          {modeLabel(mode)}); switch modes to see that mode&apos;s list.
+          The most-played maps ranked in the selected period — newest-ranked first, then ordered
+          by play count. Lists are compiled from osu! search and stored in the database, so a
+          second visit loads instantly; stale ones refresh in the background. Follows your
+          current mode ({modeLabel(mode)}); switch modes to see that mode&apos;s lists. This week
+          is one list; this month is 4 weekly cards and this year is 12 monthly cards — open a
+          card to see its songs.
         </p>
       </div>
 
@@ -409,33 +586,37 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
         <button
           className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
           type="button"
-          disabled={loading}
-          onClick={() => void load(true)}
+          disabled={anyCompiling}
+          onClick={() => setRefreshSignal((n) => n + 1)}
         >
           <span className="material-symbols-outlined text-[16px]">refresh</span>
           <span>Refresh</span>
         </button>
-        <LockedButton
-          allowed={caps.canSave}
-          lockedTitle="Create a free account to save lists"
-          onLocked={() => navigate('/auth')}
-          onClick={() => void saveAsList()}
-          className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all disabled:opacity-60"
-          aria-label="Save this ranked list as one of my lists"
-        >
-          <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
-          <span>{saving ? 'Saving…' : 'Save as list'}</span>
-        </LockedButton>
-        <button
-          className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
-          type="button"
-          disabled={loading || bulkActive || entries.length === 0}
-          onClick={downloadAllRanked}
-          aria-label={`Download all ${entries.length} ranked maps`}
-        >
-          <span className="material-symbols-outlined text-[16px]">download</span>
-          <span>{bulkActive ? 'Queuing downloads…' : `Download all (${entries.length})`}</span>
-        </button>
+        {windowId === 'week' && (
+          <>
+            <LockedButton
+              allowed={caps.canSave}
+              lockedTitle="Create a free account to save lists"
+              onLocked={() => navigate('/auth')}
+              onClick={() => void saveAsList()}
+              className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-md hover:bg-primary-container hover:text-on-primary-container active:scale-95 transition-all disabled:opacity-60"
+              aria-label="Save this ranked list as one of my lists"
+            >
+              <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
+              <span>{saving ? 'Saving…' : 'Save as list'}</span>
+            </LockedButton>
+            <button
+              className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
+              type="button"
+              disabled={weekLoading || bulkActive || entries.length === 0}
+              onClick={downloadAllRanked}
+              aria-label={`Download all ${entries.length} ranked maps`}
+            >
+              <span className="material-symbols-outlined text-[16px]">download</span>
+              <span>{bulkActive ? 'Queuing downloads…' : `Download all (${entries.length})`}</span>
+            </button>
+          </>
+        )}
       </div>
 
       {saveMessage && (
@@ -449,50 +630,75 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
         </p>
       )}
 
-      {loading && <LoadingState label={`Compiling the top 50 Ranked ${modeLabel(mode)} maps…`} />}
-      {error && !loading && (
-        <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
-          <p className="font-body-sm text-body-sm text-error">{error}</p>
-          <button
-            className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
-            type="button"
-            onClick={() => void load(true)}
-          >
-            Retry
-          </button>
-        </div>
+      {windowId === 'week' && (
+        <>
+          {weekLoading && (
+            <LoadingState label={`Compiling the top 50 Ranked ${modeLabel(mode)} maps…`} />
+          )}
+          {weekError && !weekLoading && (
+            <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+              <p className="font-body-sm text-body-sm text-error">{weekError}</p>
+              <button
+                className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
+                type="button"
+                onClick={() => setRefreshSignal((n) => n + 1)}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {!weekLoading && !weekError && weekCompilation && weekCompilation.entries.length === 0 && (
+            <div className="p-space-md rounded-lg bg-surface-container-low">
+              <p className="font-body-md text-body-md text-on-surface-variant">
+                No maps were ranked in this window for {modeLabel(mode)} yet.
+              </p>
+            </div>
+          )}
+          {!weekLoading && !weekError && weekCompilation && weekCompilation.partial && entries.length > 0 && (
+            <div className="p-space-md rounded-lg bg-surface-container-low">
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                Partial list — the scan stopped early before reaching the start of this window, so
+                this may not be the full top 50. Refresh to try the full scan again.
+              </p>
+            </div>
+          )}
+          {!weekLoading && !weekError && weekState?.stale && entries.length > 0 && (
+            <p className="font-body-sm text-body-sm text-on-surface-variant">
+              Showing the stored list — updating in the background…
+            </p>
+          )}
+          {!weekLoading && !weekError && entries.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {entries.map((entry) => (
+                <BeatmapRow
+                  key={entry.candidate.beatmapsetId}
+                  candidate={entry.candidate}
+                  mode={mode}
+                  seenKeyValue={seenKeyValue}
+                  downloaded={downloaded.includes(entry.candidate.beatmapsetId)}
+                  onDownloaded={() => setDownloadedTick((n) => n + 1)}
+                  rank={entry.rank}
+                  feedback={rowMaps.feedbackById.get(entry.candidate.beatmapId) ?? null}
+                  containing={rowMaps.containingBySet.get(entry.candidate.beatmapsetId) ?? []}
+                  onFeedbackChange={rowMaps.onFeedbackChange}
+                  onContainingChange={(ids) =>
+                    rowMaps.onContainingChange(entry.candidate.beatmapsetId, ids)
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
-      {!loading && !error && compilation && compilation.entries.length === 0 && (
-        <div className="p-space-md rounded-lg bg-surface-container-low">
-          <p className="font-body-md text-body-md text-on-surface-variant">
-            No maps were ranked in this window for {modeLabel(mode)} yet.
-          </p>
-        </div>
-      )}
-      {!loading && !error && compilation && compilation.partial && entries.length > 0 && (
-        <div className="p-space-md rounded-lg bg-surface-container-low">
-          <p className="font-body-sm text-body-sm text-on-surface-variant">
-            Partial list — the scan stopped early before reaching the start of this window, so
-            this may not be the full top 50. Refresh to try the full scan again.
-          </p>
-        </div>
-      )}
-      {!loading && !error && entries.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {entries.map((entry) => (
-            <BeatmapRow
-              key={entry.candidate.beatmapsetId}
-              candidate={entry.candidate}
-              mode={mode}
-              seenKeyValue={seenKeyValue}
-              downloaded={downloaded.includes(entry.candidate.beatmapsetId)}
-              onDownloaded={() => setDownloadedTick((n) => n + 1)}
-              rank={entry.rank}
-              feedback={rowMaps.feedbackById.get(entry.candidate.beatmapId) ?? null}
-              containing={rowMaps.containingBySet.get(entry.candidate.beatmapsetId) ?? []}
-              onFeedbackChange={rowMaps.onFeedbackChange}
-              onContainingChange={(ids) =>
-                rowMaps.onContainingChange(entry.candidate.beatmapsetId, ids)
+      {windowId !== 'week' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-space-md">
+          {cards.map((card) => (
+            <RankedCardTile
+              key={card.period}
+              card={card}
+              state={cardStates[card.period] ?? { ...EMPTY_CARD_STATE }}
+              onOpen={() =>
+                navigate(`/collections/ranked/${mode}/${card.granularity}/${card.period}`)
               }
             />
           ))}

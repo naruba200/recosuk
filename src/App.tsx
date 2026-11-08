@@ -10,11 +10,11 @@ import LinkOsu from './screens/LinkOsu'
 import Generating from './screens/Generating'
 import StatsExplained from './screens/StatsExplained'
 import WelcomeRecs from './screens/WelcomeRecs'
-import Dashboard from './screens/Dashboard'
-import Stats from './screens/Stats'
+import Profile from './screens/Profile'
 import Recommendations from './screens/Recommendations'
-import Mirror from './screens/Mirror'
+import Beatmaps from './screens/Beatmaps'
 import Collections from './screens/Collections'
+import RankedDetail from './screens/RankedDetail'
 import Lists from './screens/Lists'
 import History from './screens/History'
 import Auth from './screens/Auth'
@@ -24,10 +24,10 @@ import OsuCallback from './screens/OsuCallback'
 
 /**
  * Entry choice: `/` is a first-visit gate, and it always REDIRECTS —
- * it never renders the Dashboard itself, so the address bar always
- * shows the real route (/dashboard or /onboarding). A first visit (no
+ * it never renders the Profile itself, so the address bar always
+ * shows the real route (/profile or /onboarding). A first visit (no
  * `recosuk-onboarded` flag in localStorage) goes to /onboarding;
- * everyone else goes to /dashboard.
+ * everyone else goes to /profile.
  */
 function EntryGate() {
   const { user, loading } = useAuth()
@@ -39,12 +39,12 @@ function EntryGate() {
     onboarded = false
   }
   // While the auth session is still resolving, keep showing the
-  // Dashboard shell rather than flashing a redirect.
-  if (loading) return <Dashboard />
+  // Profile shell rather than flashing a redirect.
+  if (loading) return <Profile />
   // Returning users (PLAN-v2 §5.6): a guest link or a signed-in account
   // with a linked profile skips onboarding entirely, flag or not.
   if (guestSession || user || onboarded) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/profile" replace />
   }
   return <Navigate to="/onboarding" replace />
 }
@@ -118,30 +118,32 @@ function NavigationBridge() {
       let to: string | null = null
 
       if (path === '/onboarding') {
-        if (text.includes('skip')) { markOnboarded(); to = '/dashboard' }
+        if (text.includes('skip')) { markOnboarded(); to = '/profile' }
         else if (text.includes('next')) to = '/onboarding/link'
       } else if (path === '/onboarding/link') {
-        if (text.includes('continue without linking')) { markOnboarded(); to = '/dashboard' }
+        if (text.includes('continue without linking')) { markOnboarded(); to = '/profile' }
         else if (text.includes('link my osu')) to = '/onboarding/generating'
         else if (text.includes('continue as guest')) to = '/onboarding/generating'
         else if (text.includes('create account')) to = '/auth'
       } else if (path === '/onboarding/stats') {
         if (text.includes('recommendation')) to = '/welcome-recs'
       } else if (path === '/welcome-recs') {
-        if (text.includes('dashboard')) { markOnboarded(); to = '/dashboard' }
+        if (text.includes('dashboard')) { markOnboarded(); to = '/profile' }
       } else if (path === '/auth') {
-        if (text.includes('continue as guest')) { markOnboarded(); to = '/dashboard' }
+        if (text.includes('continue as guest')) { markOnboarded(); to = '/profile' }
         else if (text.includes('github') || text.includes('create account') || text.includes('sign in')) to = '/onboarding/link'
       }
 
       if (!to) {
         // Sidebar + global CTAs (any app-shell screen)
         if (text.includes('replay the introduction') || text.includes('replay intro')) to = '/onboarding'
-        else if (text.includes('dashboard')) to = '/dashboard'
+        else if (text.includes('profile')) to = '/profile'
+        else if (text.includes('dashboard')) to = '/profile'
         else if (text.includes('recommendations')) to = '/recommendations'
-        else if (text.includes('mirror')) to = '/mirror'
+        else if (text.includes('beatmaps')) to = '/beatmaps'
+        else if (text.includes('mirror')) to = '/beatmaps'
         else if (text.includes('collections')) to = '/collections'
-        else if (text === 'stats' || text.endsWith(' stats') || text.startsWith('stats ')) to = '/stats'
+        else if (text === 'stats' || text.endsWith(' stats') || text.startsWith('stats ')) to = '/profile'
         else if (text.includes('your lists') || text === 'lists' || text.endsWith(' lists')) to = '/lists'
         else if (text.includes('history')) to = '/history'
         else if (text.includes('settings')) to = '/settings'
@@ -174,11 +176,17 @@ export default function App() {
         <Route path="/onboarding/stats" element={<StatsExplained />} />
         <Route path="/welcome-recs" element={<WelcomeRecs />} />
         <Route path="/" element={<EntryGate />} />
-        <Route path="/dashboard" element={<RequireSession><Dashboard /></RequireSession>} />
-        <Route path="/stats" element={<RequireSession><Stats /></RequireSession>} />
+        <Route path="/profile" element={<RequireSession><Profile /></RequireSession>} />
+        {/* §AN: Dashboard + Stats merged into /profile; old
+            links/bookmarks keep working via these redirects. */}
+        <Route path="/dashboard" element={<Navigate to="/profile" replace />} />
+        <Route path="/stats" element={<Navigate to="/profile" replace />} />
         <Route path="/recommendations" element={<RequireSession><RecommendationsPage /></RequireSession>} />
-        <Route path="/mirror" element={<RequireSession><Mirror /></RequireSession>} />
+        {/* §AN: Mirror renamed Beatmaps; /mirror redirects. */}
+        <Route path="/beatmaps" element={<RequireSession><Beatmaps /></RequireSession>} />
+        <Route path="/mirror" element={<Navigate to="/beatmaps" replace />} />
         <Route path="/collections" element={<RequireSession><Collections /></RequireSession>} />
+        <Route path="/collections/ranked/:mode/:granularity/:period" element={<RequireSession><RankedDetail /></RequireSession>} />
         <Route path="/lists" element={<RequireSession><Lists /></RequireSession>} />
         <Route path="/history" element={<RequireSession><History /></RequireSession>} />
         <Route path="/auth" element={<Auth />} />

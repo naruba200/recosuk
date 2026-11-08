@@ -450,7 +450,7 @@ function finishOnboarding(navigate: (path: string) => void) {
   } catch {
     /* ignore */
   }
-  navigate('/dashboard')
+  navigate('/profile')
 }
 
 function WelcomeRecsReal({ data }: { data: ProfileData }) {

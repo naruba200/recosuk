@@ -20,7 +20,7 @@ export interface TierCapabilities {
   canLearn: boolean
   /** Stat snapshots + progress-over-time history (account only). */
   canSnapshotHistory: boolean
-  /** Download .osz files (Recommendations + Mirror). */
+  /** Download .osz files (Recommendations + Beatmaps). */
   canDownload: boolean
   /** Play beatmap audio previews. */
   canPreview: boolean
@@ -49,7 +49,7 @@ export function tierCapabilities(tier: AuthTier): TierCapabilities {
         canPreview: true,
       }
     case 'none':
-      // No link at all: Mirror browsing only (preview + download there).
+      // No link at all: Beatmaps browsing only (preview + download there).
       return {
         canSave: false,
         canCreateLists: false,

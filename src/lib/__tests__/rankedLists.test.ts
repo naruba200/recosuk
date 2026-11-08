@@ -156,6 +156,78 @@ describe('ranked compilation windows', () => {
   })
 })
 
+describe('ranked compilation intervals (§AN cards)', () => {
+  // Interval: Oct 22 00:00Z .. Oct 29 00:00Z (7 days ending at NOW).
+  const START = Date.parse('2026-10-22T00:00:00.000Z')
+  const END = NOW
+  const interval = { startMs: START, endMs: END }
+
+  it('collects only sets inside [startMs, endMs): newer sets skipped, older ones stop the scan', async () => {
+    const { fetchPage, calls } = pagesFetcher([
+      page(
+        [
+          // Newer than the interval end — skipped, scan continues.
+          set(1, new Date(NOW + 60_000).toISOString(), 999),
+          // Inside the interval.
+          set(2, new Date(NOW - 1000).toISOString(), 50),
+        ],
+        '1',
+      ),
+      page(
+        [
+          set(3, new Date(START + 1000).toISOString(), 40),
+          // Older than the interval start — stops the scan.
+          set(4, new Date(START - 1000).toISOString(), 900),
+        ],
+        null,
+      ),
+    ])
+    const compiled = await compileRankedList({
+      mode: 'mania',
+      window: week,
+      now: NOW,
+      ...interval,
+      fetchPage,
+    })
+    expect(compiled.entries.map((e) => e.candidate.beatmapsetId)).toEqual([2, 3])
+    expect(compiled.windowStart).toBe(new Date(START).toISOString())
+    expect(calls.length).toBe(2)
+  })
+
+  it('pages through newer-than-end sets without collecting or stopping', async () => {
+    const { fetchPage, calls } = pagesFetcher([
+      page([set(1, new Date(NOW + 60_000).toISOString(), 999)], '1'),
+      page([set(2, new Date(NOW - 1000).toISOString(), 10)], null),
+    ])
+    const compiled = await compileRankedList({
+      mode: 'mania',
+      window: week,
+      now: NOW,
+      ...interval,
+      fetchPage,
+    })
+    expect(compiled.entries.map((e) => e.candidate.beatmapsetId)).toEqual([2])
+    expect(calls.length).toBe(2)
+  })
+
+  it('returns empty after one page for a future interval', async () => {
+    const { fetchPage, calls } = pagesFetcher([
+      page([set(1, new Date(NOW - 1000).toISOString(), 999)], '1'),
+      page([set(2, new Date(NOW - 2000).toISOString(), 888)], null),
+    ])
+    const compiled = await compileRankedList({
+      mode: 'mania',
+      window: week,
+      now: NOW,
+      startMs: NOW + 86_400_000,
+      endMs: NOW + 2 * 86_400_000,
+      fetchPage,
+    })
+    expect(compiled.entries).toEqual([])
+    expect(calls.length).toBe(1)
+  })
+})
+
 describe('ranked candidate mapping', () => {
   it('excludes sets with no difficulty in the current mode', async () => {
     const { fetchPage } = pagesFetcher([
@@ -234,7 +306,7 @@ describe('save compilation as list', () => {
 
   it('names the list Top 50 Ranked — Mode — Window', () => {
     expect(rankedListName('mania' as GameMode, month)).toBe(
-      'Top 50 Ranked — Mania — Last 4 weeks',
+      'Top 50 Ranked — Mania — This month',
     )
   })
 

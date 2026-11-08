@@ -16,16 +16,15 @@ import { fmtAcc, fmtInt, fmtSr } from '../lib/interpretations'
 import { useAuth } from '../lib/auth'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
-const DEMO_IDENTITY = {
+export const DEMO_IDENTITY = {
   username: 'sora_playz',
   pp: 5284,
   countryCode: 'VN',
   tierLabel: 'free tier',
 }
 
-function DashboardDemo() {
+export function DashboardDemoContent() {
   return (
-    <AppShell identity={DEMO_IDENTITY}>
         <div className="flex flex-col w-full">
           {/* Subtle Mode Context Background Glow */}
           <div className="relative w-full">
@@ -693,6 +692,13 @@ function DashboardDemo() {
             </div>
           </div>
         </div>
+  )
+}
+
+function DashboardDemo() {
+  return (
+    <AppShell identity={DEMO_IDENTITY}>
+      <DashboardDemoContent />
     </AppShell>
   )
 }
@@ -701,7 +707,7 @@ function DashboardDemo() {
 // Real variant (M2): same design, live data for the linked player.
 // ---------------------------------------------------------------------------
 
-function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () => void }) {
+export function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefresh: () => void }) {
   const mode = useModeStore((s) => s.mode)
   const { user, skillProfile: p } = data
   const stats = user.statistics ?? {}

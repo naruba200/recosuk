@@ -344,7 +344,7 @@ export const ROW_TAG_ALLOWLIST_LIMIT = 7
  * order, so the result is deterministic for the same list.
  * The Recommendations screens narrow row chips to this set so
  * a list shows one shared handful of dominant skillsets
- * instead of a different scattering per row; Mirror / Welcome
+ * instead of a different scattering per row; Beatmaps / Welcome
  * Recs pass no allowlist and keep the full essential tags.
  */
 export function mostUsedEssentialTags(
@@ -395,7 +395,7 @@ export function applyTagAllowlist(
  * from its own items. The two fallback flags distinguish WHY
  * the list came back: every item downloaded (the downloaded
  * note) vs every item hidden for either reason (the seen note).
- * The Generated/Batches view calls this; Mirror / Welcome Recs
+ * The Generated/Batches view calls this; Beatmaps / Welcome Recs
  * / Collections never do. Filtering happens at list level,
  * never inside BeatmapRow, and the engine's fetch-time
  * exclusion is untouched.
@@ -601,7 +601,7 @@ export function applyFilters(
     if (filters.rankedLovedOnly && c.status !== 'ranked' && c.status !== 'loved') return false
     // Key count only applies when the candidate actually carries a
     // CS value: search payloads without one (cs 0 = unknown) must
-    // pass, matching Mirror's "unknown values pass" rule. Dropping
+    // pass, matching Beatmaps' "unknown values pass" rule. Dropping
     // them emptied every mania run whose payloads lacked CS.
     if (mode === 'mania' && filters.keyCount !== null && c.cs > 0 && Math.round(c.cs) !== filters.keyCount)
       return false

@@ -24,9 +24,8 @@ const DEMO_IDENTITY = {
   tierLabel: 'free tier',
 }
 
-function StatsDemo() {
+export function StatsDemoContent() {
   return (
-    <AppShell identity={DEMO_IDENTITY}>
         <div className="flex flex-col w-full">
           {/* Active Tab Sidebar Override Script for Visual Integrity */}
           {/* Top Page Header Bar */}
@@ -877,6 +876,13 @@ function StatsDemo() {
           </div>
           {/* Interactive Sync Button Toast Simulation JS */}
         </div>
+  )
+}
+
+function StatsDemo() {
+  return (
+    <AppShell identity={DEMO_IDENTITY}>
+      <StatsDemoContent />
     </AppShell>
   )
 }
@@ -890,7 +896,7 @@ function formatHours(seconds: number | undefined): string {
   return fmtInt(Math.round(seconds / 3600))
 }
 
-function StatsReal({
+export function StatsReal({
   data,
   onRefresh,
 }: {

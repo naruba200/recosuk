@@ -49,7 +49,7 @@ export interface RankedWindow {
 
 export const RANKED_WINDOWS: RankedWindow[] = [
   { id: 'week', tabLabel: 'This week', listLabel: 'This week', days: 7, ttlMs: 60 * 60 * 1000 },
-  { id: 'month', tabLabel: 'Last 4 weeks', listLabel: 'Last 4 weeks', days: 28, ttlMs: 6 * 60 * 60 * 1000 },
+  { id: 'month', tabLabel: 'This month', listLabel: 'This month', days: 28, ttlMs: 6 * 60 * 60 * 1000 },
   { id: 'year', tabLabel: 'This year', listLabel: 'This year', days: 365, ttlMs: 24 * 60 * 60 * 1000 },
 ]
 
@@ -168,10 +168,18 @@ export async function compileRankedList(opts: {
   mode: GameMode
   window: RankedWindow
   now?: number
+  /** Explicit interval (UTC ms) for a calendar period (a week of a
+   *  month, a month of a year): overrides the rolling `days`
+   *  window. `endMs` is EXCLUSIVE — sets ranked at/after it are
+   *  skipped without stopping the scan, so a past interval pages
+   *  through newer sets to reach its own. */
+  startMs?: number
+  endMs?: number
   fetchPage: RankedPageFetcher
 }): Promise<RankedCompilation> {
   const now = opts.now ?? Date.now()
-  const windowStartMs = now - opts.window.days * 24 * 60 * 60 * 1000
+  const windowStartMs = opts.startMs ?? now - opts.window.days * 24 * 60 * 60 * 1000
+  const windowEndMs = opts.endMs ?? null
   const collected = new Map<number, { set: SearchBeatmapset; rankedMs: number }>()
   let cursor: string | null | undefined
   let pages = 0
@@ -191,6 +199,11 @@ export async function compileRankedList(opts: {
       scanned += 1
       const rankedMs = parseRankedDate(set.ranked_date)
       if (rankedMs === null) continue
+      // Past-interval bound: sets newer than the interval end are
+      // skipped (they belong to a later period), but the scan
+      // continues — the sort is newest-first, so the interval's
+      // own sets sit further down the pages.
+      if (windowEndMs !== null && rankedMs >= windowEndMs) continue
       if (rankedMs >= windowStartMs) {
         collected.set(set.id, { set, rankedMs })
       } else {
@@ -288,6 +301,42 @@ export async function fetchRankedCompilation(
     mode,
     window,
     now: opts.now,
+    fetchPage: (cursor) => fetchRankedPage(mode, cursor),
+  })
+  dataCache.set(key, compiled, window.ttlMs)
+  return compiled
+}
+
+/**
+ * Calendar-period compilation (§AN cards): same scan, but for an
+ * explicit [startMs, endMs) interval instead of the rolling
+ * `days` window. Cached in dataCache under a key that includes
+ * the interval, same TTL as the window it belongs to.
+ */
+export async function fetchRankedCompilationForInterval(
+  mode: GameMode,
+  window: RankedWindow,
+  startMs: number,
+  endMs: number,
+  opts: { fresh?: boolean; now?: number } = {},
+): Promise<RankedCompilation> {
+  const key = JSON.stringify([
+    'ranked-compilation-interval',
+    mode,
+    window.id,
+    startMs,
+    endMs,
+  ])
+  if (!opts.fresh) {
+    const hit = dataCache.get<RankedCompilation>(key)
+    if (hit) return hit
+  }
+  const compiled = await compileRankedList({
+    mode,
+    window,
+    now: opts.now,
+    startMs,
+    endMs,
     fetchPage: (cursor) => fetchRankedPage(mode, cursor),
   })
   dataCache.set(key, compiled, window.ttlMs)

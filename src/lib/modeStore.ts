@@ -4,7 +4,7 @@ import { getGuestSession, useGuestStore } from './guestStore'
 
 /**
  * Global mode state (PLAN-v2 §2.2). One store, every screen reads it:
- * profile, stats, recommendations, filters and Mirror all follow the
+ * profile, stats, recommendations, filters and Beatmaps all follow the
  * chosen mode. Mode accents come from the `modes` tokens in
  * tailwind.config.js — screens set `data-mode={mode}` on a wrapper and
  * use `MODE_ACCENTS[mode]` / the `bg-modes-*` classes to re-tint.

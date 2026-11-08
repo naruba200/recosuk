@@ -267,7 +267,7 @@ async function fetchAccountProfileRow(userId: string): Promise<AccountProfileRow
 
 // Shared account-row fetch (batch 10): the profiles-row lookup used to
 // live inside useProfileData only, so page shells that needed just the
-// linked osu! name (Mirror/Collections/History/Lists) read the guest
+// linked osu! name (Beatmaps/Collections/History/Lists) read the guest
 // session alone and showed "Guest" for signed-in account users. This
 // hook owns the row fetch; useProfileData consumes it, and the sidebar
 // identity hook consumes it too. Concurrent instances share one
@@ -367,7 +367,7 @@ export function resolveSidebarIdentity(input: SidebarIdentityInput): string | nu
 
 /**
  * Sidebar identity for page shells that don't load full profile data
- * (Mirror/Collections/History/Lists): resolves the display name from
+ * (Beatmaps/Collections/History/Lists): resolves the display name from
  * the account profiles row, guest session, and pending link, without
  * fetching osu! profile data. Returns null while resolution is still
  * pending — callers render a placeholder ('Loading…', matching
