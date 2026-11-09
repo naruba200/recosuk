@@ -296,6 +296,7 @@ export default function RankedDetail() {
                 onContainingChange={(ids) =>
                   rowMaps.onContainingChange(entry.candidate.beatmapsetId, ids)
                 }
+                downloadPrimary="auto"
               />
             ))}
           </div>

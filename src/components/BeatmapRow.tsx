@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { GameMode } from '../lib/mode'
 import { modeLabel } from '../lib/mode'
 import type { DownloadPrimary } from '../lib/downloadManager'
+import { statusBadgeClasses } from '../lib/statusBadge'
 import type { RecCandidate } from '../lib/recommend'
 import { applyTagAllowlist, essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
 import { usePreviewPlayer } from '../lib/previewPlayer'
@@ -57,9 +58,10 @@ interface BeatmapRowProps {
   onDownloaded?: () => void
   /**
    * Which source the DownloadButton's main button uses first.
-   * Default 'official' — Mirror, Welcome Recs, Collections
-   * and Lists pass nothing. Recommendations passes 'auto'
-   * (user decision 2026-10-30).
+   * Default 'official' — Mirror, Welcome Recs and Lists pass
+   * nothing. Recommendations passes 'auto' (user decision
+   * 2026-10-30); Collections and History's redownload pass
+   * 'auto' too (user decision 2026-11-09, §AU).
    */
   downloadPrimary?: DownloadPrimary
   /** Ranked compilation lists only: renders the #N rank badge and
@@ -471,8 +473,8 @@ export default function BeatmapRow({
             {isDownloaded && (
               <span className="px-2 py-0.5 rounded-full bg-surface-variant/80 text-outline font-label-sm text-[10px]">Already downloaded</span>
             )}
-            {c.status === 'loved' && (
-              <span className="px-2 py-0.5 rounded-full bg-secondary-container/60 text-secondary font-label-sm text-[10px] font-bold uppercase">Loved</span>
+            {c.status && (
+              <span className={`px-2 py-0.5 rounded-full ${statusBadgeClasses(c.status)} font-label-sm text-[10px] font-bold uppercase`}>{c.status}</span>
             )}
           </div>
           <p className="font-body-sm text-body-sm text-primary-fixed-dim leading-snug line-clamp-1 mb-2">{c.reason}</p>

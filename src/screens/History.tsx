@@ -388,6 +388,7 @@ function HistoryReal({ userId, username }: { userId: string; username: string | 
                         mode={globalMode}
                         seenKeyValue={downloadKey}
                         downloaded
+                        primary="auto"
                       />
                     </div>
                   </div>

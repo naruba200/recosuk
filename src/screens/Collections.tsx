@@ -836,6 +836,7 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
                   onContainingChange={(ids) =>
                     rowMaps.onContainingChange(entry.candidate.beatmapsetId, ids)
                   }
+                  downloadPrimary="auto"
                 />
               ))}
             </div>
