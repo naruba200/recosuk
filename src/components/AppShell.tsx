@@ -60,7 +60,7 @@ export function ModePills({
     <div
       className={
         vertical
-          ? 'flex flex-col items-center gap-space-sm bg-surface-container px-2 py-2 rounded-full'
+          ? 'flex flex-col items-center gap-6 px-2 py-2 rounded-full'
           : 'flex items-center gap-space-sm bg-surface-container-low px-space-sm py-1.5 rounded-full'
       }
     >
@@ -69,7 +69,7 @@ export function ModePills({
         return (
           <button
             key={m}
-            className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-surface-container-highest hover:scale-[1.15] active:scale-[1.3] transition-all"
+            className="w-12 h-12 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-surface-container-highest hover:scale-[1.15] active:scale-[1.3] transition-all"
             style={
               active
                 ? {
@@ -89,7 +89,7 @@ export function ModePills({
               onSelect?.()
             }}
           >
-            <span className="font-headline-sm text-[13px] leading-none">
+            <span className="font-headline-sm text-[16px] leading-none">
               {MODE_PILL_LABELS[m]}
             </span>
           </button>
@@ -320,7 +320,7 @@ export default function AppShell({
             <span className="font-label-sm text-label-sm text-on-surface-variant">rhythm companion</span>
           </div>
         </NavLink>
-        <nav className="flex items-center gap-1 min-w-0 overflow-x-auto" aria-label="Main">
+        <nav className="flex flex-1 items-center justify-between gap-1 min-w-0 overflow-x-auto" aria-label="Main">
           {NAV.map((item) => (
             <NavLink
               key={item.path}
@@ -338,7 +338,7 @@ export default function AppShell({
             </NavLink>
           ))}
         </nav>
-        <div className="flex items-center gap-space-md ml-auto flex-shrink-0">
+        <div className="flex items-center gap-space-md flex-shrink-0">
           <NavLink
             to="/download"
             title="Get the RecOsuk app"
@@ -389,7 +389,7 @@ export default function AppShell({
       <aside
         aria-label="Mode"
         onMouseLeave={() => setSidebarOpen(false)}
-        className={`fixed left-0 top-16 bottom-0 z-40 w-[72px] bg-surface-container-low shadow-[0_1px_8px_rgb(var(--c-shadow)_/_0.4)] flex flex-col items-center pt-space-lg transition-transform duration-300 ease-out ${
+        className={`fixed left-0 top-16 bottom-0 z-40 w-[72px] flex flex-col items-center justify-center transition-transform duration-300 ease-out ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

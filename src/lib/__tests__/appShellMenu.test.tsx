@@ -125,6 +125,49 @@ describe('header nav + mode rail (§AQ items 3+12)', () => {
     }
   })
 
+  it('the nav spreads across the leftover space (flex-1 + justify-between)', () => {
+    const html = renderShell()
+    const nav = classOf(html, 'nav', 'flex-1')
+    expect(nav).not.toBeNull()
+    expect(nav).toContain('justify-between')
+    // Narrow-screen safety stays: the nav can still scroll.
+    expect(nav).toContain('min-w-0')
+    expect(nav).toContain('overflow-x-auto')
+    // The right-side group no longer pushes itself with ml-auto —
+    // the growing nav does that job now.
+    expect(html).not.toContain('ml-auto')
+  })
+
+  it('the mode rail is transparent, vertically centred, and the pills are bigger', () => {
+    const html = renderShell()
+    const rail = classOf(html, 'aside', 'z-40')
+    expect(rail).not.toBeNull()
+    // Floating-dock look: no solid bar, no shadow; the pills sit
+    // in the middle of the full-height rail.
+    expect(rail).not.toContain('bg-surface-container-low')
+    expect(rail).not.toContain('shadow-[')
+    expect(rail).not.toContain('pt-space-lg')
+    expect(rail).toContain('justify-center')
+    // Hide/show mechanics unchanged.
+    expect(rail).toContain('w-[72px]')
+    expect(rail).toContain('transition-transform')
+    expect(rail).toContain('-translate-x-full')
+    // Vertical capsule: transparent, wider gaps.
+    const capsule = classOf(html, 'div', 'gap-6')
+    expect(capsule).not.toBeNull()
+    expect(capsule).not.toContain('bg-surface-container')
+    // Pills grew 32px -> 48px, labels 13px -> 16px; the scale
+    // animations stay.
+    const pill = classOf(html, 'button', 'w-12')
+    expect(pill).not.toBeNull()
+    expect(pill).toContain('h-12')
+    expect(pill).toContain('hover:scale-[1.15]')
+    expect(pill).toContain('active:scale-[1.3]')
+    expect(html).toContain('font-headline-sm text-[16px] leading-none')
+    // The header's touch-only mode toggle keeps its old size.
+    expect(html).toContain('font-headline-sm text-[13px] leading-none')
+  })
+
   it('the touch-only mode toggle is in the header', () => {
     const html = renderShell()
     expect(html).toContain('Change mode')
