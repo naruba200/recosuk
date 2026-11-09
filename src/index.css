@@ -248,6 +248,28 @@
   animation: modeChangeIn 0.35s ease-out;
 }
 
+/* §AT — active mode pill breathe: the active pill gently pulses
+ * (scale only, no layout shift). The keyframe animates the
+ * standalone `scale` property so it composes with the pill's
+ * hover/press transform scales instead of overriding them. */
+@keyframes mode-pill-breathe {
+  0%,
+  100% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.06;
+  }
+}
+.animate-mode-pill-breathe {
+  animation: mode-pill-breathe 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-mode-pill-breathe {
+    animation: none;
+  }
+}
+
 /* Dark Horse (Hook Agency): yellow #feda6a, silver #d4d4dc, slate #1d1e22. */
 [data-theme="dark-horse"] {
   --c-background: 22 23 27;

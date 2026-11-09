@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import LoadingState from '../components/LoadingState'
+import { BentoCard, BentoGrid } from '../components/magicui/bento-grid'
 import BeatmapRow from '../components/BeatmapRow'
 import LockedButton from '../components/LockedButton'
 import { isProxyConfigured, OsuServiceError } from '../lib/osu'
@@ -255,10 +256,16 @@ function RankedCardTile({
   const first = state.compilation?.entries[0]
   const count = state.compilation?.entries.length
   return (
+    // §AT: the tile is the BentoCard's body — the shell owns the
+    // card chrome (surface, rounding, hover), so the button fills
+    // it and carries only the content + the CTA line. The CTA is a
+    // non-interactive span (never a nested link/button): in flow
+    // on mobile, hover-revealed from the bottom on desktop, while
+    // the text block lifts to make room for it.
     <button
       type="button"
       onClick={onOpen}
-      className="text-left rounded-2xl bg-surface-container-low overflow-hidden hover:bg-surface-container transition-colors focus-visible:outline-2 focus-visible:outline-primary"
+      className="relative w-full flex-1 text-left overflow-hidden focus-visible:outline-2 focus-visible:outline-primary"
       aria-label={`${card.label} — ${count != null ? `${count} maps` : 'loading'}`}
     >
       {first?.candidate.cover ? (
@@ -275,7 +282,7 @@ function RankedCardTile({
           </span>
         </div>
       )}
-      <div className="p-space-md flex flex-col gap-1">
+      <div className="p-space-md flex flex-col gap-1 transition-all duration-300 lg:group-hover:-translate-y-10">
         <p className="font-headline-sm text-headline-sm text-on-surface">{card.label}</p>
         {state.compiling && !state.compilation && (
           <p className="font-body-sm text-body-sm text-on-surface-variant">Compiling…</p>
@@ -306,7 +313,47 @@ function RankedCardTile({
           </>
         )}
       </div>
+      <span className="pointer-events-none flex w-full flex-row items-center gap-1 px-space-md pb-space-md font-label-md text-label-md text-primary lg:hidden">
+        Open list
+        <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+      </span>
+      <span className="pointer-events-none absolute bottom-0 hidden w-full translate-y-10 transform-gpu flex-row items-center gap-1 p-space-md font-label-md text-label-md text-primary opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 lg:flex">
+        Open list
+        <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+      </span>
     </button>
+  )
+}
+
+/**
+ * The ranked month/year cards as a Magic UI bento grid (§AT):
+ * 3 columns, content-sized rows; the newest card spans 2 columns
+ * on large screens, the rest span 1. Exported for tests.
+ */
+export function RankedCardsGrid({
+  cards,
+  cardStates,
+  onOpen,
+}: {
+  cards: RankedPeriodCard[]
+  cardStates: Record<string, CardState>
+  onOpen: (card: RankedPeriodCard) => void
+}) {
+  return (
+    <BentoGrid>
+      {cards.map((card, index) => (
+        <BentoCard
+          key={card.period}
+          className={index === 0 ? 'lg:col-span-2' : 'lg:col-span-1'}
+        >
+          <RankedCardTile
+            card={card}
+            state={cardStates[card.period] ?? { ...EMPTY_CARD_STATE }}
+            onOpen={() => onOpen(card)}
+          />
+        </BentoCard>
+      ))}
+    </BentoGrid>
   )
 }
 
@@ -808,18 +855,13 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-space-md">
-              {visibleCards.map((card) => (
-                <RankedCardTile
-                  key={card.period}
-                  card={card}
-                  state={cardStates[card.period] ?? { ...EMPTY_CARD_STATE }}
-                  onOpen={() =>
-                    navigate(`/collections/ranked/${mode}/${card.granularity}/${card.period}`)
-                  }
-                />
-              ))}
-            </div>
+            <RankedCardsGrid
+              cards={visibleCards}
+              cardStates={cardStates}
+              onOpen={(card) =>
+                navigate(`/collections/ranked/${mode}/${card.granularity}/${card.period}`)
+              }
+            />
           )}
         </>
       )}

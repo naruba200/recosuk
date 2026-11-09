@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth'
-import AppShell, { type ShellIdentity } from '../../components/AppShell'
+import AppShell, { ModePills, type ShellIdentity } from '../../components/AppShell'
 
 /**
  * §AO/§AQ — the profile menu, the header nav, and the mode rail.
@@ -119,23 +119,29 @@ describe('header nav + mode rail (§AQ items 3+12)', () => {
     expect(html).toContain('aria-label="Mode"')
     // Hidden = translated off-screen to the left.
     expect(html).toContain('-translate-x-full')
-    expect(html).not.toContain('translate-x-0')
+    // Scoped to the aside's own classes: the pill hover labels
+    // legitimately contain the substring `translate-x-0` inside
+    // their `group-hover:translate-x-0` variant (§AT).
+    const rail = classOf(html, 'aside', 'z-40')
+    expect(rail).not.toBeNull()
+    expect(rail?.split(' ') ?? []).not.toContain('translate-x-0')
     for (const mode of ['standard', 'taiko', 'catch', 'mania']) {
       expect(html).toContain(`title="osu!${mode}"`)
     }
   })
 
-  it('the nav spreads across the leftover space (flex-1 + justify-between)', () => {
+  it('the nav sizes to its content (no spread) and the right group pushes with ml-auto (§AT reverts §AR)', () => {
     const html = renderShell()
-    const nav = classOf(html, 'nav', 'flex-1')
+    const nav = classOf(html, 'nav', 'overflow-x-auto')
     expect(nav).not.toBeNull()
-    expect(nav).toContain('justify-between')
+    // The §AR spread is gone: no flex-1, no justify-between.
+    expect(nav).not.toContain('flex-1')
+    expect(nav).not.toContain('justify-between')
     // Narrow-screen safety stays: the nav can still scroll.
     expect(nav).toContain('min-w-0')
     expect(nav).toContain('overflow-x-auto')
-    // The right-side group no longer pushes itself with ml-auto —
-    // the growing nav does that job now.
-    expect(html).not.toContain('ml-auto')
+    // The right-side group pushes itself with ml-auto again.
+    expect(html).toContain('ml-auto')
   })
 
   it('the mode rail is transparent, vertically centred, and the pills are bigger', () => {
@@ -171,5 +177,39 @@ describe('header nav + mode rail (§AQ items 3+12)', () => {
   it('the touch-only mode toggle is in the header', () => {
     const html = renderShell()
     expect(html).toContain('Change mode')
+  })
+
+  it('vertical pills reveal their mode-name label on hover (§AT)', () => {
+    const html = renderShell()
+    // The rail renders the vertical pills; each carries its mode
+    // name in a label that slides + fades in on group-hover.
+    for (const label of ['osu!', 'Taiko', 'Catch', 'Mania']) {
+      expect(html).toContain(`>${label}<`)
+    }
+    expect(html).toContain('group-hover:opacity-100')
+    expect(html).toContain('group-hover:translate-x-0')
+    expect(html).toContain('opacity-0')
+    // The label is visual only — the title attribute stays.
+    expect(html).toContain('title="osu!standard"')
+  })
+
+  it('horizontal pills render no hover label (§AT)', () => {
+    const html = renderToStaticMarkup(<ModePills />)
+    expect(html).not.toContain('>osu!<')
+    expect(html).not.toContain('>Taiko<')
+    expect(html).not.toContain('>Catch<')
+    expect(html).not.toContain('>Mania<')
+  })
+
+  it('pills use a springy overshoot curve and the active pill breathes (§AT)', () => {
+    const html = renderShell()
+    // Springy scale on every pill (hover 1.15x / press 1.3x
+    // overshoot instead of moving linearly).
+    expect(html).toContain('transition-transform duration-300')
+    expect(html).toContain('[transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]')
+    expect(html).toContain('hover:scale-[1.15]')
+    expect(html).toContain('active:scale-[1.3]')
+    // Exactly one pill breathes: the active one (default mode osu).
+    expect(html.match(/animate-mode-pill-breathe/g) ?? []).toHaveLength(1)
   })
 })

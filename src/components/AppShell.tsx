@@ -45,7 +45,11 @@ const NAV: { path: string; icon: string; label: string }[] = [
  *
  * Pill animation (transform-only, no layout shift): hovering a
  * pill scales it up (~1.15x); pressing it scales it up more
- * (~1.3x); on release it settles back to the hover scale.
+ * (~1.3x); on release it settles back to the hover scale. The
+ * scale runs on a springy overshoot curve (§AT). The active pill
+ * gently breathes (a scale keyframe, `mode-pill-breathe` in
+ * index.css; off under prefers-reduced-motion). In the vertical
+ * rail each pill also reveals its mode name beside it on hover.
  * `onSelect` runs after a pick — the rail uses it to close
  * itself on touch screens.
  */
@@ -65,33 +69,42 @@ export function ModePills({
     >
       {GAME_MODES.map((m) => {
         const active = m === mode
+        // Rail hover label (§AT): "osu!" for Standard, the mode
+        // name for the rest. Visual only — the title stays.
+        const label = m === 'osu' ? 'osu!' : MODE_LABELS[m]
         return (
-          <button
-            key={m}
-            className="w-12 h-12 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-surface-container-highest hover:scale-[1.15] active:scale-[1.3] transition-all"
-            style={
-              active
-                ? {
-                    backgroundColor: MODE_ACCENTS[m],
-                    // Dark surface text on the bright mode accent:
-                    // follows the theme's surface token, not a
-                    // hardcoded stage hex (batch 11 theming audit).
-                    color: 'rgb(var(--c-surface-dim) / 1)',
-                    boxShadow: `0 0 14px ${MODE_ACCENTS[m]}73`,
-                  }
-                : undefined
-            }
-            title={`osu!${MODE_LABELS[m].toLowerCase()}`}
-            type="button"
-            onClick={() => {
-              setMode(m)
-              onSelect?.()
-            }}
-          >
-            <span className="font-headline-sm text-[16px] leading-none">
-              {MODE_PILL_LABELS[m]}
-            </span>
-          </button>
+          <div key={m} className="relative group">
+            <button
+              className={`w-12 h-12 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center hover:bg-surface-container-highest hover:scale-[1.15] active:scale-[1.3] transition-transform duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]${active ? ' animate-mode-pill-breathe' : ''}`}
+              style={
+                active
+                  ? {
+                      backgroundColor: MODE_ACCENTS[m],
+                      // Dark surface text on the bright mode accent:
+                      // follows the theme's surface token, not a
+                      // hardcoded stage hex (batch 11 theming audit).
+                      color: 'rgb(var(--c-surface-dim) / 1)',
+                      boxShadow: `0 0 14px ${MODE_ACCENTS[m]}73`,
+                    }
+                  : undefined
+              }
+              title={`osu!${MODE_LABELS[m].toLowerCase()}`}
+              type="button"
+              onClick={() => {
+                setMode(m)
+                onSelect?.()
+              }}
+            >
+              <span className="font-headline-sm text-[16px] leading-none">
+                {MODE_PILL_LABELS[m]}
+              </span>
+            </button>
+            {vertical && (
+              <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 translate-x-1 whitespace-nowrap rounded-full bg-surface-container-high px-2.5 py-1 font-label-md text-label-md text-on-surface opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100">
+                {label}
+              </span>
+            )}
+          </div>
         )
       })}
     </div>
@@ -319,7 +332,7 @@ export default function AppShell({
             <span className="font-label-sm text-label-sm text-on-surface-variant">rhythm companion</span>
           </div>
         </NavLink>
-        <nav className="flex flex-1 items-center justify-between gap-1 min-w-0 overflow-x-auto" aria-label="Main">
+        <nav className="flex items-center gap-1 min-w-0 overflow-x-auto" aria-label="Main">
           {NAV.map((item) => (
             <NavLink
               key={item.path}
@@ -337,7 +350,7 @@ export default function AppShell({
             </NavLink>
           ))}
         </nav>
-        <div className="flex items-center gap-space-md flex-shrink-0">
+        <div className="flex items-center gap-space-md ml-auto flex-shrink-0">
           <NavLink
             to="/download"
             title="Get the RecOsuk app"
