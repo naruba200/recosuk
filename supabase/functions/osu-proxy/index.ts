@@ -498,8 +498,7 @@ function requireRefreshEnv(): { supabaseUrl: string; serviceRoleKey: string } {
   if (!supabaseUrl) throw new ProxyError('osu-proxy is not configured (missing SUPABASE_URL)', 500)
   if (!serviceRoleKey) {
     throw new ProxyError(
-      'osu-proxy is not configured (missing SUPABASE_SERVICE_ROLE_KEY). ' +
-        'Set it with: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...',
+      'osu-proxy is not configured (missing SUPABASE_SERVICE_ROLE_KEY — Supabase injects this key automatically).',
       500,
     )
   }
@@ -816,8 +815,7 @@ function requireUserAuthEnv(): UserAuthEnv {
   if (!anonKey) throw new ProxyError('osu-proxy is not configured (missing SUPABASE_ANON_KEY)', 500)
   if (!serviceRoleKey) {
     throw new ProxyError(
-      'osu-proxy is not configured (missing SUPABASE_SERVICE_ROLE_KEY). ' +
-        'Set it with: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=... (see docs/OSU-SIGNIN.md)',
+      'osu-proxy is not configured (missing SUPABASE_SERVICE_ROLE_KEY — Supabase injects this key automatically).',
       500,
     )
   }
@@ -936,8 +934,7 @@ function serviceClientFor(env: ProxyEnv): SupabaseClient | null {
     if (!warnedMissingServiceRole) {
       warnedMissingServiceRole = true
       console.warn(
-        '[RecOsuk proxy] SUPABASE_SERVICE_ROLE_KEY is not set — DB cache + rate limit are off (in-memory cache only). ' +
-          'Set it with: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...',
+        '[RecOsuk proxy] SUPABASE_SERVICE_ROLE_KEY is not set — DB cache + rate limit are off (in-memory cache only).',
       )
     }
     return null
