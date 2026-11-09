@@ -327,8 +327,9 @@ function RankedCardTile({
 
 /**
  * The ranked month/year cards as a Magic UI bento grid (§AT):
- * 3 columns, content-sized rows; the newest card spans 2 columns
- * on large screens, the rest span 1. Exported for tests.
+ * every card the same size — 1 column on phones, 2 on small
+ * screens, 4 on desktop, so a month's 4 cards sit in one row.
+ * Content-sized rows. Exported for tests.
  */
 export function RankedCardsGrid({
   cards,
@@ -340,12 +341,9 @@ export function RankedCardsGrid({
   onOpen: (card: RankedPeriodCard) => void
 }) {
   return (
-    <BentoGrid>
-      {cards.map((card, index) => (
-        <BentoCard
-          key={card.period}
-          className={index === 0 ? 'lg:col-span-2' : 'lg:col-span-1'}
-        >
+    <BentoGrid className="grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+      {cards.map((card) => (
+        <BentoCard key={card.period} className="col-span-1">
           <RankedCardTile
             card={card}
             state={cardStates[card.period] ?? { ...EMPTY_CARD_STATE }}

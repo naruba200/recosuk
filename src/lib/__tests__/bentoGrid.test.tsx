@@ -86,27 +86,28 @@ function renderGrid() {
 }
 
 describe('ranked bento grid (§AT)', () => {
-  it('renders a 3-column grid with content-sized rows', () => {
+  it('renders a uniform grid: 1 col on phones, 2 on sm, 4 on xl', () => {
     const html = renderGrid()
-    const grid = classOf(html, 'div', 'grid-cols-3')
+    const grid = classOf(html, 'div', 'grid-cols-1')
     expect(grid).not.toBeNull()
     expect(grid).toContain('grid')
     expect(grid).toContain('w-full')
-    // Content-sized rows: no fixed 22rem rows from upstream.
+    expect(grid).toContain('sm:grid-cols-2')
+    expect(grid).toContain('xl:grid-cols-4')
+    // No 3-column base from upstream, no fixed 22rem rows.
+    expect(grid).not.toContain('grid-cols-3')
     expect(grid).not.toContain('auto-rows-[22rem]')
   })
 
-  it('the newest card spans 2 columns on lg, the rest span 1', () => {
+  it('every card is the same size: one column at every width', () => {
     const html = renderGrid()
     const shells = cardShells(html)
     expect(shells).toHaveLength(4)
-    expect(shells[0]).toContain('lg:col-span-2')
-    for (const shell of shells.slice(1)) {
-      expect(shell).toContain('lg:col-span-1')
+    for (const shell of shells) {
+      expect(shell).toContain('col-span-1')
+      expect(shell).not.toContain('col-span-3')
       expect(shell).not.toContain('lg:col-span-2')
     }
-    // Mobile: every card is full width.
-    for (const shell of shells) expect(shell).toContain('col-span-3')
   })
 
   it('tile content is unchanged: label, count, #1 map, cover, CTA', () => {
