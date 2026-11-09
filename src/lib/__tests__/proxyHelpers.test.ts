@@ -10,6 +10,7 @@ import {
   FEEDBACK_NEW_PER_HOUR,
   LIST_MAX_ITEMS,
   RATE_LIMIT_GUEST_PER_MIN,
+  RATE_LIMIT_OWNER_PER_MIN,
   RATE_LIMIT_USER_PER_MIN,
   RATE_LIMIT_WINDOW_SECONDS,
   SNAPSHOT_THROTTLE_MS,
@@ -20,6 +21,7 @@ import {
   isWithinThrottleWindow,
   parseAllowedOrigins,
   rateLimitForCaller,
+  rateLimitForUser,
   rateLimitKeyForGuest,
   rateLimitKeyForUser,
   sha256Hex,
@@ -47,6 +49,35 @@ describe('rate limits (batch AP item 2a)', () => {
     )
     expect(formatRateLimitMessage(10, 1)).toContain('Try again in 1 second.')
     expect(formatRateLimitMessage(60, 0)).not.toContain('Try again')
+  })
+})
+
+describe('owner high cap (batch AW)', () => {
+  const OWNER = '11111111-1111-1111-1111-111111111111'
+  const OTHER_USER = '22222222-2222-2222-2222-222222222222'
+
+  it('caps the owner at 600/min', () => {
+    expect(RATE_LIMIT_OWNER_PER_MIN).toBe(600)
+    expect(rateLimitForUser(OWNER, OWNER)).toBe(600)
+  })
+
+  it('keeps every other signed-in user at 60/min', () => {
+    expect(rateLimitForUser(OTHER_USER, OWNER)).toBe(60)
+    expect(rateLimitForUser(OWNER, OTHER_USER)).toBe(60)
+  })
+
+  it('never exempts anyone when the owner id is unset or empty', () => {
+    expect(rateLimitForUser(OWNER, undefined)).toBe(60)
+    expect(rateLimitForUser(OWNER, '')).toBe(60)
+    expect(rateLimitForUser(OTHER_USER, undefined)).toBe(60)
+  })
+
+  it('keeps guests at 10/min', () => {
+    expect(rateLimitForCaller('guest')).toBe(10)
+  })
+
+  it('quotes the real limit in the 429 message — 600 for the owner', () => {
+    expect(formatRateLimitMessage(600, 5)).toContain('600-calls-a-minute')
   })
 })
 

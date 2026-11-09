@@ -13,19 +13,31 @@
 // index.ts, which calls it through the service-role client.
 
 // ---------------------------------------------------------------------------
-// Rate limits (batch AP item 2a): 60/min per signed-in user, 10/min
-// per guest IP. The owner is NOT exempt — same 60/min as any
-// signed-in user (the owner high-cap was the hypothetical part and
-// stays out). Window is a rolling 60 seconds, enforced atomically
-// by the check_proxy_rate_limit() SQL function (migration 004).
+// Rate limits (batch AP item 2a, owner cap batch AW): 60/min per
+// signed-in user, 10/min per guest IP, 600/min for the owner — the
+// Supabase user UUID in the OWNER_USER_ID function secret. Window
+// is a rolling 60 seconds, enforced atomically by the
+// check_proxy_rate_limit() SQL function (migration 004), which
+// takes the limit as a parameter, so the numbers live here only.
 // ---------------------------------------------------------------------------
 
 export const RATE_LIMIT_USER_PER_MIN = 60
 export const RATE_LIMIT_GUEST_PER_MIN = 10
+export const RATE_LIMIT_OWNER_PER_MIN = 600
 export const RATE_LIMIT_WINDOW_SECONDS = 60
 
 export function rateLimitForCaller(kind: 'user' | 'guest'): number {
   return kind === 'user' ? RATE_LIMIT_USER_PER_MIN : RATE_LIMIT_GUEST_PER_MIN
+}
+
+/** Per-user limit (batch AW): the owner — `ownerUserId` from the
+ *  OWNER_USER_ID secret — gets 600/min; every other signed-in
+ *  user gets 60/min. An unset or empty owner id never matches, so
+ *  the exemption can never turn on by accident. */
+export function rateLimitForUser(userId: string, ownerUserId: string | undefined): number {
+  return ownerUserId !== undefined && ownerUserId !== '' && userId === ownerUserId
+    ? RATE_LIMIT_OWNER_PER_MIN
+    : RATE_LIMIT_USER_PER_MIN
 }
 
 export function rateLimitKeyForUser(userId: string): string {

@@ -53,6 +53,7 @@ import {
   isAllowedOrigin,
   parseAllowedOrigins,
   rateLimitForCaller,
+  rateLimitForUser,
   rateLimitKeyForGuest,
   rateLimitKeyForUser,
   sha256Hex,
@@ -1026,7 +1027,14 @@ async function checkProxyRateLimit(
   if (ctx.callerKind === 'service') {
     return { allowed: true, retryAfterSeconds: 0, key: 'service', limit: RATE_LIMIT_USER_PER_MIN }
   }
-  const limit = rateLimitForCaller(ctx.callerKind)
+  // Batch AW: the owner (OWNER_USER_ID secret, read here like
+  // RANKED_REFRESH_TOKEN) rides the 600/min cap; every other
+  // signed-in user stays at 60/min, guests at 10/min. An unset or
+  // empty secret means no exemption — fail-safe, never a bypass.
+  const limit =
+    ctx.callerKind === 'user'
+      ? rateLimitForUser(ctx.userId ?? 'unknown', Deno.env.get('OWNER_USER_ID'))
+      : rateLimitForCaller(ctx.callerKind)
   let key: string
   if (ctx.callerKind === 'user') {
     key = rateLimitKeyForUser(ctx.userId ?? 'unknown')
