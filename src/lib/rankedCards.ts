@@ -235,7 +235,7 @@ function asStoredRow(row: unknown): StoredRankedCompilation | null {
   }
 }
 
-/** Read one stored card. Null client (demo/unconfigured) or a
+/** Read one stored card. Null client (unconfigured) or a
  *  missing/malformed row reads as "not stored" — never an error. */
 export async function loadStoredCompilation(
   client: SupabaseClient | null,

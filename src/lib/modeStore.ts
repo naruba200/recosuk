@@ -47,8 +47,8 @@ function writeStoredMode(mode: GameMode): void {
  * Initial mode resolution order (PLAN-v2 §2.2 + build brief):
  *   1. an explicitly stored choice (recosuk-mode)
  *   2. the guest session's selected mode / playmode
- *   3. 'mania' — the demo persona's main, and the most sensible default
- *      for an unlinked first run of this app.
+ *   3. 'mania' — the most sensible default for an unlinked first
+ *      run of this app.
  * Account profiles are applied later by profileService via
  * `initMode()` once the profiles row has been read (and only when the
  * user hasn't already picked a mode this session).

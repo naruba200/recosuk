@@ -11,8 +11,8 @@ const TAB_ACTIVE =
 const TAB_INACTIVE =
   'py-2.5 px-4 rounded-full font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-all flex items-center justify-center gap-2 cursor-pointer'
 
-const DEMO_NOTICE =
-  "Demo mode — Supabase isn't connected yet, so accounts can't be created or signed in. Connect it with docs/M1-SETUP.md, then try again."
+const NOT_CONFIGURED_NOTICE =
+  "Accounts aren't available right now — Supabase isn't connected, so accounts can't be created or signed in. Connect it with docs/M1-SETUP.md, then try again."
 
 export default function Auth() {
   const navigate = useNavigate()
@@ -84,7 +84,7 @@ export default function Auth() {
     stop(e)
     if (busy) return
     if (!configured) {
-      setNotice({ kind: 'error', text: DEMO_NOTICE })
+      setNotice({ kind: 'error', text: NOT_CONFIGURED_NOTICE })
       return
     }
     setBusy(true)
@@ -93,7 +93,7 @@ export default function Auth() {
     if (error) {
       setNotice({
         kind: 'error',
-        text: error === NOT_CONFIGURED ? DEMO_NOTICE : error,
+        text: error === NOT_CONFIGURED ? NOT_CONFIGURED_NOTICE : error,
       })
     }
   }
@@ -102,7 +102,7 @@ export default function Auth() {
     e.preventDefault()
     if (busy) return
     if (!configured) {
-      setNotice({ kind: 'error', text: DEMO_NOTICE })
+      setNotice({ kind: 'error', text: NOT_CONFIGURED_NOTICE })
       return
     }
     // The button is never input-disabled (QA batch 2: it read as
@@ -123,7 +123,7 @@ export default function Auth() {
     if (error) {
       setNotice({
         kind: 'error',
-        text: error === NOT_CONFIGURED ? DEMO_NOTICE : error,
+        text: error === NOT_CONFIGURED ? NOT_CONFIGURED_NOTICE : error,
       })
       return
     }
@@ -137,7 +137,7 @@ export default function Auth() {
     e.preventDefault()
     if (busy) return
     if (!configured) {
-      setNotice({ kind: 'error', text: DEMO_NOTICE })
+      setNotice({ kind: 'error', text: NOT_CONFIGURED_NOTICE })
       return
     }
     setBusy(true)
@@ -147,7 +147,7 @@ export default function Auth() {
     if (error) {
       setNotice({
         kind: 'error',
-        text: error === NOT_CONFIGURED ? DEMO_NOTICE : error,
+        text: error === NOT_CONFIGURED ? NOT_CONFIGURED_NOTICE : error,
       })
       return
     }

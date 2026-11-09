@@ -20,14 +20,14 @@ import type { AuthTier } from './capabilities'
  *        'guest'   when only a guest osu! link exists (local store);
  *        'none'    otherwise.
  *
- * When Supabase is not configured the app is in demo mode: there is never
- * a user, and signUp/signIn resolve with { error: 'not-configured' }
- * instead of throwing.
+ * When Supabase is not configured there is never a user, and
+ * signUp/signIn resolve with { error: 'not-configured' } instead
+ * of throwing.
  */
 export const NOT_CONFIGURED = 'not-configured' as const
 
 export interface AuthResult {
-  /** null on success; 'not-configured' in demo mode; otherwise a message. */
+  /** null on success; 'not-configured' when Supabase is unconfigured; otherwise a message. */
   error: typeof NOT_CONFIGURED | string | null
 }
 

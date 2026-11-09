@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import ExampleBlock from '../components/ExampleBlock'
 import LoadingState from '../components/LoadingState'
 import BeatmapRow from '../components/BeatmapRow'
 import LockedButton from '../components/LockedButton'
@@ -73,49 +72,6 @@ import {
  * on, each set is ALSO written into their picked Songs folder.
  * Without it, downloads are browser-only, exactly like Beatmaps.
  */
-
-const SAMPLE_PACKS: { name: string; tag: string; sets: number }[] = [
-  { name: 'Standard Beatmap Pack (example)', tag: 'standard-example', sets: 42 },
-  { name: 'Featured Beatmap Pack (example)', tag: 'featured-example', sets: 187 },
-  { name: 'Tournament Beatmap Pack (example)', tag: 'tournament-example', sets: 1240 },
-]
-
-function SamplePacks() {
-  return (
-    <ExampleBlock note="Example packs — sample entries showing the layout, not real packs.">
-      <div className="flex flex-col gap-3">
-        {SAMPLE_PACKS.map((pack) => (
-          <article
-            key={pack.tag}
-            className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md p-space-md bg-surface-container-low rounded-lg shadow-sm"
-          >
-            <div className="flex flex-col min-w-0">
-              <span className="font-headline-sm text-headline-sm text-on-surface truncate">{pack.name}</span>
-              <span className="font-body-sm text-body-sm text-on-surface-variant">
-                Example pack · {pack.sets} beatmapsets
-              </span>
-            </div>
-            <button
-              className="px-space-md py-2 rounded-full bg-surface-container-high text-on-surface-variant font-label-md text-label-md flex-shrink-0"
-              type="button"
-              disabled
-            >
-              Download (example)
-            </button>
-          </article>
-        ))}
-      </div>
-    </ExampleBlock>
-  )
-}
-
-interface DownloadProgress {
-  active: boolean
-  done: number
-  total: number
-  copied: number
-  label: string
-}
 
 /** Cap on expanded pack contents rendered at once: yearly packs
  * can hold 1000+ sets, and rendering every row would jank the
@@ -871,6 +827,16 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   )
 }
 
+/** Bulk pack-download progress (local shape: counts of sets, not
+ *  bytes — downloadQueue's DownloadProgress is per-row byte counts). */
+interface PackDownloadProgress {
+  active: boolean
+  done: number
+  total: number
+  copied: number
+  label: string
+}
+
 function CollectionsReal() {
   const { tier } = useAuth()
   const guestSession = useGuestStore((s) => s.session)
@@ -880,7 +846,7 @@ function CollectionsReal() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [packErrors, setPackErrors] = useState<Record<string, string>>({})
-  const [progress, setProgress] = useState<DownloadProgress | null>(null)
+  const [progress, setProgress] = useState<PackDownloadProgress | null>(null)
   const [visibleCount, setVisibleCount] = useState(PACKS_PAGE_SIZE)
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [detailLoadingTag, setDetailLoadingTag] = useState<string | null>(null)
@@ -1249,7 +1215,16 @@ function CollectionsReal() {
 
       {error && !loading && (
         <div className="mt-space-md">
-          <SamplePacks />
+          <div className="p-space-md rounded-lg bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-space-md">
+            <p className="font-body-sm text-body-sm text-error">{error}</p>
+            <button
+              className="px-space-md py-2 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md flex-shrink-0"
+              type="button"
+              onClick={() => void load(true, packType)}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -1273,9 +1248,7 @@ export default function Collections() {
           <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Collections</h1>
           <p className="font-body-md text-body-md text-on-surface-variant">
             Real beatmap packs load once the osu! proxy is connected (see docs/M1-SETUP.md).
-            Until then, here is how the page looks:
           </p>
-          <SamplePacks />
         </div>
       </AppShell>
     )

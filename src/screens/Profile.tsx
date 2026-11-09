@@ -4,19 +4,20 @@ import { useAuth } from '../lib/auth'
 import { MODE_LABELS } from '../lib/mode'
 import { useModeStore } from '../lib/modeStore'
 import { useProfileData } from '../lib/profileService'
-import { DashboardDemoContent, DashboardReal, DEMO_IDENTITY } from './Dashboard'
-import { StatsDemoContent, StatsReal } from './Stats'
+import LoadErrorPanel from '../components/LoadErrorPanel'
+import { DashboardReal } from './Dashboard'
+import { StatsReal } from './Stats'
 
 /**
  * Profile (§AN): Dashboard + Stats merged on one page — the
  * Dashboard sections on top, the Stats sections below. Same
- * real data, same loading states, no redesign; the demo state
- * shows both demos' sample content under one shell.
+ * real data, same loading states, no redesign; a failed load
+ * shows an honest error panel with Retry, never sample data.
  */
 export default function Profile() {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
-  const { status, data, identity, refresh } = useProfileData(mode)
+  const { status, data, error, identity, refresh } = useProfileData(mode)
 
   if (status === 'loading') {
     return (
@@ -32,12 +33,21 @@ export default function Profile() {
     )
   }
 
-  if (status === 'demo' || status === 'error' || !data) {
+  if (status === 'error' || !data) {
     return (
-      <AppShell identity={DEMO_IDENTITY}>
+      <AppShell
+        identity={{
+          username: identity?.username ?? 'No linked profile',
+          pp: null,
+          tierLabel: tier === 'account' ? 'account' : tier === 'guest' ? 'guest' : 'free tier',
+        }}
+      >
         <div className="flex flex-col w-full gap-space-xl">
-          <DashboardDemoContent />
-          <StatsDemoContent />
+          <LoadErrorPanel
+            message={error}
+            onRetry={refresh}
+            noProfile={!identity?.username}
+          />
         </div>
       </AppShell>
     )

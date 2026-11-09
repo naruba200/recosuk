@@ -2,8 +2,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 /**
  * Supabase client — created only when the VITE_ env vars are present.
- * When they are absent the app runs in demo mode: `supabase` is null,
- * `isSupabaseConfigured` is false, and nothing may crash.
+ * When they are absent `supabase` is null, `isSupabaseConfigured`
+ * is false, and nothing may crash.
  * (Setup: see docs/M1-SETUP.md. The anon key is public-safe; the
  * service-role key and the osu! client secret never go in frontend env.)
  */

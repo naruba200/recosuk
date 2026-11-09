@@ -293,7 +293,7 @@ export interface ValidatedOsuUser {
 /**
  * Validate an osu! username for the link flow (both tiers use this).
  * Returns the user id + playmode on success, or a typed error:
- * 'not-configured' (demo mode), 'not-found' (no such osu! user), or
+ * 'not-configured' (proxy not configured), 'not-found' (no such osu! user), or
  * 'upstream' (proxy/osu! failure).
  */
 export async function validateOsuUsername(

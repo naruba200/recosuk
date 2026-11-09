@@ -12,7 +12,7 @@ export default function LinkOsu() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const linkGuest = useGuestStore((s) => s.linkGuest)
-  // Starts empty: the Stitch export pre-filled the demo username here.
+  // Starts empty: no pre-filled username (the Stitch export shipped one).
   const [username, setUsername] = useState('')
   const [selectedMode, setSelectedMode] = useState<GameMode>('mania')
   const [autoDetect, setAutoDetect] = useState(true)
@@ -23,8 +23,8 @@ export default function LinkOsu() {
    * Validate the entered username against osu! (when the proxy is
    * configured) and resolve which mode the link should use.
    * Returns null when blocked — `status` explains why, no navigation.
-   * In demo mode (proxy not configured) the entered name is accepted
-   * as-is and the Generating screen falls back to the demo profile.
+   * When the proxy is not configured the entered name is accepted
+   * as-is — it can't be checked against osu! yet.
    */
   async function resolveLink(): Promise<{
     osuUserId: number | null
@@ -77,7 +77,7 @@ export default function LinkOsu() {
         }),
       )
     } catch {
-      /* storage unavailable — Generating falls back to demo data */
+      /* storage unavailable — the link is lost; Generating will ask to link again */
     }
     navigate('/onboarding/generating')
   }
@@ -289,7 +289,7 @@ export default function LinkOsu() {
             )}
             {!isProxyConfigured && !status && (
               <p className="relative z-10 mt-4 text-left font-body-sm text-body-sm text-on-surface-variant">
-                Demo mode — Supabase isn't connected yet, so usernames aren't checked against osu! and the demo profile is used.
+                Supabase isn't connected yet, so usernames can't be checked against osu!.
               </p>
             )}
           </div>
@@ -351,7 +351,7 @@ export default function LinkOsu() {
         <div className="text-left">
           <span className="text-xs text-[#A59AB5] block">Ready for player
           </span>
-          <span className="text-xs font-bold text-[#F5F1FA]">sora_playz (5,284 pp)
+          <span className="text-xs font-bold text-[#F5F1FA]">No player linked yet
           </span>
         </div>
       </div>

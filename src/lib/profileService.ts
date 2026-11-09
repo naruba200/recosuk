@@ -57,8 +57,8 @@ export function seedPlayedSets(key: string, data: ProfileData | null | undefined
  *             writes are best-effort — a failed write never breaks UI)
  *
  * Screens consume `useProfileData(mode)`. With no linked identity or no
- * proxy configured the status is 'demo' and screens render the Stitch
- * demo content instead.
+ * proxy configured the status is 'empty' and screens render an honest
+ * empty state instead.
  */
 
 export interface ProfileData {
@@ -69,7 +69,7 @@ export interface ProfileData {
   skillProfile: SkillProfile
 }
 
-export type ProfileStatus = 'demo' | 'loading' | 'ready' | 'empty' | 'error'
+export type ProfileStatus = 'loading' | 'ready' | 'empty' | 'error'
 
 export interface Identity {
   username: string
@@ -614,12 +614,12 @@ export function useProfileData(mode: GameMode): UseProfileData {
 
   useEffect(() => {
     if (!isProxyConfigured || !username) {
-      // Still waiting on auth/account-row resolution is not "demo".
+      // Still waiting on auth/account-row resolution is not "empty".
       if (authLoading || (user && !accountRow && !pending?.osuUsername)) {
         setStatus('loading')
         return
       }
-      setStatus('demo')
+      setStatus('empty')
       setData(null)
       return
     }

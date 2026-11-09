@@ -2,7 +2,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import ExampleBlock from '../components/ExampleBlock'
 import MenuSelect from '../components/MenuSelect'
 import OsuConnectionRow from '../components/OsuConnectionRow'
 import { useAuth } from '../lib/auth'
@@ -111,7 +110,7 @@ export default function Settings() {
                         : 'No account linked'}
                   </span>
                   <span className="px-2 py-0.5 rounded-full bg-secondary/20 text-secondary font-label-sm text-[10px] uppercase font-bold tracking-wider">
-                    {tier === 'account' ? 'Account' : tier === 'guest' ? 'Unverified' : 'Demo'}
+                    {tier === 'account' ? 'Account' : tier === 'guest' ? 'Unverified' : 'Not signed in'}
                   </span>
                 </div>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
@@ -120,7 +119,7 @@ export default function Settings() {
                   ) : tier === 'guest' ? (
                     <>You&apos;re browsing as a guest linked to <strong className="text-on-surface font-semibold">{guestSession?.osuUsername}</strong>. Create an account to permanently sync recommendations and lists.</>
                   ) : (
-                    <>Nothing is linked yet — sign in or link an osu! username to see your own data instead of the demo.</>
+                    <>Nothing is linked yet — sign in or link an osu! username to see your own data.</>
                   )}
                 </p>
               </div>
@@ -249,7 +248,7 @@ export default function Settings() {
                         ? 'Account data (snapshots, lists, ratings) syncs to Supabase'
                         : tier === 'guest'
                           ? 'Local browser storage keeps this session until cache is cleared'
-                          : 'Browsing the demo — link an account to keep anything'}
+                          : 'Nothing is saved yet — link an account to keep anything'}
                     </span>
                   </div>
                   <div className="flex items-center gap-space-sm">
@@ -261,7 +260,7 @@ export default function Settings() {
                           ? `Account Tier • ${MODE_LABELS[mode]} mode`
                           : tier === 'guest'
                             ? 'Guest Tier • Session Data Temporary'
-                            : 'No session • Demo data'}
+                            : 'No session'}
                       </span>
                     </div>
                   </div>
@@ -284,8 +283,7 @@ export default function Settings() {
               </div>
             </div>
             {/* SECTION 2: DOWNLOAD OPTIONS — live preferences (QA
-                batch 2). Kept separate from the ExampleBlock sample
-                settings below: these switches change behaviour. */}
+                batch 2): these switches change behaviour. */}
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
                 <div className="flex items-center gap-2.5">
@@ -452,90 +450,6 @@ export default function Settings() {
               </div>
               </div>
             </div>
-            {/* SECTION 3: DOWNLOADS & CLIENT SYNC */}
-            <div className="flex flex-col">
-              <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_rgb(var(--c-tertiary)_/_0.7)]">
-                  </span>
-                  <span className="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wider text-[14px]">Downloads & Client Sync
-                  </span>
-                </div>
-                <span className="font-label-sm text-label-sm text-on-surface-variant">Sample settings and local game paths
-                </span>
-              </div>
-              {/* Sample settings: folder path, slots and the
-                  sample toggles are illustration, not wired-up
-                  preferences. The live Mirror Route Priority
-                  control lives in Download options above. */}
-              <ExampleBlock note="Example settings — these download options don't change behaviour yet.">
-              <div className="flex flex-col divide-y divide-surface-container-highest/60">
-                {/* Row: Download Folder Path */}
-                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
-                  <div className="flex flex-col">
-                    <span className="font-label-md text-label-md text-on-surface">Beatmap Download Destination
-                    </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Default staging directory for unpacked and packed .osz files
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-space-sm">
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-DEFAULT bg-surface-container font-mono text-[13px] text-primary-fixed-dim tracking-tight shadow-inner">
-                      <span className="material-symbols-outlined text-[16px] text-outline">folder
-                      </span>
-                      <span id="folderPathDisplay">D:\osu downloads
-                      </span>
-                    </div>
-                    <button className="px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-primary hover:text-on-primary text-on-surface transition-all font-label-md text-label-md" type="button">{' '}Change folder{' '}
-                    </button>
-                  </div>
-                </div>
-                {/* Row: Copy to osu! Songs folder */}
-                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
-                  <div className="flex flex-col max-w-xl">
-                    <span className="font-label-md text-label-md text-on-surface">Auto-copy into osu! Songs directory
-                    </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Automatically extracts .osz beatmapsets into your game directory for immediate in-game access.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-label-sm text-label-sm text-on-surface-variant" id="toggleStateLabel">Disabled
-                    </span>
-                    <button aria-pressed="false" className="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full bg-surface-container-highest transition-colors duration-200 ease-in-out focus:outline-none" id="songsToggle" type="button">
-                      <span className="translate-x-1 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-outline-variant shadow transition duration-200 ease-in-out my-1" id="toggleKnob">
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                {/* Row: Concurrent downloads limit */}
-                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
-                  <div className="flex flex-col">
-                    <span className="font-label-md text-label-md text-on-surface">Concurrent Download Slots
-                    </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Limits bandwidth pressure and avoids mirror IP throttling
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-space-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="font-headline-sm text-[16px] text-tertiary font-bold">2 parallel active slots
-                      </span>
-                      <span className="text-on-surface-variant text-body-sm">(Max recommended: 4)
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 ml-2">
-                      <button className="w-8 h-8 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface flex items-center justify-center transition-colors" type="button">
-                        <span className="material-symbols-outlined text-[18px]">remove
-                        </span>
-                      </button>
-                      <button className="w-8 h-8 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface flex items-center justify-center transition-colors" type="button">
-                        <span className="material-symbols-outlined text-[18px]">add
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              </ExampleBlock>
-            </div>
             {/* SECTION 3: APP & CLIENT PREFERENCES */}
             <div className="flex flex-col">
               <div className="flex items-center justify-between pb-3 bg-gradient-to-r from-transparent via-outline-variant/10 to-transparent">
@@ -661,27 +575,6 @@ export default function Settings() {
                     </button>
                   </div>
                 </div>
-                {/* Row: Cache & Local Database — sample values, not a real measurement. */}
-                <ExampleBlock note="Example — the cache size shown here is a placeholder, not a real measurement.">
-                <div className="py-space-md flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm group hover:bg-surface-container-low/40 px-2 rounded-DEFAULT transition-colors">
-                  <div className="flex flex-col">
-                    <span className="font-label-md text-label-md text-on-surface">Local Audio & Cover Cache
-                    </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Cached mp3 audio previews, background thumbnails, and offline mirror indices
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-label-sm text-label-sm text-outline">128 MB stored
-                    </span>
-                    <button className="px-space-md py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface hover:text-error transition-colors font-label-md text-label-md flex items-center gap-1.5" id="clearCacheBtn" type="button">
-                      <span className="material-symbols-outlined text-[16px]">cleaning_services
-                      </span>
-                      <span>Clear beatmap preview cache (128 MB)
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                </ExampleBlock>
               </div>
             </div>
             {/* SECTION 4: DANGER ZONE */}

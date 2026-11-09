@@ -3,17 +3,18 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth'
 import RecFiltersPanel from '../../components/RecFiltersPanel'
-import { RecommendationsDemo } from '../../screens/Recommendations'
-import { RecommendationsUnlimitedDemo } from '../../screens/RecommendationsUnlimited'
+import { RecommendationsReal } from '../../screens/Recommendations'
+import { FeedReal } from '../../screens/RecommendationsUnlimited'
+import type { ProfileData } from '../profileService'
 import type { RecFilters } from '../recommend'
 import type { SkillProfile } from '../skillProfile'
 
 /**
  * §AL — the Recommendations filter rail scrolls inside its own box,
  * separate from the list (which keeps window scroll). The rail is
- * rendered three times: once as the shared RecFiltersPanel (used by
- * both Real views) and once inline in each Demo. All three asides
- * must carry the same independent-scroll classes.
+ * the shared RecFiltersPanel, rendered by both Real views
+ * (RecommendationsReal + FeedReal); the aside must carry the same
+ * independent-scroll classes in both.
  */
 
 // Independent-scroll rule (§AL): sticky offset top-20 (5rem) + 1rem
@@ -27,9 +28,9 @@ const SCROLL_CLASSES = [
 ]
 
 function tagClass(html: string, tag: 'aside' | 'main', mustContain: string): string {
-  // The demo renders inside AppShell, whose sidebar is an <aside> and
-  // whose content wrapper is a <main> — pick the grid column by its
-  // distinguishing class instead of assuming a single tag.
+  // The Real views render inside a grid whose sidebar is an <aside>
+  // and whose content wrapper is a <main> — pick the grid column by
+  // its distinguishing class instead of assuming a single tag.
   const matches = [...html.matchAll(new RegExp(`<${tag} class="([^"]*)"`, 'g'))]
     .map((m) => m[1])
     .filter((cls) => cls.split(' ').includes(mustContain))
@@ -86,6 +87,14 @@ const profile: SkillProfile = {
   generatedAt: '2026-11-04T00:00:00.000Z',
 }
 
+const data: ProfileData = {
+  user: { id: 1, username: 'test', playmode: 'osu' },
+  topPlays: [],
+  recentPlays: [],
+  mostPlayed: [],
+  skillProfile: profile,
+}
+
 describe('§AL filter rail independent scroll', () => {
   it('RecFiltersPanel aside scrolls in its own box (both Real views)', () => {
     const html = renderToStaticMarkup(
@@ -101,23 +110,38 @@ describe('§AL filter rail independent scroll', () => {
     expectIndependentScroll(tagClass(html, 'aside', 'lg:col-span-4'))
   })
 
-  it('RecommendationsDemo aside scrolls in its own box', () => {
-    // The demo renders NavLinks, so it needs a Router context.
+  it('RecommendationsReal aside scrolls in its own box', () => {
     const html = renderToStaticMarkup(
       <AuthProvider>
         <MemoryRouter>
-          <RecommendationsDemo />
+          <RecommendationsReal
+            data={data}
+            filters={draft}
+            draft={draft}
+            onFiltersChange={() => {}}
+            onDraftChange={() => {}}
+            resumeRef={{ current: null }}
+            active
+          />
         </MemoryRouter>
       </AuthProvider>,
     )
     expectIndependentScroll(tagClass(html, 'aside', 'lg:col-span-4'))
   })
 
-  it('RecommendationsUnlimitedDemo aside scrolls in its own box', () => {
+  it('FeedReal aside scrolls in its own box', () => {
     const html = renderToStaticMarkup(
       <AuthProvider>
         <MemoryRouter>
-          <RecommendationsUnlimitedDemo />
+          <FeedReal
+            data={data}
+            filters={draft}
+            draft={draft}
+            onFiltersChange={() => {}}
+            onDraftChange={() => {}}
+            active
+            renderBackToTop={false}
+          />
         </MemoryRouter>
       </AuthProvider>,
     )
@@ -129,14 +153,30 @@ describe('§AL filter rail independent scroll', () => {
       renderToStaticMarkup(
         <AuthProvider>
           <MemoryRouter>
-            <RecommendationsDemo />
+            <RecommendationsReal
+              data={data}
+              filters={draft}
+              draft={draft}
+              onFiltersChange={() => {}}
+              onDraftChange={() => {}}
+              resumeRef={{ current: null }}
+              active
+            />
           </MemoryRouter>
         </AuthProvider>,
       ),
       renderToStaticMarkup(
         <AuthProvider>
           <MemoryRouter>
-            <RecommendationsUnlimitedDemo />
+            <FeedReal
+              data={data}
+              filters={draft}
+              draft={draft}
+              onFiltersChange={() => {}}
+              onDraftChange={() => {}}
+              active
+              renderBackToTop={false}
+            />
           </MemoryRouter>
         </AuthProvider>,
       ),

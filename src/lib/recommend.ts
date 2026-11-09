@@ -104,7 +104,7 @@ export interface RecCandidate {
    * The set's difficulties in the row's mode, carried from the
    * already-fetched search payload (no extra API calls) so the
    * row can compute the max-PP range (see lib/pp). Optional:
-   * candidates built before this field existed, and demo/test
+   * candidates built before this field existed, and test
    * literals, omit it — rows without it show no PP pill.
    */
   difficulties?: CandidateDifficulty[]

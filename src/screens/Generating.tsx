@@ -3,9 +3,9 @@
 // stage of the generation pipeline (profile → plays → skill profile →
 // first recommendations) via profileService.generateProfile, and the
 // screen navigates only when the work is done. Failures show an honest
-// error state with retry / continue-with-demo. In demo mode (no proxy
-// or no link) the steps animate on a timer and land on the demo stats.
-import { useEffect, useRef, useState } from 'react'
+// error state with retry; with no linked identity or no proxy it says
+// so instead of faking a run.
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { isGameMode, MODE_LABELS, type GameMode } from '../lib/mode'
 import { isProxyConfigured } from '../lib/osu'
@@ -57,32 +57,22 @@ export default function Generating() {
   const [stage, setStage] = useState(0)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
-  const ranRef = useRef(0)
 
   const target = resolveTarget()
-  const demoRun = !isProxyConfigured || !target
-  const username = target?.username ?? 'sora_playz'
+  const username = target?.username ?? null
   const mode: GameMode = target?.mode ?? 'mania'
+  // Nothing to generate without a linked identity or the proxy:
+  // the failure panel below says so instead of faking a run.
+  const noTarget = !target
+  const noProxy = !isProxyConfigured
 
   useEffect(() => {
-    const run = ++ranRef.current
     setStage(0)
     setFailed(false)
 
-    if (demoRun) {
-      // Demo mode: animate the checklist, then show the demo stats.
-      const timers = [0, 1, 2, 3].map((i) =>
-        window.setTimeout(() => {
-          if (ranRef.current === run) setStage(i + 1)
-        }, 900 * (i + 1)),
-      )
-      const done = window.setTimeout(() => {
-        if (ranRef.current === run) navigate('/onboarding/stats')
-      }, 900 * 4 + 600)
-      return () => {
-        timers.forEach((t) => window.clearTimeout(t))
-        window.clearTimeout(done)
-      }
+    if (!target || !isProxyConfigured) {
+      setFailed(true)
+      return
     }
 
     let cancelled = false
@@ -95,15 +85,15 @@ export default function Generating() {
     ;(async () => {
       try {
         setMode(mode)
-        const data = await generateProfile(username, mode, (step) => {
+        const data = await generateProfile(target.username, mode, (step) => {
           if (!cancelled) setStage(stepToStage[step])
         })
         if (cancelled) return
         const tier = user ? 'account' : 'guest'
-        const key = seenKey(tier, username)
+        const key = seenKey(tier, target.username)
         seedPlayedSets(key, data)
         await persistProfile(
-          { username, osuUserId: data.user.id, tier },
+          { username: target.username, osuUserId: data.user.id, tier },
           mode,
           data,
           { snapshot: Boolean(user) },
@@ -117,7 +107,7 @@ export default function Generating() {
             filters: defaultFiltersFor(data.skillProfile),
             seen,
           })
-          setWelcomeRecs(username, mode, recs.items)
+          setWelcomeRecs(target.username, mode, recs.items)
           seenStore.markMany(key, 'served', recs.items.map((c) => c.beatmapsetId))
         } catch {
           /* welcome page will generate on its own */
@@ -125,7 +115,7 @@ export default function Generating() {
         if (cancelled) return
         setStage(4)
         window.setTimeout(() => {
-          if (!cancelled) navigate('/onboarding/stats')
+          if (!cancelled) navigate('/welcome-recs')
         }, 650)
       } catch {
         if (!cancelled) setFailed(true)
@@ -166,10 +156,10 @@ export default function Generating() {
     <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-4 max-w-4xl mx-auto w-full text-center">
       <div className="mb-5 inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-[#1F1630]/90 border border-[#442F6B]/60 shadow-[0_4px_16px_rgba(0,0,0,0.4)] backdrop-blur-sm" data-purpose="player-profile-badge">
         <div className="relative w-6 h-6 rounded-full bg-gradient-to-br from-[#9D6BFF] to-[#FF66AA] p-[1.5px] flex items-center justify-center">
-          <div className="w-full h-full rounded-full bg-[#1E132D] flex items-center justify-center text-[10px] font-bold text-purple-200">{username.slice(0, 2).toUpperCase()}</div>
+          <div className="w-full h-full rounded-full bg-[#1E132D] flex items-center justify-center text-[10px] font-bold text-purple-200">{(username ?? '??').slice(0, 2).toUpperCase()}</div>
           <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-[#7EE787] border-2 border-[#1E132D] rounded-full"></span>
         </div>
-        <span className="font-semibold text-xs tracking-tight text-slate-200">{username}</span>
+        <span className="font-semibold text-xs tracking-tight text-slate-200">{username ?? 'No account linked'}</span>
         <span className="text-xs text-[#7A7289] font-medium">• {MODE_LABELS[mode]}</span>
       </div>
       <div className="relative w-44 h-44 mb-6 flex items-center justify-center" data-purpose="osu-hit-circle-graphic">
@@ -189,10 +179,10 @@ export default function Generating() {
         <span className="text-[#9D6BFF] drop-shadow-[0_0_20px_rgba(157,107,255,0.7)]">{MODE_LABELS[mode]}</span>{' '}profile{' '}
       </h1>
       <p className="text-slate-300 font-inter text-sm md:text-base max-w-xl mx-auto font-normal leading-relaxed mb-6">
-        {demoRun ? (
-          <>Analyzing <span className="font-semibold text-slate-100">12,430</span> plays across <span className="font-semibold text-slate-100">7K</span> beatmaps for <span className="text-[#FF66AA] font-semibold">sora_playz</span> (demo data)</>
-        ) : (
+        {target ? (
           <>Analyzing the plays of <span className="text-[#FF66AA] font-semibold">{username}</span> in {MODE_LABELS[mode]} — live from osu!</>
+        ) : (
+          <>Link your osu! account to analyze your plays.</>
         )}
       </p>
       <div className="w-full max-w-xl bg-[#221832]/85 backdrop-blur-md rounded-2xl border border-[#3E2B5C]/70 p-5 md:p-6 shadow-[0_16px_36px_rgba(0,0,0,0.45)] text-left" data-purpose="checklist-progress-panel">
@@ -267,15 +257,22 @@ export default function Generating() {
         {failed ? (
           <div className="flex flex-col items-center gap-3 w-full max-w-md">
             <p className="text-sm text-[#ffb4ab] font-medium" role="alert">
-              We couldn't reach osu! just now — the proxy or osu! itself may be down. Your link is saved; retry, or continue with the demo profile.
+              {noTarget
+                ? 'No osu! account linked yet — link your account to build your profile.'
+                : noProxy
+                  ? "The osu! proxy isn't connected (see docs/M1-SETUP.md) — generation can't run until it is."
+                  : "We couldn't reach osu! just now — the proxy or osu! itself may be down. Your link is saved; retry."}
             </p>
             <div className="flex items-center justify-center gap-3 w-full">
-              <button className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl font-outfit font-bold text-sm text-white bg-gradient-to-r from-[#FF66AA] to-[#f44795] shadow-[0_0_24px_rgba(255,102,170,0.5)] transition duration-200 active:scale-[0.98] gap-2 cursor-pointer" type="button" onClick={(e) => { e.stopPropagation(); setAttempt((n) => n + 1) }}>
-                <span>Retry</span>
-              </button>
-              <button className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl font-outfit font-bold text-sm text-slate-200 bg-[#201530] border border-[#3E2B5C] transition duration-200 active:scale-[0.98] cursor-pointer" type="button" onClick={(e) => { e.stopPropagation(); navigate('/onboarding/stats') }}>
-                <span>Continue with demo</span>
-              </button>
+              {noTarget ? (
+                <button className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl font-outfit font-bold text-sm text-white bg-gradient-to-r from-[#FF66AA] to-[#f44795] shadow-[0_0_24px_rgba(255,102,170,0.5)] transition duration-200 active:scale-[0.98] gap-2 cursor-pointer" type="button" onClick={(e) => { e.stopPropagation(); navigate('/onboarding/link') }}>
+                  <span>Link osu! account</span>
+                </button>
+              ) : (
+                <button className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl font-outfit font-bold text-sm text-white bg-gradient-to-r from-[#FF66AA] to-[#f44795] shadow-[0_0_24px_rgba(255,102,170,0.5)] transition duration-200 active:scale-[0.98] gap-2 cursor-pointer" type="button" onClick={(e) => { e.stopPropagation(); setAttempt((n) => n + 1) }}>
+                  <span>Retry</span>
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -285,7 +282,7 @@ export default function Generating() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#9D6BFF] opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-[#9D6BFF]"></span>
               </span>
-              <span>{demoRun ? 'Playing the demo…' : 'Analyzing live data...'}</span>
+              <span>Analyzing live data...</span>
             </div>
             <button className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl font-outfit font-bold text-sm text-white bg-gradient-to-r from-[#FF66AA] to-[#f44795] hover:from-[#ff77b4] hover:to-[#ff529e] shadow-[0_0_24px_rgba(255,102,170,0.5)] transition duration-200 active:scale-[0.98] gap-2 cursor-pointer" type="button" onClick={(e) => { e.stopPropagation(); navigate('/welcome-recs') }}>
               <span>Skip to recommendations</span>
@@ -301,10 +298,10 @@ export default function Generating() {
     <footer className="relative z-10 w-full px-8 py-5 border-t border-[#291E3B]/70 bg-[#120B1A]/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto flex items-center justify-between text-xs">
         <div className="flex items-center space-x-3" data-purpose="current-player-status">
-          <div className="w-8 h-8 rounded-full bg-[#2A1D3F] border border-[#44335F] flex items-center justify-center font-bold text-[11px] text-[#C9ADFF] shadow-inner">{username.slice(0, 2).toUpperCase()}</div>
+          <div className="w-8 h-8 rounded-full bg-[#2A1D3F] border border-[#44335F] flex items-center justify-center font-bold text-[11px] text-[#C9ADFF] shadow-inner">{(username ?? '??').slice(0, 2).toUpperCase()}</div>
           <div className="text-left">
             <div className="text-[#7A7289] text-[11px] font-medium leading-tight">Ready for player</div>
-            <div className="text-slate-200 font-semibold tracking-tight">{username}</div>
+            <div className="text-slate-200 font-semibold tracking-tight">{username ?? 'No account linked'}</div>
           </div>
         </div>
         <nav aria-label="Onboarding Progress" className="flex items-center space-x-2" data-purpose="pagination-dots">

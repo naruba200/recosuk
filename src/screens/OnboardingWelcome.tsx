@@ -93,8 +93,6 @@ export default function OnboardingWelcome() {
         </div>
         {/* Mania (Highlighted as Active / Featured) */}
         <div className="flex items-center gap-3 bg-[#221832] hover:bg-[#2c2040] transition-colors pl-2.5 pr-5 py-2 rounded-full border border-[#9D6BFF]/50 shadow-lg shadow-[#9D6BFF]/15 group cursor-pointer relative">
-          <div className="absolute -top-2 -right-1 bg-[#9D6BFF] text-[10px] font-bold text-white px-2 py-0.5 rounded-full uppercase tracking-wider">{' '}Demo{' '}
-          </div>
           <div className="w-10 h-10 rounded-full bg-[#9D6BFF] flex items-center justify-center font-outfit font-extrabold text-sm text-white shadow-md shadow-[#9D6BFF]/40 group-hover:scale-110 transition-transform">{' '}MNA{' '}
           </div>
           <div className="text-left">
@@ -129,7 +127,7 @@ export default function OnboardingWelcome() {
         <div className="text-left">
           <span className="text-xs text-[#A59AB5] block">Ready for player
           </span>
-          <span className="text-xs font-bold text-[#F5F1FA]">sora_playz (5,284 pp)
+          <span className="text-xs font-bold text-[#F5F1FA]">No player linked yet
           </span>
         </div>
       </div>

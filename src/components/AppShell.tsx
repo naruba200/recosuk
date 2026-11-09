@@ -15,10 +15,9 @@ import { usePreviewPlayer } from '../lib/previewPlayer'
  * there is no hover there. The main content uses the full width.
  *
  * Markup/classes are copied from the exported screens (Dashboard
- * is the reference); the demo screens keep their static copies,
- * while real-data screens render through this shell so identity +
- * mode pills are live: pills read/write the global mode store and
- * the active pill re-tints with the per-mode accent token.
+ * is the reference); real-data screens render through this shell so
+ * identity + mode pills are live: pills read/write the global mode
+ * store and the active pill re-tints with the per-mode accent token.
  */
 
 export interface ShellIdentity {
@@ -41,7 +40,7 @@ const NAV: { path: string; icon: string; label: string }[] = [
 
 /**
  * Mode pills (§AQ item 12): the global mode switcher. Horizontal
- * by default (StatsExplained's onboarding screen); `vertical`
+ * by default (the onboarding screen's mode picker); `vertical`
  * stacks the four pills in a capsule for the left rail.
  *
  * Pill animation (transform-only, no layout shift): hovering a

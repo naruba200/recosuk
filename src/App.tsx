@@ -8,7 +8,6 @@ import { readOnboardedFlag, resolveRoute } from './lib/routeGuard'
 import OnboardingWelcome from './screens/OnboardingWelcome'
 import LinkOsu from './screens/LinkOsu'
 import Generating from './screens/Generating'
-import StatsExplained from './screens/StatsExplained'
 import WelcomeRecs from './screens/WelcomeRecs'
 import Profile from './screens/Profile'
 import Recommendations from './screens/Recommendations'
@@ -84,8 +83,8 @@ function RecommendationsPage() {
  * Navigation bridge: the converted Stitch screens keep their exported
  * markup, whose buttons/sidebar anchors are inert placeholders
  * (href="#" or dropped inline handlers). This bridge intercepts clicks
- * on those elements and routes by their visible label, so the demo is
- * click-through end to end: onboarding flow, sidebar, guest/account CTAs.
+ * on those elements and routes by their visible label, so the screens
+ * are click-through end to end: onboarding flow, sidebar, guest/account CTAs.
  * Real app logic will replace this with proper Link/onClick wiring
  * component by component.
  */
@@ -127,8 +126,6 @@ function NavigationBridge() {
         else if (text.includes('link my osu')) to = '/onboarding/generating'
         else if (text.includes('continue as guest')) to = '/onboarding/generating'
         else if (text.includes('create account')) to = '/auth'
-      } else if (path === '/onboarding/stats') {
-        if (text.includes('recommendation')) to = '/welcome-recs'
       } else if (path === '/welcome-recs') {
         if (text.includes('dashboard')) { markOnboarded(); to = '/beatmaps' }
       } else if (path === '/auth') {
@@ -175,7 +172,6 @@ export default function App() {
         <Route path="/onboarding" element={<OnboardingWelcome />} />
         <Route path="/onboarding/link" element={<LinkOsu />} />
         <Route path="/onboarding/generating" element={<Generating />} />
-        <Route path="/onboarding/stats" element={<StatsExplained />} />
         <Route path="/welcome-recs" element={<WelcomeRecs />} />
         <Route path="/" element={<EntryGate />} />
         <Route path="/profile" element={<RequireSession><Profile /></RequireSession>} />
