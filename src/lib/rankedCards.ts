@@ -10,21 +10,23 @@ import type { GameMode } from './mode'
 import { modeLabel } from './mode'
 
 /**
- * Ranked period cards (§AN): the Collections ranked section no
- * longer shows one live-compiled list per window. The week view
- * stays one list; the month view shows 4 cards (the 4 weeks of
- * the CURRENT calendar month) and the year view 12 cards (the 12
- * months of the CURRENT calendar year). Cards follow the global
- * mode like the lists did. Each card opens a detail page with
- * that period's song list.
+ * Ranked period cards (§AN, rolling in §AO): the Collections ranked
+ * section no longer shows one live-compiled list per window. The week
+ * view stays one list; the month view shows 4 cards (the TRAILING
+ * 4 calendar weeks — e.g. on 2026-11-09: weeks 3–4 of October plus
+ * weeks 1–2 of November) and the year view 12 cards (the TRAILING
+ * 12 calendar months — e.g. December 2025 through November 2026).
+ * Cards follow the global mode like the lists did. Each card opens
+ * a detail page with that period's song list.
  *
  * PERIOD MATH (UTC): ranked dates arrive as UTC ISO strings, so
  * calendar boundaries are computed in UTC — the same instant
  * means the same card everywhere, and tests can pin the
- * boundaries exactly. Month weeks split 1–7 / 8–14 / 15–21 /
- * 22–last-day; a week or month that has not started yet still
- * gets a card, and its compile is one cheap page (every set is
- * older than the interval start, so the scan stops at once).
+ * boundaries exactly. A calendar month-week splits 1–7 / 8–14 /
+ * 15–21 / 22–last-day. The trailing windows are computed from
+ * `nowMs` on every visit, so the card set itself rolls forward
+ * as the date changes — no background worker, no stored card
+ * list to advance.
  */
 
 export type RankedGranularity = RankedWindowId
@@ -70,50 +72,90 @@ export function weekCard(nowMs: number): RankedPeriodCard {
   }
 }
 
-/** The 4 weeks of the calendar month containing `nowMs` (UTC). */
-export function weeksOfMonth(nowMs: number): RankedPeriodCard[] {
-  const now = new Date(nowMs)
-  const year = now.getUTCFullYear()
-  const month = now.getUTCMonth()
+/** One calendar month-week (1–7 / 8–14 / 15–21 / 22–last-day, UTC). */
+export function monthWeekCard(
+  year: number,
+  month: number,
+  weekIndex: number,
+): RankedPeriodCard {
   const window = windowFor('month')
   const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
   const starts = [1, 8, 15, 22]
-  return starts.map((startDay, i) => {
-    // Weeks 1–3 are 7 days; week 4 runs to the month end (which
-    // is 8–10 days in a 30/31-day month, 7 in February).
-    const endDay = i === starts.length - 1 ? lastDay : startDay + 6
-    return {
-      granularity: 'month' as const,
-      period: `${year}-${pad2(month + 1)}-w${i + 1}`,
-      label: `Week ${i + 1} · ${MONTH_SHORT[month]} ${startDay}–${endDay}`,
-      startMs: Date.UTC(year, month, startDay),
-      endMs: Date.UTC(year, month, endDay + 1),
-      window,
-    }
-  })
-}
-
-/** The 12 months of the calendar year containing `nowMs` (UTC). */
-export function monthsOfYear(nowMs: number): RankedPeriodCard[] {
-  const year = new Date(nowMs).getUTCFullYear()
-  const window = windowFor('year')
-  return Array.from({ length: 12 }, (_, m) => ({
-    granularity: 'year' as const,
-    period: `${year}-${pad2(m + 1)}`,
-    label: `${MONTH_FULL[m]} ${year}`,
-    startMs: Date.UTC(year, m, 1),
-    endMs: Date.UTC(year, m + 1, 1),
+  const startDay = starts[weekIndex]
+  // Weeks 1–3 are 7 days; week 4 runs to the month end (which
+  // is 8–10 days in a 30/31-day month, 7 in February).
+  const endDay = weekIndex === starts.length - 1 ? lastDay : startDay + 6
+  return {
+    granularity: 'month' as const,
+    period: `${year}-${pad2(month + 1)}-w${weekIndex + 1}`,
+    label: `Week ${weekIndex + 1} · ${MONTH_SHORT[month]} ${startDay}–${endDay}`,
+    startMs: Date.UTC(year, month, startDay),
+    endMs: Date.UTC(year, month, endDay + 1),
     window,
-  }))
+  }
 }
 
-/** All cards for a window: week → 1, month → 4, year → 12. */
+/** One calendar month (UTC). */
+export function monthCard(year: number, month: number): RankedPeriodCard {
+  const window = windowFor('year')
+  return {
+    granularity: 'year' as const,
+    period: `${year}-${pad2(month + 1)}`,
+    label: `${MONTH_FULL[month]} ${year}`,
+    startMs: Date.UTC(year, month, 1),
+    endMs: Date.UTC(year, month + 1, 1),
+    window,
+  }
+}
+
+/**
+ * The TRAILING 4 calendar month-weeks ending at `nowMs` (§AO):
+ * the 4 most recent weeks whose start is at or before now, oldest
+ * first. A week that has just started counts (its interval is
+ * mostly future, but its ranked maps so far are real). Two months
+ * of candidates always hold at least 5 started weeks (the current
+ * month contributes ≥1, the previous month 4), so the take-last-4
+ * never runs dry.
+ */
+export function trailingWeeks(nowMs: number): RankedPeriodCard[] {
+  const now = new Date(nowMs)
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth()
+  const candidates: RankedPeriodCard[] = []
+  for (let m = month - 1; m <= month; m += 1) {
+    const y = m < 0 ? year - 1 : year
+    const mm = (m + 12) % 12
+    for (let w = 0; w < 4; w += 1) candidates.push(monthWeekCard(y, mm, w))
+  }
+  return candidates
+    .filter((c) => c.startMs <= nowMs)
+    .sort((a, b) => a.startMs - b.startMs)
+    .slice(-4)
+}
+
+/**
+ * The TRAILING 12 calendar months ending at `nowMs` (§AO): the
+ * current month plus the 11 before it, oldest first.
+ */
+export function trailingMonths(nowMs: number): RankedPeriodCard[] {
+  const now = new Date(nowMs)
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth()
+  const cards: RankedPeriodCard[] = []
+  for (let i = 11; i >= 0; i -= 1) {
+    const d = new Date(Date.UTC(year, month - i, 1))
+    cards.push(monthCard(d.getUTCFullYear(), d.getUTCMonth()))
+  }
+  return cards
+}
+
+/** All cards for a window: week → 1, month → trailing 4 weeks, year → trailing 12 months. */
 export function rankedCardsForWindow(
   windowId: RankedWindowId,
   nowMs: number,
 ): RankedPeriodCard[] {
-  if (windowId === 'month') return weeksOfMonth(nowMs)
-  if (windowId === 'year') return monthsOfYear(nowMs)
+  if (windowId === 'month') return trailingWeeks(nowMs)
+  if (windowId === 'year') return trailingMonths(nowMs)
   return [weekCard(nowMs)]
 }
 
@@ -139,15 +181,14 @@ export function cardFromPeriod(
     const month = Number(m[2]) - 1
     const weekIndex = Number(m[3]) - 1
     if (month < 0 || month > 11) return null
-    const cards = weeksOfMonth(Date.UTC(year, month, 15))
-    return cards[weekIndex] ?? null
+    return monthWeekCard(year, month, weekIndex)
   }
   const m = /^(\d{4})-(\d{2})$/.exec(period)
   if (!m) return null
   const year = Number(m[1])
   const month = Number(m[2]) - 1
   if (month < 0 || month > 11) return null
-  return monthsOfYear(Date.UTC(year, month, 15))[month] ?? null
+  return monthCard(year, month)
 }
 
 /** Saved-list name for one card's compilation. */
@@ -260,6 +301,83 @@ export function isCompilationFresh(
   nowMs: number,
 ): boolean {
   return Number.isFinite(compiledAtMs) && nowMs - compiledAtMs < ttlMs
+}
+
+/**
+ * Hide rule (§AO): a compilation is UNREACHABLE when the scan
+ * stopped early (partial — the page cap hit before the interval
+ * start was reached) AND collected nothing. The interval sits
+ * beyond the scan's reach, so showing "0 maps" is noise; the
+ * card is hidden instead. A failed compile stores nothing (no
+ * row), so it can never be mistaken for unreachable — and a
+ * transient failure still shows an error, never a silent hide.
+ * An unreachable row never becomes reachable (its interval only
+ * gets older), so callers must NOT recompile it on TTL expiry.
+ */
+export function isUnreachableCompilation(
+  compilation: RankedCompilation | null | undefined,
+): boolean {
+  return (
+    !!compilation && compilation.entries.length === 0 && compilation.partial === true
+  )
+}
+
+export interface StoredHistoryEntry {
+  granularity: RankedGranularity
+  period: string
+  label: string
+  entryCount: number
+  partial: boolean
+  compiledAtMs: number
+  windowStartMs: number
+}
+
+/**
+ * History (§AO): the stored compilations for one mode, newest
+ * period first. Returns null when the read fails (no client, or
+ * the table does not exist yet — migration 003 not run): the
+ * caller shows the honest "history needs the migration" note,
+ * not an empty list. Rows with no entries (unreachable cards)
+ * are not history — they are skipped. Capped at 200 rows; the
+ * entries payload is read only to count it.
+ */
+export async function listStoredCompilations(
+  client: SupabaseClient | null,
+  mode: GameMode,
+): Promise<StoredHistoryEntry[] | null> {
+  if (!client) return null
+  try {
+    const { data, error } = await client
+      .from(RANKED_COMPILATIONS_TABLE)
+      .select('granularity,period,entries,partial,window_start,compiled_at')
+      .eq('mode', mode)
+      .order('window_start', { ascending: false })
+      .limit(200)
+    if (error || !Array.isArray(data)) return null
+    const rows: StoredHistoryEntry[] = []
+    for (const row of data as Record<string, unknown>[]) {
+      if (typeof row.period !== 'string') continue
+      if (!Array.isArray(row.entries) || row.entries.length === 0) continue
+      const granularity = row.granularity as RankedGranularity
+      const card = cardFromPeriod(granularity, row.period, Date.now())
+      const compiledAtMs =
+        typeof row.compiled_at === 'string' ? Date.parse(row.compiled_at) : NaN
+      const windowStartMs =
+        typeof row.window_start === 'string' ? Date.parse(row.window_start) : NaN
+      rows.push({
+        granularity,
+        period: row.period,
+        label: card ? card.label : row.period,
+        entryCount: row.entries.length,
+        partial: row.partial === true,
+        compiledAtMs: Number.isFinite(compiledAtMs) ? compiledAtMs : 0,
+        windowStartMs: Number.isFinite(windowStartMs) ? windowStartMs : 0,
+      })
+    }
+    return rows
+  } catch {
+    return null
+  }
 }
 
 /** Live-compile one card (used when its row is missing or stale).

@@ -49,8 +49,8 @@ export interface RankedWindow {
 
 export const RANKED_WINDOWS: RankedWindow[] = [
   { id: 'week', tabLabel: 'This week', listLabel: 'This week', days: 7, ttlMs: 60 * 60 * 1000 },
-  { id: 'month', tabLabel: 'This month', listLabel: 'This month', days: 28, ttlMs: 6 * 60 * 60 * 1000 },
-  { id: 'year', tabLabel: 'This year', listLabel: 'This year', days: 365, ttlMs: 24 * 60 * 60 * 1000 },
+  { id: 'month', tabLabel: 'Last 4 weeks', listLabel: 'Last 4 weeks', days: 28, ttlMs: 6 * 60 * 60 * 1000 },
+  { id: 'year', tabLabel: 'Last 12 months', listLabel: 'Last 12 months', days: 365, ttlMs: 24 * 60 * 60 * 1000 },
 ]
 
 export const RANKED_TOP_N = 50
@@ -151,6 +151,17 @@ export interface RankedCompilation {
   scanned: number
   /** Inclusive window start, ISO string. */
   windowStart: string
+  /** True when the scan started from a seeded cursor at the
+   *  window end (§AO item 8) rather than the newest page.
+   *  Absent for rows stored before the seed fields existed — a
+   *  stored row does not record how it was compiled. */
+  seeded?: boolean
+  /** True when the first (seeded) page held a set newer than the
+   *  window end — the API ignored the seed. The compile still
+   *  works (it falls back to paging from the newest set), but a
+   *  card that then goes partial may be reachable after all.
+   *  Absent for stored rows, like `seeded`. */
+  seedIgnored?: boolean
 }
 
 /** One search page; injectable so tests drive the scan without live calls. */
@@ -162,6 +173,21 @@ function parseRankedDate(raw: unknown): number | null {
   if (typeof raw !== 'string' || raw === '') return null
   const ms = Date.parse(raw)
   return Number.isFinite(ms) ? ms : null
+}
+
+/** Build a fabricated search cursor that starts a newest-first
+ *  ranked scan AT `endMs` (§AO item 8). The osu! search
+ *  `cursor_string` is plain base64 JSON
+ *  `{"approved_date": <ms epoch>, "id": <set id>}` — standard
+ *  base64 WITHOUT `=` padding, exactly as the API returns it
+ *  (live-verified 2026-11-09). `id: 0` with newest-first order
+ *  means "everything strictly before `endMs`" (no set id is < 0),
+ *  which is exactly the window's exclusive end. Keep this in sync
+ *  with the same helper in
+ *  `supabase/functions/osu-proxy/rankedRefresh.ts` — the
+ *  cross-check test `seededScanMatchesFunction` pins them equal. */
+export function buildSeedCursor(endMs: number): string {
+  return btoa(JSON.stringify({ approved_date: endMs, id: 0 })).replace(/=+$/, '')
 }
 
 export async function compileRankedList(opts: {
@@ -181,11 +207,29 @@ export async function compileRankedList(opts: {
   const windowStartMs = opts.startMs ?? now - opts.window.days * 24 * 60 * 60 * 1000
   const windowEndMs = opts.endMs ?? null
   const collected = new Map<number, { set: SearchBeatmapset; rankedMs: number }>()
-  let cursor: string | null | undefined
+  // Seeded scan (§AO, item 8 — ranked_asc research): for an
+  // explicit past interval, the first page starts AT the window
+  // end instead of at the newest set. `ranked_asc` alone does NOT
+  // fix old intervals (it pages forward from 2007 — ~1,100 pages
+  // to Jan 2026); a fabricated cursor jumps straight to the
+  // interval, so a month card is ~8–15 pages instead of
+  // unreachable. The seed is the same base64-JSON shape the API
+  // itself returns (`{"approved_date": <ms>, "id": <set id>}`,
+  // standard base64 WITHOUT `=` padding — verified live
+  // 2026-11-09: a seed at 2026-01-01T00:00:00Z returned its first
+  // set at 2026-01-01T00:42:23Z). Undocumented and uncontracted —
+  // the API could change the format — so the scan watches for the
+  // seed being ignored (see `seedIgnored` below) instead of
+  // trusting it blindly. The rolling week (no explicit end) needs
+  // no seed: the newest page already is its window end.
+  const seeded = windowEndMs !== null
+  let cursor: string | null | undefined = seeded ? buildSeedCursor(windowEndMs) : undefined
   let pages = 0
   let scanned = 0
+  let skippedNewer = 0
   let reachedStart = false
   let exhausted = false
+  let seedIgnored = false
 
   while (pages < RANKED_SCAN_MAX_PAGES) {
     const page = await opts.fetchPage(cursor)
@@ -203,7 +247,18 @@ export async function compileRankedList(opts: {
       // skipped (they belong to a later period), but the scan
       // continues — the sort is newest-first, so the interval's
       // own sets sit further down the pages.
-      if (windowEndMs !== null && rankedMs >= windowEndMs) continue
+      if (windowEndMs !== null && rankedMs >= windowEndMs) {
+        skippedNewer += 1
+        // A valid seed returns nothing newer than the window end
+        // on the first page — seeing one means the API ignored the
+        // seed and served the unseeded newest page (or, far less
+        // likely, a set ranked at exactly the window-end instant).
+        // The compile still works (it just burns pages on newer
+        // sets, as before seeding), but the hide rule would then
+        // eat a reachable card — so say so loudly instead.
+        if (seeded && pages === 1) seedIgnored = true
+        continue
+      }
       if (rankedMs >= windowStartMs) {
         collected.set(set.id, { set, rankedMs })
       } else {
@@ -220,6 +275,31 @@ export async function compileRankedList(opts: {
   }
 
   const partial = !reachedStart && !exhausted && pages >= RANKED_SCAN_MAX_PAGES
+
+  // Browser diagnostic log (§AO): one line per compile so a
+  // partial scan can be checked in devtools — window, pages,
+  // sets examined/collected/skipped, and exactly why it stopped.
+  // `console.info` (not debug) so it shows with default log levels.
+  console.info('[RecOsuk ranked scan]', {
+    mode: opts.mode,
+    windowStart: new Date(windowStartMs).toISOString(),
+    windowEnd: windowEndMs === null ? null : new Date(windowEndMs).toISOString(),
+    seeded,
+    seedIgnored,
+    pages,
+    scanned,
+    collected: collected.size,
+    skippedNewer,
+    stop: reachedStart ? 'reached-start' : exhausted ? 'exhausted' : 'cap-hit',
+    partial,
+  })
+  if (seedIgnored) {
+    console.warn(
+      '[RecOsuk ranked scan] the seeded cursor was ignored (first page holds sets newer than the window end) — ' +
+        'the scan fell back to paging from the newest set, so this card may show partial even though its interval is reachable. ' +
+        'Check whether the search API still accepts a fabricated cursor.',
+    )
+  }
 
   // Play-count sort AFTER window filtering — never search order.
   // Ties: newer ranked first, then higher set id (deterministic).
@@ -247,6 +327,8 @@ export async function compileRankedList(opts: {
     partial,
     scanned,
     windowStart: new Date(windowStartMs).toISOString(),
+    seeded,
+    seedIgnored,
   }
 }
 

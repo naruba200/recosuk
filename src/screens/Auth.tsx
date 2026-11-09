@@ -123,8 +123,9 @@ export default function Auth() {
       })
       return
     }
-    // Signed in: straight to the profile (returning-user flow).
-    navigate('/profile')
+    // Signed in: straight to Beatmaps (the default page after
+    // login, §AO — the Profile page stays reachable from the menu).
+    navigate('/beatmaps')
   }
 
   // Live password-strength meter (the export's static "Strong" bar

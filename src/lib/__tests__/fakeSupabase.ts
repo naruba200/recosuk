@@ -1,11 +1,11 @@
 /**
  * Minimal in-memory stand-in for the Supabase JS client, covering
  * exactly the query-builder surface the lists/feedback services
- * use (select/insert/upsert/update/delete + eq/in/order/single/maybeSingle).
- * Lets the M5 service tests run with no network and no real
- * project. Column lists are ignored (full rows come back); RLS is
- * NOT simulated — the services are tested for query shape and
- * behaviour, RLS stays a migration concern.
+ * use (select/insert/upsert/update/delete + eq/in/order/limit/
+ * single/maybeSingle). Lets the M5 service tests run with no
+ * network and no real project. Column lists are ignored (full rows
+ * come back); RLS is NOT simulated — the services are tested for
+ * query shape and behaviour, RLS stays a migration concern.
  */
 
 export type Row = Record<string, unknown>
@@ -38,6 +38,7 @@ class FakeQuery implements PromiseLike<QueryResult> {
   private onConflict: string | null = null
   private filters: Array<(r: Row) => boolean> = []
   private orderBy: { col: string; ascending: boolean } | null = null
+  private limitN: number | null = null
   private wantSingle = false
   private wantMaybeSingle = false
   private db: FakeDb
@@ -92,6 +93,11 @@ class FakeQuery implements PromiseLike<QueryResult> {
     return this
   }
 
+  limit(n: number): this {
+    this.limitN = n
+    return this
+  }
+
   single(): this {
     this.wantSingle = true
     return this
@@ -131,6 +137,7 @@ class FakeQuery implements PromiseLike<QueryResult> {
         return (String(av) < String(bv) ? -1 : 1) * (ascending ? 1 : -1)
       })
     }
+    if (this.limitN !== null) out = out.slice(0, this.limitN)
     return out
   }
 

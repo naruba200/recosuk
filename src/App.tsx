@@ -24,10 +24,12 @@ import OsuCallback from './screens/OsuCallback'
 
 /**
  * Entry choice: `/` is a first-visit gate, and it always REDIRECTS —
- * it never renders the Profile itself, so the address bar always
- * shows the real route (/profile or /onboarding). A first visit (no
+ * it never renders the Beatmaps itself, so the address bar always
+ * shows the real route (/beatmaps or /onboarding). A first visit (no
  * `recosuk-onboarded` flag in localStorage) goes to /onboarding;
- * everyone else goes to /profile.
+ * everyone else goes to /beatmaps (§AO: Beatmaps is the default
+ * page after login now, not Profile — the Profile page itself stays,
+ * reachable from the hamburger menu).
  */
 function EntryGate() {
   const { user, loading } = useAuth()
@@ -44,7 +46,7 @@ function EntryGate() {
   // Returning users (PLAN-v2 §5.6): a guest link or a signed-in account
   // with a linked profile skips onboarding entirely, flag or not.
   if (guestSession || user || onboarded) {
-    return <Navigate to="/profile" replace />
+    return <Navigate to="/beatmaps" replace />
   }
   return <Navigate to="/onboarding" replace />
 }
@@ -118,19 +120,19 @@ function NavigationBridge() {
       let to: string | null = null
 
       if (path === '/onboarding') {
-        if (text.includes('skip')) { markOnboarded(); to = '/profile' }
+        if (text.includes('skip')) { markOnboarded(); to = '/beatmaps' }
         else if (text.includes('next')) to = '/onboarding/link'
       } else if (path === '/onboarding/link') {
-        if (text.includes('continue without linking')) { markOnboarded(); to = '/profile' }
+        if (text.includes('continue without linking')) { markOnboarded(); to = '/beatmaps' }
         else if (text.includes('link my osu')) to = '/onboarding/generating'
         else if (text.includes('continue as guest')) to = '/onboarding/generating'
         else if (text.includes('create account')) to = '/auth'
       } else if (path === '/onboarding/stats') {
         if (text.includes('recommendation')) to = '/welcome-recs'
       } else if (path === '/welcome-recs') {
-        if (text.includes('dashboard')) { markOnboarded(); to = '/profile' }
+        if (text.includes('dashboard')) { markOnboarded(); to = '/beatmaps' }
       } else if (path === '/auth') {
-        if (text.includes('continue as guest')) { markOnboarded(); to = '/profile' }
+        if (text.includes('continue as guest')) { markOnboarded(); to = '/beatmaps' }
         else if (text.includes('github') || text.includes('create account') || text.includes('sign in')) to = '/onboarding/link'
       }
 

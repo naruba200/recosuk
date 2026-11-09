@@ -4,6 +4,7 @@ import {
   RANKED_SCAN_MAX_PAGES,
   RANKED_TOP_N,
   RANKED_WINDOWS,
+  buildSeedCursor,
   compileRankedList,
   fetchRankedCompilation,
   rankedListName,
@@ -56,7 +57,10 @@ function pagesFetcher(pages: SearchPage[]) {
     calls,
     fetchPage: async (cursor: string | null | undefined): Promise<SearchPage> => {
       calls.push(cursor)
-      const index = cursor === undefined ? 0 : Number(cursor)
+      // Numeric cursors are page indices (the fake's chaining).
+      // Any other cursor is the seeded cursor (§AO item 8): the
+      // API jumps to the interval start, so it serves page 0.
+      const index = cursor === undefined || cursor === null ? 0 : /^\d+$/.test(cursor) ? Number(cursor) : 0
       return pages[index] ?? { beatmapsets: [], cursor_string: null }
     },
   }
@@ -161,6 +165,13 @@ describe('ranked compilation intervals (§AN cards)', () => {
   const START = Date.parse('2026-10-22T00:00:00.000Z')
   const END = NOW
   const interval = { startMs: START, endMs: END }
+  // NOTE (§AO item 8): these compiles are SEEDED — the first
+  // fetchPage call carries the seed cursor, and the fake serves
+  // page 0 for it. The page-1 sets newer than the interval end
+  // below therefore model the seed-IGNORED fallback (the API
+  // serving the unseeded newest page), not the normal seeded
+  // path: the skip-newer logic still has to hold there. The
+  // normal seeded path is covered by 'seeded scan (§AO item 8)'.
 
   it('collects only sets inside [startMs, endMs): newer sets skipped, older ones stop the scan', async () => {
     const { fetchPage, calls } = pagesFetcher([
@@ -225,6 +236,94 @@ describe('ranked compilation intervals (§AN cards)', () => {
     })
     expect(compiled.entries).toEqual([])
     expect(calls.length).toBe(1)
+  })
+})
+
+describe('seeded scan (§AO item 8)', () => {
+  const START = Date.parse('2026-10-22T00:00:00.000Z')
+  const END = Date.parse('2026-10-29T00:00:00.000Z')
+
+  function decodeSeed(seed: string): unknown {
+    return JSON.parse(Buffer.from(seed, 'base64').toString('utf8'))
+  }
+
+  it('buildSeedCursor matches the API cursor shape (base64 JSON, no padding)', () => {
+    const seed = buildSeedCursor(END)
+    expect(seed).not.toContain('=')
+    expect(decodeSeed(seed)).toEqual({ approved_date: END, id: 0 })
+  })
+
+  it('seeds the first page at the window end for an explicit interval', async () => {
+    const { fetchPage, calls } = pagesFetcher([
+      page(
+        [
+          set(2, new Date(END - 1000).toISOString(), 50),
+          set(3, new Date(START + 1000).toISOString(), 40),
+          // Older than the interval start — stops the scan.
+          set(4, new Date(START - 1000).toISOString(), 900),
+        ],
+        null,
+      ),
+    ])
+    const compiled = await compileRankedList({
+      mode: 'mania',
+      window: week,
+      now: END,
+      startMs: START,
+      endMs: END,
+      fetchPage,
+    })
+    expect(calls).toHaveLength(1)
+    expect(decodeSeed(calls[0] as string)).toEqual({ approved_date: END, id: 0 })
+    expect(compiled.entries.map((e) => e.candidate.beatmapsetId)).toEqual([2, 3])
+    expect(compiled.seeded).toBe(true)
+    expect(compiled.seedIgnored).toBe(false)
+    expect(compiled.partial).toBe(false)
+  })
+
+  it('does not seed the rolling week (no explicit end)', async () => {
+    const { fetchPage, calls } = pagesFetcher([
+      page([set(1, new Date(END - 1000).toISOString(), 10)], null),
+    ])
+    const compiled = await compileRankedList({
+      mode: 'mania',
+      window: week,
+      now: END,
+      fetchPage,
+    })
+    expect(calls).toEqual([undefined])
+    expect(compiled.seeded).toBe(false)
+    expect(compiled.seedIgnored).toBe(false)
+    expect(compiled.entries).toHaveLength(1)
+  })
+
+  it('flags seedIgnored — and still collects — when the first page holds a newer set', async () => {
+    const { fetchPage, calls } = pagesFetcher([
+      page(
+        [
+          // Newer than the window end: only possible when the API
+          // ignored the seed and served the newest page.
+          set(1, new Date(END + 60_000).toISOString(), 999),
+          set(2, new Date(END - 1000).toISOString(), 50),
+          set(3, new Date(START - 1000).toISOString(), 900),
+        ],
+        null,
+      ),
+    ])
+    const compiled = await compileRankedList({
+      mode: 'mania',
+      window: week,
+      now: END,
+      startMs: START,
+      endMs: END,
+      fetchPage,
+    })
+    expect(decodeSeed(calls[0] as string)).toEqual({ approved_date: END, id: 0 })
+    expect(compiled.seeded).toBe(true)
+    expect(compiled.seedIgnored).toBe(true)
+    // The fallback still works: the newer set is skipped, the
+    // in-window set is collected, the older set stops the scan.
+    expect(compiled.entries.map((e) => e.candidate.beatmapsetId)).toEqual([2])
   })
 })
 
@@ -306,7 +405,7 @@ describe('save compilation as list', () => {
 
   it('names the list Top 50 Ranked — Mode — Window', () => {
     expect(rankedListName('mania' as GameMode, month)).toBe(
-      'Top 50 Ranked — Mania — This month',
+      'Top 50 Ranked — Mania — Last 4 weeks',
     )
   })
 

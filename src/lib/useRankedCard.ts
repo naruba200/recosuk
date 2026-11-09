@@ -6,6 +6,7 @@ import {
   RANKED_CARD_COMPILE_ERROR,
   compileCardCompilation,
   isCompilationFresh,
+  isUnreachableCompilation,
   loadStoredCompilation,
   storeCompilation,
   type RankedPeriodCard,
@@ -80,6 +81,12 @@ export function useRankedCardCompilation(
       const nowMs = Date.now()
       const stored = await loadStoredCompilation(client, mode, card.granularity, card.period)
       if (!stillCurrent()) return
+      if (stored && isUnreachableCompilation(stored.compilation)) {
+        // §AO: unreachable — show the stored empty result and
+        // never recompile it (its interval only gets older).
+        setLoad({ compilation: stored.compilation, loading: false, error: null, stale: false, source: 'db' })
+        return
+      }
       const fresh = stored && isCompilationFresh(stored.compiledAtMs, card.window.ttlMs, nowMs)
       if (fresh && stored) {
         setLoad({ compilation: stored.compilation, loading: false, error: null, stale: false, source: 'db' })

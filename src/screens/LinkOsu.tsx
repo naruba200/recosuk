@@ -101,7 +101,7 @@ export default function LinkOsu() {
     } catch {
       /* ignore — the entry gate just shows onboarding again */
     }
-    navigate('/profile')
+    navigate('/beatmaps')
   }
 
   function pickMode(mode: GameMode) {
