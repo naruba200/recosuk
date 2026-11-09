@@ -9,6 +9,11 @@
 // `osuConnected` param (no success screen, no timer — the user
 // previously felt stuck here and pressed Back). No tokens ever reach
 // this page: the exchange response carries only username/id/expiry.
+//
+// If the code exchange hangs (network unreachable, edge function down,
+// CORS block), a timeout falls back to an error screen with a "Back to
+// Settings" button so the user is never left staring at the spinner
+// indefinitely.
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -20,6 +25,9 @@ import {
 } from '../lib/osuAuth'
 import { OsuServiceError } from '../lib/osu'
 
+/** How long to wait for the code exchange before giving up. */
+const EXCHANGE_TIMEOUT_MS = 30_000
+
 type Phase = 'working' | 'error'
 
 export default function OsuCallback() {
@@ -29,6 +37,9 @@ export default function OsuCallback() {
   const [detail, setDetail] = useState('')
   // StrictMode double-invokes effects in dev: exchange exactly once.
   const ranRef = useRef(false)
+  // Timeout guard: if the exchange promise never settles, fail open so
+  // the user is never stuck on the spinner forever.
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (ranRef.current) return
@@ -66,7 +77,17 @@ export default function OsuCallback() {
     }
 
     let cancelled = false
-    exchangeOsuCode(parsed.code, parsed.state, storedState)
+
+    // Race the exchange against a timeout so a hanging network request
+    // can't leave the user on the spinner indefinitely.
+    const timeout = new Promise<never>((_, reject) => {
+      timerRef.current = setTimeout(
+        () => reject(new Error('The osu! connection is taking longer than expected. Try signing in again.')),
+        EXCHANGE_TIMEOUT_MS,
+      )
+    })
+
+    Promise.race([exchangeOsuCode(parsed.code, parsed.state, storedState), timeout])
       .then((result) => {
         if (cancelled) return
         // Success: leave immediately — no success screen, no timer.
@@ -91,6 +112,10 @@ export default function OsuCallback() {
       })
     return () => {
       cancelled = true
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
     }
   }, [searchParams, navigate])
 
