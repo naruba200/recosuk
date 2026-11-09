@@ -165,12 +165,12 @@
   --c-tertiary-fixed-dim: 125 240 200;
 }
 
-/* Batch AM: EVA Unit-01 goes flat (experiment — revert by deleting
- * this block). Every glow shadow is off and every gradient fill is
- * flattened to a solid colour, so the theme reads as static colours
- * only. EVA's own colour tokens above are untouched, and no other
- * theme is affected — every selector below is scoped to
- * [data-theme="eva-unit-01"].
+/* Batch AM/AQ: all five themes go flat (AM made EVA flat as an
+ * experiment; AQ extends the same rules to every theme, since the
+ * user wants the static-colour look everywhere — revert by
+ * deleting this block). Every glow shadow is off and every
+ * gradient fill is flattened to a solid colour, so the themes read
+ * as static colours only. The colour tokens above are untouched.
  *
  * Mechanism: Tailwind v3 funnels every shadow utility through the
  * --tw-shadow / --tw-shadow-colored custom properties (and every
@@ -190,30 +190,62 @@
  * (.ambient-glow-mania) is removed outright — it has no solid colour
  * to flatten to. Deliberately left alone: the dot-grid background
  * patterns (.bg-grid-osu / .osu-grid-bg — textures, not highlights)
- * and the Lists dot texture (arbitrary radial gradient, not a fill). */
-[data-theme="eva-unit-01"] * {
+ * and the Lists dot texture (arbitrary radial gradient, not a fill).
+ *
+ * §AQ — blurred glow discs become flat static colour: every
+ * `blur-*` filter utility is removed (the solid bg-* colour stays
+ * as a hard-edged static shape — the corner circles, the page
+ * background discs, the hero glows). `backdrop-blur-*` is NOT
+ * touched: it is backdrop-filter on glass panels, the header and
+ * badges, and the :not() guard keeps it out. The SVG
+ * feGaussianBlur chart filter is not a class and is untouched.
+ * Scoping: the :is() list names every theme explicitly (plus
+ * :root, which carries Dark Stage for the first paint) so a
+ * future theme opts out by simply not being listed. */
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) * {
   --tw-shadow: 0 0 #0000 !important;
   --tw-shadow-colored: 0 0 #0000 !important;
   --tw-drop-shadow: drop-shadow(0 0 #0000) !important;
 }
-[data-theme="eva-unit-01"] :is(.bg-gradient-to-r, .bg-gradient-to-l, .bg-gradient-to-t, .bg-gradient-to-b, .bg-gradient-to-tr, .bg-gradient-to-tl, .bg-gradient-to-br, .bg-gradient-to-bl) {
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) :is(.bg-gradient-to-r, .bg-gradient-to-l, .bg-gradient-to-t, .bg-gradient-to-b, .bg-gradient-to-tr, .bg-gradient-to-tl, .bg-gradient-to-br, .bg-gradient-to-bl) {
   background-image: none !important;
   background-color: var(--tw-gradient-from, rgb(var(--c-primary-container))) !important;
 }
-[data-theme="eva-unit-01"] .from-transparent:is(.bg-gradient-to-r, .bg-gradient-to-l, .bg-gradient-to-t, .bg-gradient-to-b, .bg-gradient-to-tr, .bg-gradient-to-tl, .bg-gradient-to-br, .bg-gradient-to-bl) {
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) .from-transparent:is(.bg-gradient-to-r, .bg-gradient-to-l, .bg-gradient-to-t, .bg-gradient-to-b, .bg-gradient-to-tr, .bg-gradient-to-tl, .bg-gradient-to-br, .bg-gradient-to-bl) {
   background-color: var(--tw-gradient-via, transparent) !important;
 }
-[data-theme="eva-unit-01"] .hit-circle-glow {
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) .hit-circle-glow {
   box-shadow: none !important;
 }
-[data-theme="eva-unit-01"] .animate-circle-glow {
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) .animate-circle-glow {
   animation: none !important;
 }
-[data-theme="eva-unit-01"] .ambient-glow-mania {
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) .ambient-glow-mania {
   background-image: none !important;
 }
-[data-theme="eva-unit-01"] button[title^="osu!"] {
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) button[title^="osu!"] {
   box-shadow: none !important;
+}
+:is(:root, [data-theme="dark-stage"], [data-theme="eva-unit-01"], [data-theme="dark-horse"], [data-theme="punch-of-color"], [data-theme="fresh-modern"]) [class*="blur-"]:not([class*="backdrop-blur"]) {
+  filter: none !important;
+}
+
+/* §AQ item 12d — mode-change transition. AppShell toggles
+ * .animate-mode-change on <main> for ~350ms when the global mode
+ * changes, so the page fades/slides into the new mode instead of
+ * swapping instantly. Transform + opacity only (no layout shift). */
+@keyframes modeChangeIn {
+  from {
+    opacity: 0.35;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-mode-change {
+  animation: modeChangeIn 0.35s ease-out;
 }
 
 /* Dark Horse (Hook Agency): yellow #feda6a, silver #d4d4dc, slate #1d1e22. */

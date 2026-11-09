@@ -143,3 +143,51 @@ describe('RecentPlaysSection (§AJ)', () => {
     expect(html).not.toContain('No snapshots yet')
   })
 })
+
+describe('RecentPlaysSection Show more (§AQ item 7)', () => {
+  function manyPlays(n: number): OsuScore[] {
+    return Array.from({ length: n }, (_, i) => {
+      const num = i + 1
+      // The first 24 are the newest (Oct 30); the rest are older
+      // (Oct 15) — past days' plays, hidden until revealed.
+      const created_at = i < 24 ? '2026-10-30T10:00:00Z' : '2026-10-15T10:00:00Z'
+      return play({
+        id: num,
+        created_at,
+        beatmapset: {
+          id: num,
+          title: `Play-${String(num).padStart(2, '0')}`,
+          artist: 'A',
+          creator: 'M',
+          status: 'ranked',
+        },
+      })
+    })
+  }
+
+  it('shows 24 plays first with a Show more button for the rest', () => {
+    const html = render({ plays: manyPlays(30) })
+    expect(html).toContain('Play-01')
+    expect(html).toContain('Play-24')
+    expect(html).not.toContain('Play-25')
+    expect(html).not.toContain('Play-30')
+    expect(html).toContain('Show more')
+    expect(html).toContain('(6 more)')
+  })
+
+  it('shows no Show more button when everything fits', () => {
+    const html = render({ plays: manyPlays(24) })
+    expect(html).toContain('Play-24')
+    expect(html).not.toContain('Show more')
+  })
+
+  it('computes the gain from the VISIBLE plays only, not the fetched list', () => {
+    // Visible 24 (all Oct 30): oldest visible play is Oct 30, so
+    // the baseline is the Oct 25 snapshot (5250) → +34 pp. The
+    // hidden Oct 15 plays would pull the baseline back to the
+    // Oct 20 snapshot (5200) → +84 pp — that must NOT show.
+    const html = render({ plays: manyPlays(30) })
+    expect(html).toContain('+34 pp')
+    expect(html).not.toContain('+84 pp')
+  })
+})

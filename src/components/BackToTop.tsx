@@ -5,17 +5,16 @@ import { useDownloadQueue } from '../lib/downloadQueue'
 /**
  * Back-to-top button (§AE), shared by Mirror and the
  * Recommendations views. The app scrolls the WINDOW (AppShell:
- * fixed 232px sidebar + fixed header, normal-flow main), so the
- * button listens to window scroll and scrolls the window back.
+ * fixed header, normal-flow main), so the button listens to
+ * window scroll and scrolls the window back.
  *
  * Placement: 'left' is the default (bottom-LEFT of the content
- * area, left-[248px] = sidebar + 16px gutter) — the download
- * dock and its reopen button live bottom-right, so the left
- * placement clears both by construction. 'right' (§AN,
- * Recommendations only) puts it bottom-right ABOVE the dock:
- * the dock window is ~259px tall and the reopen button 44px,
- * each plus the 16px base gutter — see
- * backToTopPositionClass.
+ * area, left-4 = the 16px gutter — the download dock and its
+ * reopen button live bottom-right, so the left placement clears
+ * both by construction). 'right' (§AN, Recommendations only)
+ * puts it bottom-right ABOVE the dock: the dock window is ~259px
+ * tall and the reopen button 44px, each plus the 16px base
+ * gutter — see backToTopPositionClass.
  */
 export const BACK_TO_TOP_THRESHOLD = 600
 
@@ -43,8 +42,10 @@ export function backToTopPositionClass(
   dockWindowOpen: boolean,
   dockReopenVisible: boolean,
 ): string {
+  // §AQ item 12: the sidebar is gone, so the left placement is
+  // the plain 16px gutter now (was sidebar + 16px).
   if (placement === 'left') {
-    return hasPlayer ? 'left-[248px] bottom-[112px]' : 'left-[248px] bottom-4'
+    return hasPlayer ? 'left-4 bottom-[112px]' : 'left-4 bottom-4'
   }
   if (dockWindowOpen) return hasPlayer ? 'right-4 bottom-[388px]' : 'right-4 bottom-[292px]'
   if (dockReopenVisible) return hasPlayer ? 'right-4 bottom-[172px]' : 'right-4 bottom-[76px]'

@@ -715,7 +715,6 @@ export function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefres
     p.ceilingAccuracy !== null
       ? Math.round((p.comfortAccuracy - p.ceilingAccuracy) * 10) / 10
       : null
-  const topPlays = data.topPlays.slice(0, 3)
   const caps = useCapabilities()
   // Snapshots reload after a sync (same snapToken pattern as Stats):
   // the new snapshot row is written best-effort by persistProfile, so
@@ -864,39 +863,6 @@ export function DashboardReal({ data, onRefresh }: { data: ProfileData; onRefres
                 </div>
               </div>
 
-              <div className="flex flex-col gap-space-md">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-secondary shadow-[0_0_8px_rgba(255,176,204,0.7)]"></span>
-                  <h2 className="font-headline-md text-headline-md text-on-surface">Your top plays</h2>
-                </div>
-                {topPlays.map((play) => (
-                  <div key={play.id ?? play.beatmap?.id} className="group relative rounded-full bg-surface-container-low hover:bg-surface-container-high transition-all p-2 pr-space-lg flex items-center justify-between gap-space-md shadow-sm">
-                    <div className="flex items-center gap-space-md min-w-0 flex-1">
-                      <div className="relative flex-shrink-0 w-14 h-14 rounded-full p-0.5 bg-primary/40 shadow-[0_0_12px_rgba(164,118,255,0.4)]">
-                        <img className="w-full h-full object-cover rounded-full" alt="" src={play.beatmapset?.covers?.card ?? ''} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-headline-sm text-headline-sm text-on-surface truncate">{play.beatmapset?.title ?? 'Unknown map'}</span>
-                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-highest">
-                            <span className="text-[#FFCC22] text-[12px] leading-none">★</span>
-                            <span className="font-label-sm text-[11px] font-bold text-[#FFCC22]">{play.beatmap?.difficulty_rating.toFixed(2)}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 font-body-sm text-body-sm text-on-surface-variant truncate">
-                          <span className="text-on-surface">{play.beatmapset?.artist}</span>
-                          <span>·</span>
-                          <span>{play.beatmap?.bpm} BPM</span>
-                          <span>·</span>
-                          <span>{(play.accuracy * 100).toFixed(2)}% acc</span>
-                          <span>·</span>
-                          <span>{play.pp ? `${Math.round(play.pp)} pp` : ''}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
 
             <div className="lg:col-span-4 flex flex-col gap-space-lg">

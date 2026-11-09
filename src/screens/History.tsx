@@ -5,7 +5,8 @@ import ExampleBlock from '../components/ExampleBlock'
 import { useAuth } from '../lib/auth'
 import { useSidebarIdentity } from '../lib/profileService'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
-import { MODE_ACCENTS } from '../lib/modeStore'
+import { MODE_ACCENTS, useModeStore } from '../lib/modeStore'
+import DownloadButton from '../components/DownloadButton'
 import { GAME_MODES, modeLabel, type GameMode } from '../lib/mode'
 import {
   deleteFeedback,
@@ -1006,6 +1007,7 @@ interface HistoryRow {
 function HistoryReal({ userId, username }: { userId: string; username: string | null }) {
   const [rows, setRows] = useState<HistoryRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const globalMode = useModeStore((s) => s.mode)
   const [modeFilter, setModeFilter] = useState<GameMode | 'all'>('all')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
@@ -1337,9 +1339,23 @@ function HistoryReal({ userId, username }: { userId: string; username: string | 
                         </span>
                       </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[11px] flex-shrink-0">
-                      Downloaded
-                    </span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[11px]">
+                        Downloaded
+                      </span>
+                      {/* §AQ item 11: redownload from the same
+                          flow as every other screen — the button
+                          knows the set is already downloaded, so
+                          it offers "Download again". */}
+                      <DownloadButton
+                        beatmapsetId={id}
+                        artist={summary?.artist ?? 'Unknown artist'}
+                        title={summary ? summary.title : `Beatmapset #${id}`}
+                        mode={globalMode}
+                        seenKeyValue={downloadKey}
+                        downloaded
+                      />
+                    </div>
                   </div>
                 )
               })}

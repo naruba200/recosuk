@@ -132,7 +132,10 @@ export async function generateProfile(
   onStep?.('plays')
   const [topPlays, recentPlays, mostPlayed] = await Promise.all([
     proxyCall<OsuScore[]>('getTopPlays', { userId: user.id, mode, limit: 100 }),
-    proxyCall<OsuScore[]>('getRecentPlays', { userId: user.id, mode }).catch(
+    // §AQ item 7: fetch once with limit 100 (the proxy clamps to
+    // 100) so past days' plays are in the list — the section
+    // reveals them 24 at a time instead of stopping at 24.
+    proxyCall<OsuScore[]>('getRecentPlays', { userId: user.id, mode, limit: 100 }).catch(
       () => [] as OsuScore[],
     ),
     // CRASH FIX (QA batch 2): this call used to omit `mode`, and the

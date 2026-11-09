@@ -5,12 +5,17 @@ import { AuthProvider } from '../auth'
 import AppShell, { type ShellIdentity } from '../../components/AppShell'
 
 /**
- * §AO — the profile menu: hover bridge + press dim + sidebar
- * profile card removal + logo retarget. The menu's pinned state
- * is owned by AppShell; `initialMenuPinned` renders it pinned
- * on first paint so the static render can assert the overlay
- * and the dropdown markup. Interaction itself (hover staying
- * open across the bridge, click-to-close on the dim) is live-only.
+ * §AO/§AQ — the profile menu, the header nav, and the mode rail.
+ * The menu's pinned state is owned by AppShell; `initialMenuPinned`
+ * renders it pinned on first paint so the static render can assert
+ * the dropdown markup. Interaction itself (hover staying open
+ * across the bridge, rail sliding in on the edge zone) is live-only.
+ *
+ * §AQ item 4: the press dim is REMOVED — pinned-open behaves like
+ * hover-open (no overlay, header stays at its normal layer).
+ * §AQ item 12: the nav lives in the header (no Profile tab), the
+ * sidebar holds only the mode pills (hidden by default), and the
+ * menu holds the ONLY Log out in the shell.
  */
 
 const IDENTITY: ShellIdentity = {
@@ -28,7 +33,7 @@ function renderShell(initialMenuPinned = false): string {
           <div>page content</div>
         </AppShell>
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
 }
 
@@ -39,7 +44,7 @@ function classOf(html: string, tag: string, mustContain: string): string | null 
   return matches.length > 0 ? matches[0] : null
 }
 
-describe('profile menu (§AO)', () => {
+describe('profile menu (§AO, §AQ item 4)', () => {
   it('is closed by default: no menu, no dim overlay', () => {
     const html = renderShell()
     expect(html).not.toContain('role="menu"')
@@ -61,16 +66,14 @@ describe('profile menu (§AO)', () => {
     expect(html).not.toContain('mt-2')
   })
 
-  it('pinned-open: a dim overlay covers everything except the header + menu', () => {
+  it('pinned-open: NO dim overlay — the press dim is removed (§AQ item 4)', () => {
     const html = renderShell(true)
-    const overlay = classOf(html, 'div', 'bg-black/50')
-    expect(overlay).not.toBeNull()
-    expect(overlay).toContain('fixed')
-    expect(overlay).toContain('top-16')
-    expect(overlay).toContain('bottom-0')
-    expect(overlay).toContain('z-50')
-    // The header rises above the overlay while pinned.
-    expect(classOf(html, 'header', 'z-[60]')).not.toBeNull()
+    expect(html).toContain('role="menu"')
+    expect(html).not.toContain('bg-black/50')
+    // The header does NOT rise above anything any more: it stays
+    // at its normal layer when pinned, like when hover-open.
+    expect(classOf(html, 'header', 'z-40')).not.toBeNull()
+    expect(classOf(html, 'header', 'z-[60]')).toBeNull()
   })
 })
 
@@ -87,5 +90,43 @@ describe('sidebar profile card + logo (§AO)', () => {
     const html = renderShell()
     expect(html).toContain('href="/beatmaps"')
     expect(html).toContain('Go to Beatmaps')
+  })
+})
+
+describe('header nav + mode rail (§AQ items 3+12)', () => {
+  it('the header holds all five nav links and no Profile tab', () => {
+    const html = renderShell()
+    for (const path of ['recommendations', 'beatmaps', 'collections', 'lists', 'history']) {
+      expect(html).toContain(`href="/${path}"`)
+    }
+    // Profile is reachable only via the hamburger menu — never a
+    // nav link (the menu items are buttons, not links).
+    expect(html).not.toContain('href="/profile"')
+  })
+
+  it('the menu holds the ONLY Log out / Sign in in the shell', () => {
+    // Closed: no auth button anywhere (the header and sidebar
+    // auth controls are removed).
+    const closed = renderShell()
+    expect(closed.match(/Log out|Sign in/g) ?? []).toHaveLength(0)
+    // Pinned-open: exactly one — the menu item.
+    const pinned = renderShell(true)
+    expect(pinned.match(/Log out|Sign in/g) ?? []).toHaveLength(1)
+  })
+
+  it('the mode rail is hidden by default and holds the four mode pills', () => {
+    const html = renderShell()
+    expect(html).toContain('aria-label="Mode"')
+    // Hidden = translated off-screen to the left.
+    expect(html).toContain('-translate-x-full')
+    expect(html).not.toContain('translate-x-0')
+    for (const mode of ['standard', 'taiko', 'catch', 'mania']) {
+      expect(html).toContain(`title="osu!${mode}"`)
+    }
+  })
+
+  it('the touch-only mode toggle is in the header', () => {
+    const html = renderShell()
+    expect(html).toContain('Change mode')
   })
 })

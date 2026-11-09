@@ -157,16 +157,16 @@ function DownloadWindow() {
 /**
  * Bottom footer bar (part 6, item 4): same controls and styling as
  * the old floating player window, only the placement/container
- * changed. Batch 7, item 1: `left-[232px]` — the same offset as
- * the header — so the footer occupies only the content area and
- * never slides under the fixed 232px sidebar.
- * Exactly ONE progress/seek control (part 6, item 1):
- * the range slider with its time display — the thin progress bar
- * that used to sit below it duplicated the slider and is gone.
- * Seeking still works from the slider; there is no buffered-state
- * display (none existed). The close button stops playback AND
- * dismisses the footer (part 6, item 2): stop() pauses, unloads
- * the source, and clears the track, so the footer unmounts.
+ * changed. §AQ item 12: the sidebar is gone, so the footer spans
+ * the full width (left-0) instead of starting past the old
+ * 232px sidebar. Exactly ONE progress/seek control (part 6,
+ * item 1): the range slider with its time display — the thin
+ * progress bar that used to sit below it duplicated the slider
+ * and is gone. Seeking still works from the slider; there is no
+ * buffered-state display (none existed). The close button stops
+ * playback AND dismisses the footer (part 6, item 2): stop()
+ * pauses, unloads the source, and clears the track, so the
+ * footer unmounts.
  */
 function PlayerFooter() {
   const preview = usePreviewPlayer()
@@ -174,7 +174,7 @@ function PlayerFooter() {
   if (!track) return null
   return (
     <section
-      className="fixed left-[232px] right-0 bottom-0 z-40 border-t border-surface-container-high bg-surface-container-low"
+      className="fixed left-0 right-0 bottom-0 z-40 border-t border-surface-container-high bg-surface-container-low"
       aria-label="Song player"
     >
       <div className="flex items-center gap-3 px-3 py-2.5 min-w-0">

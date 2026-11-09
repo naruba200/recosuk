@@ -55,7 +55,7 @@ export default function Profile() {
     >
       <div className="flex flex-col w-full gap-space-xl">
         <DashboardReal data={data} onRefresh={refresh} />
-        <StatsReal data={data} onRefresh={refresh} />
+        <StatsReal data={data} />
       </div>
     </AppShell>
   )

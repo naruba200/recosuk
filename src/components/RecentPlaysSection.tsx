@@ -1,11 +1,20 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import type { OsuScore } from '../lib/osu'
 import type { StatSnapshot } from '../lib/profileService'
 import { computeRecentPpGain } from '../lib/recentPpGain'
 import { fmtInt } from '../lib/interpretations'
+import {
+  hasMoreToShow,
+  nextVisibleCount,
+  RECENT_PLAYS_PAGE_SIZE,
+} from '../lib/showMore'
 
 export interface RecentPlaysSectionProps {
-  /** Recent plays already fetched for the current mode (proxy caps at 24). */
+  /**
+   * Recent plays already fetched for the current mode (fetched
+   * with limit 100, §AQ item 7); the section reveals 24 at a
+   * time so past days' plays are reachable.
+   */
   plays: OsuScore[]
   /** Current profile pp for the current mode (skillProfile.pp). */
   currentPp: number
@@ -59,8 +68,25 @@ export default function RecentPlaysSection({
   isAccount,
   modeLabel,
 }: RecentPlaysSectionProps) {
+  // §AQ item 7: reveal 24 at a time (+24 per press) so the list
+  // reaches past days instead of stopping at today's plays. The
+  // count resets when the mode changes; a refresh that prepends
+  // new plays keeps the expanded count. Reset to the first page
+  // when the mode changes — adjusted during render, so the first
+  // render after a switch already shows 24 (an effect would flash
+  // the old count first).
+  const [visibleCount, setVisibleCount] = useState(RECENT_PLAYS_PAGE_SIZE)
+  const [prevModeLabel, setPrevModeLabel] = useState(modeLabel)
+  if (prevModeLabel !== modeLabel) {
+    setPrevModeLabel(modeLabel)
+    setVisibleCount(RECENT_PLAYS_PAGE_SIZE)
+  }
+  const visiblePlays = plays.slice(0, visibleCount)
+  // The gain pill is computed from the VISIBLE plays only — the
+  // "since" date is the snapshot at/before the oldest play shown,
+  // never the oldest play fetched.
   const gain = isAccount
-    ? computeRecentPpGain(currentPp, snapshots, oldestPlayAt(plays))
+    ? computeRecentPpGain(currentPp, snapshots, oldestPlayAt(visiblePlays))
     : null
   const sinceDate = gain ? new Date(gain.since).toLocaleDateString() : null
 
@@ -109,7 +135,8 @@ export default function RecentPlaysSection({
           No recent plays in {modeLabel} yet.
         </p>
       ) : (
-        plays.map((play) => {
+        <>
+          {visiblePlays.map((play) => {
           const mods = play.mods ?? []
           const date = formatPlayDate(play.created_at)
           const meta: ReactNode[] = []
@@ -179,7 +206,24 @@ export default function RecentPlaysSection({
               </span>
             </div>
           )
-        })
+          })}
+          {/* §AQ item 7: reveal +24 per press until every fetched
+              play is shown; then the button goes away instead of
+              pretending there is more. */}
+          {hasMoreToShow(visibleCount, plays.length) && (
+            <button
+              className="px-space-md py-2 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-md text-label-md transition-colors self-center"
+              type="button"
+              onClick={() =>
+                setVisibleCount((n) =>
+                  nextVisibleCount(n, plays.length, RECENT_PLAYS_PAGE_SIZE),
+                )
+              }
+            >
+              Show more ({plays.length - visibleCount} more)
+            </button>
+          )}
+        </>
       )}
     </div>
   )

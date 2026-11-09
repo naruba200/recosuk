@@ -23,6 +23,7 @@ import {
   buildMirrorQueryText,
   DEFAULT_MIRROR_SORT,
   defaultMirrorFilters,
+  effectiveMirrorSort,
   fetchMirrorPage,
   MIRROR_GENRES,
   MIRROR_LANGUAGES,
@@ -30,7 +31,9 @@ import {
   MIRROR_STATUSES,
   MIRROR_VIEW_STORAGE_KEY,
   mirrorCandidateMatches,
+  mirrorSearchMatchesQuery,
   parseMirrorView,
+  searchQueryWords,
   type MirrorFilters,
   type MirrorSort,
   type MirrorView,
@@ -847,6 +850,14 @@ function BeatmapsReal() {
   const [query, setQuery] = useState(initialPlace?.query ?? '')
   const [debouncedQuery, setDebouncedQuery] = useState(initialPlace?.debouncedQuery ?? '')
   const [sort, setSort] = useState<MirrorSort>(initialPlace?.sort ?? DEFAULT_MIRROR_SORT)
+  // §AQ item 9a: whether the user has picked a sort by hand. The
+  // relevance rule only applies while the sort is still the
+  // untouched default — an explicit pick (even "Newest") is
+  // always respected. A restored non-default sort counts as
+  // picked; a restored default counts as untouched.
+  const [sortTouched, setSortTouched] = useState(
+    initialPlace ? initialPlace.sort !== DEFAULT_MIRROR_SORT : false,
+  )
   const [filters, setFilters] = useState<MirrorFilters>(
     () => initialPlace?.filters ?? defaultMirrorFilters(),
   )
@@ -939,6 +950,14 @@ function BeatmapsReal() {
     () => buildMirrorQueryText(debouncedQuery, filters),
     [debouncedQuery, filters],
   )
+  // §AQ item 9b: the plain words of the current free-text query.
+  // Non-empty means the strict filter is active, so the count
+  // line must not quote the API's unfiltered total.
+  const queryWords = useMemo(() => searchQueryWords(debouncedQuery), [debouncedQuery])
+  // §AQ item 9a: the sort actually in effect. A query with the
+  // untouched default sort ranks by relevance.
+  const relevanceActive =
+    queryText.trim() !== '' && sort === DEFAULT_MIRROR_SORT && !sortTouched
   // §AN: one mode only — the global mode. No All-modes view.
   const allExhausted = results.length > 0 && exhausted
 
@@ -946,6 +965,11 @@ function BeatmapsReal() {
     (
       pages: { mode: GameMode; page: SearchPage }[],
       into: Map<number, MirrorResult>,
+      // §AQ item 9b: the plain words of the free-text query. Sets
+      // whose title/artist/creator contains none of them are
+      // dropped here, so tag/difficulty-only matches never reach
+      // the list (or the count line).
+      words: string[],
     ): Map<number, MirrorResult> => {
       for (const { mode: m, page } of pages) {
         const profile = neutralProfile(m)
@@ -953,6 +977,7 @@ function BeatmapsReal() {
           if (!set || typeof set.id !== 'number' || into.has(set.id)) continue
           const candidate = setToCandidate(set, m, profile)
           if (!candidate || !mirrorCandidateMatches(candidate, filters)) continue
+          if (!mirrorSearchMatchesQuery(candidate, words)) continue
           candidate.reason = `${set.status} · ${(set.play_count ?? 0).toLocaleString('en-US')} plays · ${(set.favourite_count ?? 0).toLocaleString('en-US')} favourites`
           into.set(set.id, { candidate, mode: m })
         }
@@ -966,11 +991,15 @@ function BeatmapsReal() {
   // list from the first cursor page. Cached pages (item 5) render
   // immediately; Refresh bypasses the cache.
   const runFreshSearch = useCallback(
-    async (opts: { fresh: boolean; queryText?: string }) => {
+    async (opts: { fresh: boolean; queryText?: string; freeText?: string }) => {
       const run = ++runRef.current
       // The Search button passes the live input text: the debounced
       // query may still hold the previous keystrokes.
       const effectiveQueryText = opts.queryText ?? queryText
+      // The free text behind the search — the live input on a
+      // Search press, the debounced query otherwise. It feeds the
+      // strict filter; the built query text above feeds the API.
+      const effectiveFreeText = opts.freeText ?? debouncedQuery
       setBusy(true)
       setError(null)
       setResults([])
@@ -979,11 +1008,22 @@ function BeatmapsReal() {
       setExhausted(false)
       try {
         const page = await fetchMirrorPage(
-          { mode: globalMode, queryText: effectiveQueryText, filters, sort },
+          {
+            mode: globalMode,
+            queryText: effectiveQueryText,
+            filters,
+            // §AQ item 9a: relevance when a query is present and
+            // the sort is still the untouched default.
+            sort: effectiveMirrorSort(effectiveQueryText, sort, sortTouched),
+          },
           { fresh: opts.fresh },
         )
         if (runRef.current !== run) return
-        const merged = pageToResults([{ mode: globalMode, page }], new Map())
+        const merged = pageToResults(
+          [{ mode: globalMode, page }],
+          new Map(),
+          searchQueryWords(effectiveFreeText),
+        )
         setCursor(page.cursor_string ?? null)
         setExhausted(!page.cursor_string)
         setResults([...merged.values()])
@@ -996,7 +1036,7 @@ function BeatmapsReal() {
         if (runRef.current === run) setBusy(false)
       }
     },
-    [globalMode, queryText, filters, sort, pageToResults],
+    [globalMode, queryText, debouncedQuery, filters, sort, sortTouched, pageToResults],
   )
 
   // Typing is debounced; filter/sort changes search immediately
@@ -1043,13 +1083,19 @@ function BeatmapsReal() {
         mode: globalMode,
         queryText,
         filters,
-        sort,
+        sort: effectiveMirrorSort(queryText, sort, sortTouched),
         cursor,
       })
       if (runRef.current !== run) return
       setResults((prev) => {
         const merged = new Map(prev.map((r) => [r.candidate.beatmapsetId, r]))
-        return [...pageToResults([{ mode: globalMode, page }], merged).values()]
+        return [
+          ...pageToResults(
+            [{ mode: globalMode, page }],
+            merged,
+            searchQueryWords(debouncedQuery),
+          ).values(),
+        ]
       })
       setCursor(page.cursor_string ?? null)
       setExhausted(!page.cursor_string)
@@ -1057,7 +1103,7 @@ function BeatmapsReal() {
       loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [busy, exhausted, cursor, globalMode, queryText, filters, sort, pageToResults])
+  }, [busy, exhausted, cursor, globalMode, queryText, debouncedQuery, filters, sort, sortTouched, pageToResults])
 
   useEffect(() => {
     const el = sentinelRef.current
@@ -1081,6 +1127,9 @@ function BeatmapsReal() {
   const clearFilters = () => {
     setFilters(defaultMirrorFilters())
     setSort(DEFAULT_MIRROR_SORT)
+    // Clearing resets the sort to the untouched default, so a
+    // later query ranks by relevance again (§AQ item 9a).
+    setSortTouched(false)
   }
 
   const filtersActive =
@@ -1225,6 +1274,7 @@ function BeatmapsReal() {
                     void runFreshSearch({
                       fresh: false,
                       queryText: buildMirrorQueryText(query, filters),
+                      freeText: query,
                     })
                   }}
                 >
@@ -1241,9 +1291,25 @@ function BeatmapsReal() {
                 unchanged — only the presentation. */}
             <div className="flex flex-wrap items-center gap-2 flex-shrink-0" role="toolbar" aria-label="Mirror controls">
               <MenuSelect
-                options={MIRROR_SORTS.map((s) => ({ value: s.value, label: s.shortLabel }))}
-                value={sort}
-                onChange={(v) => setSort(v as MirrorSort)}
+                options={
+                  relevanceActive
+                    ? [
+                        { value: 'relevance' as const, label: 'Relevance' },
+                        ...MIRROR_SORTS.map((s) => ({
+                          value: s.value,
+                          label: s.shortLabel,
+                        })),
+                      ]
+                    : MIRROR_SORTS.map((s) => ({ value: s.value, label: s.shortLabel }))
+                }
+                value={relevanceActive ? 'relevance' : sort}
+                onChange={(v) => {
+                  // "Relevance" is the effective state, not a
+                  // pickable sort — selecting it changes nothing.
+                  if (v === 'relevance') return
+                  setSort(v as MirrorSort)
+                  setSortTouched(true)
+                }}
                 prefix="Sort:"
                 ariaLabel="Sort results"
                 buttonClassName="relative flex items-center h-9 w-44 pl-3 pr-8 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm hover:bg-surface-bright transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -1417,7 +1483,15 @@ function BeatmapsReal() {
             <div className="flex items-center gap-space-sm">
               <span className="font-headline-sm text-headline-sm text-on-surface">Search results</span>
               <span className="px-2 py-0.5 rounded-full bg-surface-container-high font-label-sm text-label-sm text-on-surface-variant font-medium">
-                {results.length} beatmapsets{total !== null ? ` · ~${total.toLocaleString('en-US')} on osu!` : ''}
+                {results.length} beatmapsets
+                {/* §AQ item 9b: the API total counts full-text
+                    matches, so once the strict filter drops rows
+                    it no longer matches what is shown — the
+                    "~N on osu!" suffix is shown only when no
+                    strict filtering is active. */}
+                {total !== null && queryWords.length === 0
+                  ? ` · ~${total.toLocaleString('en-US')} on osu!`
+                  : ''}
               </span>
             </div>
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-low font-label-sm text-label-sm">

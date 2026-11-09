@@ -3,7 +3,7 @@
 // rendered unchanged when nothing is linked. The real variant at the
 // bottom renders the same design language with live per-mode data,
 // the interpretation layer, top plays, and snapshot history.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AppShell from '../components/AppShell'
 import LoadingState from '../components/LoadingState'
 import AccBandChart from '../components/AccBandChart'
@@ -15,6 +15,7 @@ import { MODE_LABELS } from '../lib/mode'
 import { fmtAcc, fmtInt, interpretProfile } from '../lib/interpretations'
 import { useAuth } from '../lib/auth'
 import { useCapabilities } from '../lib/capabilities'
+import { hasMoreToShow, nextVisibleCount, TOP_PLAYS_PAGE_SIZE } from '../lib/showMore'
 
 // Identity shown by the demo fallback variant: sample data, not a real player.
 const DEMO_IDENTITY = {
@@ -898,10 +899,8 @@ function formatHours(seconds: number | undefined): string {
 
 export function StatsReal({
   data,
-  onRefresh,
 }: {
   data: ProfileData
-  onRefresh: () => void
 }) {
   const mode = useModeStore((s) => s.mode)
   const { user, skillProfile: p } = data
@@ -909,45 +908,34 @@ export function StatsReal({
   const caps = useCapabilities()
   const [snapToken, setSnapToken] = useState(0)
   const snapshots = useSnapshots(mode, snapToken)
-  const refreshedAt = new Date(p.generatedAt)
-
-  const handleRefresh = () => {
-    onRefresh()
+  // §AQ item 5: the Stats header (and its "Refresh from osu!"
+  // button) is gone — the Dashboard's "Sync now" is the only
+  // refresh. A sync still writes a new snapshot, so reload the
+  // Progress history whenever a refresh lands (generatedAt moves);
+  // the first run is skipped so the mount fetch is not doubled.
+  const firstGeneratedAt = useRef(p.generatedAt)
+  useEffect(() => {
+    if (firstGeneratedAt.current === p.generatedAt) return
+    firstGeneratedAt.current = p.generatedAt
     setSnapToken((n) => n + 1)
+  }, [p.generatedAt])
+  // §AQ item 6: the longer top-plays list reveals +15 per press.
+  // Reset to the first page when the mode changes (adjusted
+  // during render, so the first render after a switch already
+  // shows 15 — an effect would flash the old count first).
+  const [visibleTopPlays, setVisibleTopPlays] = useState(TOP_PLAYS_PAGE_SIZE)
+  const [prevTopPlaysMode, setPrevTopPlaysMode] = useState(mode)
+  if (prevTopPlaysMode !== mode) {
+    setPrevTopPlaysMode(mode)
+    setVisibleTopPlays(TOP_PLAYS_PAGE_SIZE)
   }
 
   return (
     <div className="flex flex-col w-full">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-md pb-space-lg">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-space-sm">
-            <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Stats — {MODE_LABELS[mode]}</h1>
-            {mode === 'mania' && p.mainKeyCount !== null && (
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-container/25 text-primary">
-                <span className="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(210,187,255,0.8)]"></span>
-                <span className="font-label-sm text-label-sm uppercase tracking-wider font-bold">{p.mainKeyCount}K Focused</span>
-              </div>
-            )}
-          </div>
-          <p className="font-body-md text-body-md text-on-surface-variant">In-depth performance tracking and skill degradation analysis</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-space-md">
-          <div className="flex flex-col text-left lg:text-right">
-            <div className="flex items-center lg:justify-end gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#7EE787] shadow-[0_0_6px_rgba(126,231,135,0.8)]"></span>
-              <span className="font-label-sm text-label-sm text-on-surface font-medium">
-                Last refreshed {refreshedAt.toLocaleDateString()} {refreshedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-            <span className="font-label-sm text-[10px] text-on-surface-variant">Live from osu! via RecOsuk proxy</span>
-          </div>
-          <button className="group relative flex items-center gap-space-xs px-space-md py-2.5 rounded-full bg-primary-container text-on-primary-container font-label-md text-label-md shadow-[0_4px_20px_rgba(164,118,255,0.35)] hover:shadow-[0_4px_26px_rgba(164,118,255,0.55)] active:scale-[0.98] transition-all" id="refresh-btn" type="button" onClick={handleRefresh}>
-            <span className="material-symbols-outlined text-[18px] group-hover:rotate-180 transition-transform duration-500">sync</span>
-            <span>Refresh from osu!</span>
-          </button>
-        </div>
-      </div>
-
+      {/* §AQ item 5: no Stats header block — the Dashboard above
+          already carries the profile heading and the only refresh
+          ("Sync now"), so a second title/description/refresh in
+          the middle of the page is redundant. */}
       {p.isStarter && (
         <div className="p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)] mb-space-xl">
           <p className="font-body-md text-body-md text-on-surface">
@@ -958,22 +946,11 @@ export function StatsReal({
         </div>
       )}
 
-      {/* Headline numbers strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-space-md mb-space-xl">
-        <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
-          <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-primary/10 blur-xl pointer-events-none"></div>
-          <div className="flex items-center justify-between text-on-surface-variant mb-1">
-            <span className="font-label-sm text-label-sm uppercase tracking-wider">Performance Points</span>
-            <span className="material-symbols-outlined text-primary text-[18px]">bolt</span>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="font-metric-display text-metric-display text-primary tracking-tight leading-none">{fmtInt(p.pp)}</span>
-            <span className="font-label-sm text-label-sm text-on-surface-variant">pp</span>
-          </div>
-          <div className="flex items-center gap-1 mt-2 text-on-surface-variant">
-            <span className="font-label-sm text-label-sm">from your top {p.topPlayCount} plays</span>
-          </div>
-        </div>
+      {/* Headline numbers strip (§AQ item 1: the Performance
+          Points card is removed — the Dashboard above already
+          shows the pp; the remaining four cards fill the row, so
+          the grid drops from five columns to four on xl). */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-space-md mb-space-xl">
         <div className="relative overflow-hidden p-space-md rounded-DEFAULT bg-surface-container-low shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
           <div className="flex items-center justify-between text-on-surface-variant mb-1">
             <span className="font-label-sm text-label-sm uppercase tracking-wider">Global Ranking</span>
@@ -1058,7 +1035,7 @@ export function StatsReal({
               <p className="font-body-sm text-body-sm text-on-surface-variant">No top plays in {MODE_LABELS[mode]} yet.</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {data.topPlays.slice(0, 15).map((play) => (
+                {data.topPlays.slice(0, visibleTopPlays).map((play) => (
                   <div key={play.id ?? play.beatmap?.id} className="flex items-center gap-space-md p-2 rounded-DEFAULT bg-surface-container">
                     {play.beatmapset?.covers?.list ? (
                       <img className="w-16 h-10 rounded object-cover flex-shrink-0" alt="" src={play.beatmapset.covers.list} />
@@ -1077,10 +1054,40 @@ export function StatsReal({
                       <span className="text-[#FFCC22] font-bold">{play.beatmap?.difficulty_rating.toFixed(2)}★</span>
                       <span className="text-on-surface">{(play.accuracy * 100).toFixed(2)}%</span>
                       <span className="text-primary font-bold">{play.pp ? `${Math.round(play.pp)}pp` : '—'}</span>
-                      <span className="text-on-surface-variant hidden xl:inline">{fmtInt(play.max_combo)}x{(play.mods ?? []).length > 0 ? ` · ${(play.mods ?? []).join('')}` : ''}</span>
+                      <span className="text-on-surface-variant">{fmtInt(play.max_combo)}x</span>
+                      {/* §AQ item 8: the mods are badges now — always
+                          visible, not small text hidden below xl. */}
+                      {(play.mods ?? []).length > 0 && (
+                        <span className="flex items-center gap-1">
+                          {(play.mods ?? []).map((mod) => (
+                            <span
+                              key={mod}
+                              className="px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface font-label-sm text-[10px] font-bold"
+                            >
+                              {mod}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
+                {/* §AQ item 6: reveal +15 per press until the loaded
+                    list (up to 100) is exhausted; then the button
+                    goes away instead of pretending there is more. */}
+                {hasMoreToShow(visibleTopPlays, data.topPlays.length) && (
+                  <button
+                    className="mt-1 px-space-md py-2 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-md text-label-md transition-colors self-center"
+                    type="button"
+                    onClick={() =>
+                      setVisibleTopPlays((n) =>
+                        nextVisibleCount(n, data.topPlays.length, TOP_PLAYS_PAGE_SIZE),
+                      )
+                    }
+                  >
+                    Show more ({data.topPlays.length - visibleTopPlays} more)
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1132,7 +1139,7 @@ export function StatsReal({
                 <p className="font-body-sm text-body-sm text-on-surface-variant">Loading snapshots…</p>
               ) : snapshots.length === 0 ? (
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  No snapshots yet for {MODE_LABELS[mode]}. Hit "Refresh from osu!" and your first
+                  No snapshots yet for {MODE_LABELS[mode]}. Hit "Sync now" and your first
                   snapshot is saved — future refreshes build your progress-over-time line.
                 </p>
               ) : (
@@ -1201,7 +1208,7 @@ export function StatsReal({
 export default function Stats() {
   const mode = useModeStore((s) => s.mode)
   const { tier } = useAuth()
-  const { status, data, identity, refresh } = useProfileData(mode)
+  const { status, data, identity } = useProfileData(mode)
 
   if (status === 'loading') {
     return (
@@ -1229,7 +1236,7 @@ export default function Stats() {
         tierLabel: tier === 'account' ? 'account' : 'guest',
       }}
     >
-      <StatsReal data={data} onRefresh={refresh} />
+      <StatsReal data={data} />
     </AppShell>
   )
 }

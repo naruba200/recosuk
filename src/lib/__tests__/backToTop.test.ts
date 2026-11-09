@@ -27,15 +27,15 @@ describe('shouldShowBackToTop (§AE)', () => {
 })
 
 describe('backToTopPositionClass (§AN)', () => {
-  it('left placement is unchanged (sidebar + 16px gutter)', () => {
-    expect(backToTopPositionClass('left', false, false, false)).toBe('left-[248px] bottom-4')
+  it('left placement is the plain 16px gutter (§AQ item 12: the sidebar is gone)', () => {
+    expect(backToTopPositionClass('left', false, false, false)).toBe('left-4 bottom-4')
     expect(backToTopPositionClass('left', true, false, false)).toBe(
-      'left-[248px] bottom-[112px]',
+      'left-4 bottom-[112px]',
     )
     // The dock never moves the left placement.
-    expect(backToTopPositionClass('left', false, true, false)).toBe('left-[248px] bottom-4')
+    expect(backToTopPositionClass('left', false, true, false)).toBe('left-4 bottom-4')
     expect(backToTopPositionClass('left', true, false, true)).toBe(
-      'left-[248px] bottom-[112px]',
+      'left-4 bottom-[112px]',
     )
   })
 

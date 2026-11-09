@@ -49,6 +49,65 @@ export const MIRROR_SORTS: { value: MirrorSort; label: string; shortLabel: strin
 /** osu! website default: newest first, like the site's listing. */
 export const DEFAULT_MIRROR_SORT: MirrorSort = 'updated_desc'
 
+/**
+ * §AQ item 9a — relevance ranking for searches. When a query is
+ * present and the sort is still the untouched default (Newest),
+ * the sort param is omitted so the API falls back to its relevance
+ * ranking instead of burying the best match under newer loose
+ * matches. Live-verified 2026-11-09 against the deployed proxy:
+ * omitting sort echoes `search.sort = "relevance_desc"` and puts
+ * the five exact "Cycle Hit" title matches first, while
+ * `updated_desc` returns "Hitori no Yoru", "Hitorinbo Envy",
+ * "Seamless", ... first. The official API docs say only "TODO:
+ * documentation" for the search endpoint, so the live evidence
+ * is the source here. An explicitly user-picked sort (sortTouched)
+ * is always respected — even picking "Newest" by hand sends it.
+ * Returns undefined when relevance applies (= omit the param).
+ */
+export function effectiveMirrorSort(
+  queryText: string,
+  sort: MirrorSort,
+  sortTouched: boolean,
+): MirrorSort | undefined {
+  return queryText.trim() !== '' && sort === DEFAULT_MIRROR_SORT && !sortTouched
+    ? undefined
+    : sort
+}
+
+/**
+ * §AQ item 9b — the plain words of a free-text query. Whitespace
+ * tokens with surrounding double quotes stripped; operator clauses
+ * (`creator=`, `stars>=`, `tag="..."`, ...) are dropped because
+ * they are server-side filters, not title/artist/creator words.
+ * An empty result means "no strict filtering" (e.g. a query made
+ * only of operator clauses). A quoted phrase (`"Cycle Hit"`)
+ * yields its words; a word inside a creator clause may leak
+ * through (`creator="John Doe"` leaves "Doe") — harmless, since
+ * the creator's own sets contain it.
+ */
+export function searchQueryWords(freeText: string): string[] {
+  return freeText
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/^"+|"+$/g, ''))
+    .filter((w) => w !== '' && !/[=<>\"]/.test(w))
+}
+
+/**
+ * §AQ item 9b — strict client-side query match. Keeps only sets
+ * whose title, artist or creator contains at least one query word
+ * (case-insensitive substring), dropping the tag/difficulty-only
+ * matches the API's full-text search returns ("Cycle Hit" no
+ * longer pulls in a map that merely has "hit" in a difficulty
+ * name). No words = no filtering.
+ */
+export function mirrorSearchMatchesQuery(candidate: RecCandidate, words: string[]): boolean {
+  if (words.length === 0) return true
+  const hay = `${candidate.title} ${candidate.artist} ${candidate.creator}`.toLowerCase()
+  return words.some((w) => hay.includes(w))
+}
+
 export type MirrorStatus = 'any' | 'ranked' | 'loved' | 'qualified' | 'pending' | 'graveyard'
 
 export const MIRROR_STATUSES: { value: MirrorStatus; label: string }[] = [
@@ -220,7 +279,12 @@ export interface MirrorPageRequest {
   mode: GameMode
   queryText: string
   filters: MirrorFilters
-  sort: MirrorSort
+  /**
+   * The sort to send; undefined omits it so the API ranks by
+   * relevance (§AQ item 9a). The caller owns the decision —
+   * see effectiveMirrorSort.
+   */
+  sort?: MirrorSort
   cursor?: string | null
 }
 
@@ -291,7 +355,9 @@ export async function fetchMirrorPage(
         // literal id instead of "no filter".
         ...(req.filters.genre > 0 ? { genre: req.filters.genre } : {}),
         ...(req.filters.language > 0 ? { language: req.filters.language } : {}),
-        sort: req.sort,
+        // §AQ item 9a: an undefined sort is omitted (never sent as
+        // an empty string) so the API ranks by relevance.
+        ...(req.sort ? { sort: req.sort } : {}),
       },
     }),
   )

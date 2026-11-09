@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   buildMirrorQueryText,
   defaultMirrorFilters,
+  effectiveMirrorSort,
   mirrorCandidateMatches,
+  mirrorSearchMatchesQuery,
   MIRROR_SORTS,
   DEFAULT_MIRROR_SORT,
   mirrorPageCacheKey,
   parseMirrorView,
+  searchQueryWords,
   type MirrorFilters,
 } from '../mirrorSearch'
 import type { RecCandidate } from '../recommend'
@@ -189,5 +192,100 @@ describe('parseMirrorView (grid/list preference)', () => {
     expect(parseMirrorView('')).toBe('list')
     expect(parseMirrorView('GRID')).toBe('list')
     expect(parseMirrorView('cards')).toBe('list')
+  })
+})
+
+describe('effectiveMirrorSort — relevance for searches (§AQ item 9a)', () => {
+  it('omits the sort (relevance) for a query with the untouched default sort', () => {
+    expect(effectiveMirrorSort('Cycle Hit', 'updated_desc', false)).toBeUndefined()
+    expect(effectiveMirrorSort('  xi  ', 'updated_desc', false)).toBeUndefined()
+  })
+
+  it('keeps Newest when there is no query', () => {
+    expect(effectiveMirrorSort('', 'updated_desc', false)).toBe('updated_desc')
+    expect(effectiveMirrorSort('   ', 'updated_desc', false)).toBe('updated_desc')
+  })
+
+  it('always respects an explicitly picked sort, even "Newest"', () => {
+    expect(effectiveMirrorSort('Cycle Hit', 'updated_desc', true)).toBe('updated_desc')
+    expect(effectiveMirrorSort('Cycle Hit', 'plays_desc', false)).toBe('plays_desc')
+    expect(effectiveMirrorSort('Cycle Hit', 'plays_desc', true)).toBe('plays_desc')
+    expect(effectiveMirrorSort('', 'title_asc', false)).toBe('title_asc')
+  })
+})
+
+describe('searchQueryWords (§AQ item 9b)', () => {
+  it('lowercases and splits plain words', () => {
+    expect(searchQueryWords('Cycle Hit')).toEqual(['cycle', 'hit'])
+    expect(searchQueryWords('  xi  ')).toEqual(['xi'])
+  })
+
+  it('drops operator clauses (creator=, ranges, tags)', () => {
+    expect(searchQueryWords('stars>=5')).toEqual([])
+    expect(searchQueryWords('creator=sotarks')).toEqual([])
+    expect(searchQueryWords('xi stars>=4 bpm>=170')).toEqual(['xi'])
+  })
+
+  it('keeps the words of a quoted phrase', () => {
+    expect(searchQueryWords('"Cycle Hit"')).toEqual(['cycle', 'hit'])
+  })
+
+  it('returns no words for an empty query', () => {
+    expect(searchQueryWords('')).toEqual([])
+    expect(searchQueryWords('   ')).toEqual([])
+  })
+})
+
+describe('mirrorSearchMatchesQuery — strict client-side filter (§AQ item 9b)', () => {
+  it('keeps a set whose title contains a query word', () => {
+    expect(
+      mirrorSearchMatchesQuery(
+        candidate({ title: 'Cycle Hit', artist: 'Someone', creator: 'mapper' }),
+        ['cycle', 'hit'],
+      ),
+    ).toBe(true)
+  })
+
+  it('keeps a set whose artist or creator contains a query word', () => {
+    expect(
+      mirrorSearchMatchesQuery(
+        candidate({ title: 'Something Else', artist: 'Hitomi', creator: 'mapper' }),
+        ['cycle', 'hit'],
+      ),
+    ).toBe(true)
+    expect(
+      mirrorSearchMatchesQuery(
+        candidate({ title: 'Something Else', artist: 'A', creator: 'CycleMaker' }),
+        ['cycle', 'hit'],
+      ),
+    ).toBe(true)
+  })
+
+  it('drops a set matching only tags or a difficulty name', () => {
+    // Title/artist/creator contain neither word: this is the
+    // "Seamless" case from the live probe — a full-text match
+    // the API returns (tag/difficulty text) that the strict
+    // filter must remove. Note "Hitori no Yoru" would NOT be
+    // dropped: "Hitori" contains "hit" as a substring, so the
+    // filter keeps it by design — relevance ranking is what
+    // puts the exact title matches first.
+    expect(
+      mirrorSearchMatchesQuery(
+        candidate({ title: 'Seamless', artist: 'Someone', creator: 'mapper' }),
+        ['cycle', 'hit'],
+      ),
+    ).toBe(false)
+  })
+
+  it('is case-insensitive and passes everything with no words', () => {
+    expect(
+      mirrorSearchMatchesQuery(
+        candidate({ title: 'CYCLE HIT', artist: 'A', creator: 'M' }),
+        ['cycle'],
+      ),
+    ).toBe(true)
+    expect(
+      mirrorSearchMatchesQuery(candidate({ title: 'Anything', artist: 'A', creator: 'M' }), []),
+    ).toBe(true)
   })
 })

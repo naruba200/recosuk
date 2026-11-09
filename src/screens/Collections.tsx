@@ -53,7 +53,6 @@ import {
   paginatePackList,
   type BeatmapPack,
   type PackCategory,
-  type PackModeFilter,
 } from '../lib/packs'
 
 /**
@@ -886,10 +885,6 @@ function CollectionsReal() {
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [detailLoadingTag, setDetailLoadingTag] = useState<string | null>(null)
   const [packType, setPackType] = useState<PackCategory>('standard')
-  // Mode filter defaults to the global mode and follows global-mode
-  // changes, like the Ranked section below; the user can override it
-  // with the chips. Packs with an unknown mode are always shown.
-  const [modeFilter, setModeFilter] = useState<PackModeFilter>(globalMode)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const cancelRef = useRef(false)
@@ -897,10 +892,6 @@ function CollectionsReal() {
 
   const username = guestSession?.osuUsername ?? null
   const key = seenKey(tier, username ?? 'collections')
-
-  useEffect(() => {
-    setModeFilter(globalMode)
-  }, [globalMode])
 
   const load = useCallback(async (fresh: boolean, type: PackCategory) => {
     const run = ++runRef.current
@@ -1096,12 +1087,13 @@ function CollectionsReal() {
   )
 
   // Packs render in chunks (batch 12, part 10): the buffered list is
-  // never rendered whole. The mode filter applies client-side over
-  // the buffered packs (the list endpoint has no mode param; each
-  // pack's mode comes from its `ruleset_id`, unknown modes always
-  // shown). "Show more" loads the next cursor page while one exists,
-  // else reveals the next buffered chunk.
-  const filteredPacks = packs.filter((pack) => packVisibleForMode(pack, modeFilter))
+  // never rendered whole. Packs follow the GLOBAL mode (§AQ item
+  // 10: the section's own mode filter chips are removed) — the
+  // list endpoint has no mode param; each pack's mode comes from
+  // its `ruleset_id`, unknown modes always shown. "Show more"
+  // loads the next cursor page while one exists, else reveals
+  // the next buffered chunk.
+  const filteredPacks = packs.filter((pack) => packVisibleForMode(pack, globalMode))
   const { visible: visiblePacks, remaining: remainingPacks } = paginatePackList(
     filteredPacks,
     visibleCount,
@@ -1150,31 +1142,9 @@ function CollectionsReal() {
             </button>
           ))}
         </div>
-        <div
-          className="inline-flex flex-wrap items-center gap-1 p-1 rounded-full bg-surface-container-low"
-          role="group"
-          aria-label="Pack mode filter"
-        >
-          {(['all', 'osu', 'taiko', 'fruits', 'mania'] as const).map((filter) => (
-            <button
-              key={filter}
-              aria-pressed={filter === modeFilter}
-              className={`px-space-md py-1.5 rounded-full font-label-md text-label-md transition-all ${
-                filter === modeFilter
-                  ? 'bg-primary text-on-primary shadow-sm'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-              type="button"
-              onClick={() => setModeFilter(filter)}
-            >
-              {filter === 'all' ? 'All modes' : modeLabel(filter)}
-            </button>
-          ))}
-        </div>
       </div>
       <p className="font-body-sm text-body-sm text-on-surface-variant -mt-1">
-        Showing {PACK_CATEGORY_LABELS[packType]} packs
-        {modeFilter === 'all' ? '' : ` for ${modeLabel(modeFilter)}`}. Packs with an
+        Showing {PACK_CATEGORY_LABELS[packType]} packs for {modeLabel(globalMode)}. Packs with an
         unknown mode are always shown.
       </p>
 
@@ -1248,9 +1218,9 @@ function CollectionsReal() {
       {!loading && !error && packs.length > 0 && visiblePacks.length === 0 && (
         <div className="p-space-md rounded-lg bg-surface-container-low">
           <p className="font-body-md text-body-md text-on-surface-variant">
-            No {modeLabel(modeFilter)} packs in the loaded {PACK_CATEGORY_LABELS[packType]} packs.
+            No {modeLabel(globalMode)} packs in the loaded {PACK_CATEGORY_LABELS[packType]} packs.
             Packs with an unknown mode are always shown, so this means every loaded pack
-            belongs to another mode — try All modes.
+            belongs to another mode.
           </p>
         </div>
       )}
