@@ -131,3 +131,39 @@ describe('lists service (M5)', () => {
     await expect(createList(null, 'u1', 'x')).rejects.toThrow('Supabase is not connected')
   })
 })
+
+describe('list cap (batch AP item 2d)', () => {
+  function dbWithItems(n: number): FakeDb {
+    return new FakeDb({
+      lists: [{ id: 'l1', user_id: 'u1', name: 'L', is_public: false, created_at: '2026-01-01T00:00:00Z' }],
+      list_items: Array.from({ length: n }, (_, i) => ({
+        id: `i${i}`,
+        list_id: 'l1',
+        beatmapset_id: 1000 + i,
+        beatmap_id: 10000 + i,
+        mode: 'mania',
+        added_at: '2026-01-01T00:00:00Z',
+      })),
+    })
+  }
+
+  it('refuses a new map once the list holds 500, with an honest message', async () => {
+    const db = dbWithItems(500)
+    await expect(
+      addToList(client(db), { listId: 'l1', beatmapsetId: 9999, beatmapId: 99999, mode: 'mania' }),
+    ).rejects.toThrow('already has 500 maps')
+    expect(await loadListItems(client(db), 'l1')).toHaveLength(500)
+  })
+
+  it('allows the 500th map and re-adding a set that is already in a full list', async () => {
+    const db = dbWithItems(499)
+    const last = await addToList(client(db), { listId: 'l1', beatmapsetId: 9999, beatmapId: 99999, mode: 'mania' })
+    expect(last.beatmapset_id).toBe(9999)
+    expect(await loadListItems(client(db), 'l1')).toHaveLength(500)
+    // Re-adding a set that is already in the list is a dedupe no-op,
+    // not a new item — it never counts against the cap.
+    const again = await addToList(client(db), { listId: 'l1', beatmapsetId: 1000, beatmapId: 10000, mode: 'mania' })
+    expect(again.beatmapset_id).toBe(1000)
+    expect(await loadListItems(client(db), 'l1')).toHaveLength(500)
+  })
+})

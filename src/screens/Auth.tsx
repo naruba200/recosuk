@@ -1,5 +1,6 @@
 // Converted from Stitch export: stitch-raw/12-auth.html
-import { useEffect, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import HCaptcha from '@hcaptcha/react-hcaptcha'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { NOT_CONFIGURED, useAuth } from '../lib/auth'
 
@@ -34,6 +35,31 @@ export default function Auth() {
   const [signinPassword, setSigninPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(null)
+
+  // Captcha (batch AP item 2c): Supabase's CAPTCHA protection is
+  // global once enabled — every sign-up AND sign-in must carry a
+  // token. The widget only renders when VITE_HCAPTCHA_SITEKEY is
+  // set (the public site key, safe to ship in the bundle); with no
+  // key there is no widget and no token, and auth works exactly as
+  // before. Deploy the frontend with the key BEFORE toggling
+  // CAPTCHA on in the Supabase dashboard, or legitimate sign-ups
+  // fail. The token is single-use: it is cleared (and the widget
+  // reset) after every submit, success or failure.
+  const hcaptchaSiteKey = import.meta.env.VITE_HCAPTCHA_SITEKEY as string | undefined
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const hcaptchaRef = useRef<HCaptcha | null>(null)
+
+  function resetCaptcha() {
+    setCaptchaToken(null)
+    hcaptchaRef.current?.resetCaptcha()
+  }
+
+  // Switching tabs unmounts the captcha widget, so the token from
+  // the other tab is stale — clear it.
+  function switchTab(tab: 'signup' | 'signin') {
+    resetCaptcha()
+    setActiveTab(tab)
+  }
 
   // Clicks on wired controls must not be double-handled by the
   // label-based NavigationBridge in App.tsx.
@@ -91,8 +117,9 @@ export default function Auth() {
       return
     }
     setBusy(true)
-    const { error } = await signUp(signupEmail.trim(), signupPassword)
+    const { error } = await signUp(signupEmail.trim(), signupPassword, captchaToken ?? undefined)
     setBusy(false)
+    resetCaptcha()
     if (error) {
       setNotice({
         kind: 'error',
@@ -114,8 +141,9 @@ export default function Auth() {
       return
     }
     setBusy(true)
-    const { error } = await signIn(signinEmail.trim(), signinPassword)
+    const { error } = await signIn(signinEmail.trim(), signinPassword, captchaToken ?? undefined)
     setBusy(false)
+    resetCaptcha()
     if (error) {
       setNotice({
         kind: 'error',
@@ -214,11 +242,11 @@ export default function Auth() {
           <div className="w-full bg-surface-container-low/95 rounded-lg p-6 sm:p-8 shadow-2xl relative z-10 backdrop-blur-xl">
             {/* Top Mode Switcher Tabs */}
             <div className="grid grid-cols-2 p-1.5 bg-surface-container-lowest rounded-full mb-8" id="auth-tab-bar">
-              <button className={activeTab === 'signin' ? TAB_ACTIVE : TAB_INACTIVE} id="tab-signin" type="button" onClick={(e) => { stop(e); setActiveTab('signin') }}>
+              <button className={activeTab === 'signin' ? TAB_ACTIVE : TAB_INACTIVE} id="tab-signin" type="button" onClick={(e) => { stop(e); switchTab('signin') }}>
                 <span className="material-symbols-outlined text-sm">login
                 </span>{' '}Sign in{' '}
               </button>
-              <button className={activeTab === 'signup' ? TAB_ACTIVE : TAB_INACTIVE} id="tab-signup" type="button" onClick={(e) => { stop(e); setActiveTab('signup') }}>
+              <button className={activeTab === 'signup' ? TAB_ACTIVE : TAB_INACTIVE} id="tab-signup" type="button" onClick={(e) => { stop(e); switchTab('signup') }}>
                 <span className="material-symbols-outlined text-sm">person_add
                 </span>{' '}Create account{' '}
               </button>
@@ -287,6 +315,21 @@ export default function Auth() {
                     )}
                   </div>
                 </div>
+                {/* Captcha (batch AP item 2c): only in the active
+                    tab — the other form is hidden, not unmounted, so
+                    an unconditional widget would mount twice. Renders
+                    nothing until VITE_HCAPTCHA_SITEKEY is set. */}
+                {activeTab === 'signup' && hcaptchaSiteKey ? (
+                  <div className="flex justify-center">
+                    <HCaptcha
+                      ref={hcaptchaRef}
+                      sitekey={hcaptchaSiteKey}
+                      onVerify={(token) => setCaptchaToken(token)}
+                      onExpire={() => setCaptchaToken(null)}
+                      onError={() => setCaptchaToken(null)}
+                    />
+                  </div>
+                ) : null}
                 {/* Primary Submit Button — always visibly enabled
                     except while the request is in flight (QA batch 2:
                     the muted secondary-container styling read as a
@@ -352,6 +395,17 @@ export default function Auth() {
                     </span>
                   </div>
                 </div>
+                {activeTab === 'signin' && hcaptchaSiteKey ? (
+                  <div className="flex justify-center">
+                    <HCaptcha
+                      ref={hcaptchaRef}
+                      sitekey={hcaptchaSiteKey}
+                      onVerify={(token) => setCaptchaToken(token)}
+                      onExpire={() => setCaptchaToken(null)}
+                      onError={() => setCaptchaToken(null)}
+                    />
+                  </div>
+                ) : null}
                 <button className="mt-2 w-full py-3.5 px-6 rounded-full bg-primary-container text-on-primary hover:brightness-110 active:scale-[0.98] font-headline-sm text-headline-sm transition-all shadow-xl shadow-primary-container/20 flex items-center justify-center gap-2 cursor-pointer font-bold" type="submit" onClick={stop}>
                   <span className="material-symbols-outlined text-lg">login
                   </span>{' '}Sign in to stage{' '}

@@ -39,8 +39,8 @@ interface AuthContextValue {
   /** The linked guest session, if one exists (drives conversion + UI). */
   guestSession: GuestSession | null
   configured: boolean
-  signUp: (email: string, password: string) => Promise<AuthResult>
-  signIn: (email: string, password: string) => Promise<AuthResult>
+  signUp: (email: string, password: string, captchaToken?: string) => Promise<AuthResult>
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<AuthResult>
   /**
    * GitHub OAuth (M5). Redirects the browser to GitHub; Supabase
    * returns to the app origin and the client picks the session up
@@ -128,19 +128,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [user])
 
+  // Captcha (batch AP item 2c): when Supabase's CAPTCHA protection
+  // is ON, every auth call must carry a captcha token or it fails.
+  // The token comes from the hCaptcha widget in Auth.tsx; when the
+  // widget is absent (no VITE_HCAPTCHA_SITEKEY — captcha off) the
+  // calls go out exactly as before.
   const signUp = useCallback(
-    async (email: string, password: string): Promise<AuthResult> => {
+    async (email: string, password: string, captchaToken?: string): Promise<AuthResult> => {
       if (!supabase) return { error: NOT_CONFIGURED }
-      const { error } = await supabase.auth.signUp({ email, password })
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: captchaToken ? { captchaToken } : undefined,
+      })
       return { error: error ? error.message : null }
     },
     [],
   )
 
   const signIn = useCallback(
-    async (email: string, password: string): Promise<AuthResult> => {
+    async (email: string, password: string, captchaToken?: string): Promise<AuthResult> => {
       if (!supabase) return { error: NOT_CONFIGURED }
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+        options: captchaToken ? { captchaToken } : undefined,
+      })
       return { error: error ? error.message : null }
     },
     [],

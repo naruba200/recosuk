@@ -75,19 +75,46 @@ export interface OsuScore {
 // Errors
 // ---------------------------------------------------------------------------
 
-export type OsuErrorKind = 'not-configured' | 'not-found' | 'upstream'
+export type OsuErrorKind = 'not-configured' | 'not-found' | 'upstream' | 'rate-limited'
 
 export class OsuServiceError extends Error {
   kind: OsuErrorKind
   status?: number
   /** Stable machine-readable code from the proxy (auth actions), e.g. `osu_auth_expired`. */
   code?: string
-  constructor(kind: OsuErrorKind, message: string, status?: number, code?: string) {
+  /** Seconds to wait before retrying, when the proxy sent a
+   *  Retry-After (rate-limited only). */
+  retryAfterSeconds?: number
+  constructor(
+    kind: OsuErrorKind,
+    message: string,
+    status?: number,
+    code?: string,
+    retryAfterSeconds?: number,
+  ) {
     super(message)
     this.kind = kind
     this.status = status
     this.code = code
+    this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+/** True when the failure is the proxy's own rate limit (batch AP
+ *  item 2a: 60/min signed-in, 10/min guests). The message is the
+ *  honest one the proxy returned — show it, never fake success and
+ *  never silently retry in a loop. */
+export function isRateLimitError(err: unknown): err is OsuServiceError {
+  return err instanceof OsuServiceError && err.kind === 'rate-limited'
+}
+
+/** The user-facing rate-limit message, or null when the error is
+ *  anything else. Falls back to a plain message when the proxy
+ *  gave no text of its own. */
+export function rateLimitMessage(err: unknown): string | null {
+  if (!isRateLimitError(err)) return null
+  if (err.message && err.message.trim() !== '') return err.message
+  return 'Too many requests — the osu! proxy is rate-limited right now. Try again in a moment.'
 }
 
 export interface OsuResult<T> {
@@ -170,6 +197,23 @@ export function createOsuClient(deps: OsuClientDeps): OsuClient {
     if (!res.ok) {
       const status = payload?.status ?? res.status
       const code = typeof payload?.code === 'string' ? payload.code : undefined
+      // The proxy's own rate limit (batch AP item 2a) is a distinct
+      // kind: the message names the limit and the wait, and the
+      // Retry-After header carries the same wait in seconds. The
+      // caller shows it — never a silent retry in a loop.
+      if (status === 429 || res.status === 429) {
+        const raw = res.headers?.get?.('retry-after')
+        const retryAfterSeconds = raw !== undefined && raw !== null ? Number(raw) : NaN
+        throw new OsuServiceError(
+          'rate-limited',
+          payload?.error ?? 'Too many requests — the osu! proxy is rate-limited right now. Try again in a moment.',
+          status,
+          code,
+          Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? Math.ceil(retryAfterSeconds)
+            : undefined,
+        )
+      }
       if (status === 404 || res.status === 404) {
         throw new OsuServiceError('not-found', payload?.error ?? 'Not found on osu!', status, code)
       }

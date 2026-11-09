@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from './supabase'
-import { isProxyConfigured, OsuServiceError, proxyCall, type OsuScore, type OsuUser } from './osu'
+import { isProxyConfigured, OsuServiceError, proxyCall, rateLimitMessage, type OsuScore, type OsuUser } from './osu'
+import { SNAPSHOT_THROTTLE_MS } from './proxyLimits'
 import { computeSkillProfile, type MostPlayedEntry, type SkillProfile } from './skillProfile'
 import { createProfileWatcher, type ProfileWatcher } from './profileWatcher'
 import { getGuestSession, useGuestStore } from './guestStore'
@@ -225,14 +226,32 @@ export async function persistProfile(
       { onConflict: 'id' },
     )
     if (opts.snapshot) {
-      await db.from('stat_snapshots').insert({
-        user_id: userId,
-        mode,
-        pp: data.skillProfile.pp,
-        global_rank: data.skillProfile.globalRank,
-        accuracy: data.skillProfile.accuracy,
-        skill_profile: data.skillProfile,
-      })
+      // Snapshot throttle (batch AP item 2d): at most one snapshot
+      // per user per mode per hour. The DB trigger in migration 004
+      // is the real enforcement; this pre-check keeps the common
+      // case from hitting it — a rapid second "Sync now" simply
+      // skips the insert instead of erroring. The latest row is
+      // read (not a time-filtered query) so the check works with
+      // the query shapes the fake DB in tests supports.
+      const { data: latest } = await db
+        .from('stat_snapshots')
+        .select('created_at')
+        .eq('user_id', userId)
+        .eq('mode', mode)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const lastMs = latest?.created_at ? Date.parse(latest.created_at) : NaN
+      if (!Number.isFinite(lastMs) || Date.now() - lastMs >= SNAPSHOT_THROTTLE_MS) {
+        await db.from('stat_snapshots').insert({
+          user_id: userId,
+          mode,
+          pp: data.skillProfile.pp,
+          global_rank: data.skillProfile.globalRank,
+          accuracy: data.skillProfile.accuracy,
+          skill_profile: data.skillProfile,
+        })
+      }
     }
     return true
   } catch {
@@ -571,11 +590,17 @@ export function useProfileData(mode: GameMode): UseProfileData {
         setStatus(fresh.skillProfile.isStarter ? 'empty' : 'ready')
         if (identity) void persistProfile(identity, mode, fresh, { snapshot })
         return fresh
-      } catch {
+      } catch (err) {
         if (runRef.current !== run) return null
         if (!quiet) {
           setStatus('error')
-          setError('Could not load your osu! data just now — the proxy or osu! may be unreachable.')
+          // A rate-limited load shows the proxy's honest limit
+          // message (batch AP item 2a); anything else keeps the
+          // existing generic line.
+          setError(
+            rateLimitMessage(err) ??
+              'Could not load your osu! data just now — the proxy or osu! may be unreachable.',
+          )
         }
         return null
       } finally {

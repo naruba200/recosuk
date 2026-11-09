@@ -13,6 +13,7 @@ import {
   encryptToken,
   exchangeAuthorizationCode,
   fetchOsuMe,
+  getUserAccessTokenBestEffort,
   getValidAccessToken,
   isTokenExpired,
   isValidOsuRedirectUri,
@@ -373,6 +374,79 @@ describe('getValidAccessToken', () => {
     await expect(
       getValidAccessToken({ store, fetchFn, env: badEnv, userId: 'user-1' }),
     ).rejects.toMatchObject({ code: OSU_CONFIG_MISSING_CODE, status: 500 })
+    expect(removed).toEqual([])
+  })
+})
+
+describe('getUserAccessTokenBestEffort (batch AP item 1a)', () => {
+  const env = { clientId: 'cid', clientSecret: 'csecret', encryptionKeyB64: KEY_A }
+
+  it('returns null when no row exists (and deletes nothing)', async () => {
+    const { store, removed } = memoryStore(null)
+    const fetchFn = fakeFetch(async () => tokenResponse({}))
+    const out = await getUserAccessTokenBestEffort({ store, fetchFn, env, userId: 'user-1' })
+    expect(out).toBeNull()
+    expect(removed).toEqual([])
+  })
+
+  it('returns the stored token untouched when fresh (no network, no write)', async () => {
+    const row = await encRow()
+    const { store, upserts } = memoryStore(row)
+    const fetchFn = fakeFetch(async () => {
+      throw new Error('must not be called')
+    })
+    const out = await getUserAccessTokenBestEffort({ store, fetchFn, env, userId: 'user-1' })
+    expect(out).toBe('access-1')
+    expect(upserts).toEqual([])
+  })
+
+  it('refreshes an expired token and updates the row (no delete)', async () => {
+    const row = await encRow({ expires_at: new Date(Date.now() - 1000).toISOString() })
+    const { store, rows, removed, upserts } = memoryStore(row)
+    const fetchFn = fakeFetch(async () =>
+      tokenResponse({ access_token: 'at-new', refresh_token: 'rt-new', expires_in: 7200 }),
+    )
+    const out = await getUserAccessTokenBestEffort({ store, fetchFn, env, userId: 'user-1' })
+    expect(out).toBe('at-new')
+    expect(removed).toEqual([])
+    expect(upserts).toHaveLength(1)
+    const saved = rows.get('user-1')!
+    await expect(decryptToken(saved.access_token_enc, KEY_A)).resolves.toBe('at-new')
+  })
+
+  it('returns null and KEEPS the row when refresh fails (transient failure must not unlink)', async () => {
+    const row = await encRow({ expires_at: new Date(Date.now() - 1000).toISOString() })
+    const { store, rows, removed } = memoryStore(row)
+    const fetchFn = fakeFetch(async () =>
+      tokenResponse({ error: 'invalid_grant' }, 400),
+    )
+    const out = await getUserAccessTokenBestEffort({ store, fetchFn, env, userId: 'user-1' })
+    expect(out).toBeNull()
+    expect(removed).toEqual([])
+    expect(rows.has('user-1')).toBe(true)
+  })
+
+  it('returns null and keeps the row on undecryptable stored tokens', async () => {
+    const row = await encRow({ access_token_enc: 'garbage-not-encrypted' })
+    const { store, removed } = memoryStore(row)
+    const fetchFn = fakeFetch(async () => {
+      throw new Error('must not be called')
+    })
+    const out = await getUserAccessTokenBestEffort({ store, fetchFn, env, userId: 'user-1' })
+    expect(out).toBeNull()
+    expect(removed).toEqual([])
+  })
+
+  it('returns null and keeps the row when the key is misconfigured', async () => {
+    const row = await encRow()
+    const { store, removed } = memoryStore(row)
+    const badEnv = {
+      ...env,
+      encryptionKeyB64: btoa(String.fromCharCode(...new Uint8Array(16))),
+    }
+    const fetchFn = fakeFetch(async () => tokenResponse({}))
+    const out = await getUserAccessTokenBestEffort({ store, fetchFn, env: badEnv, userId: 'user-1' })
+    expect(out).toBeNull()
     expect(removed).toEqual([])
   })
 })

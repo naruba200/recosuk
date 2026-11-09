@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GameMode } from './mode'
 import { fetchBeatmapsetSummary } from './beatmapsets'
+import { FEEDBACK_NEW_PER_HOUR } from './proxyLimits'
 
 /**
  * Map feedback (M5, PLAN-v2 §M5): tried/skipped status + 1–5 rating
@@ -122,6 +123,15 @@ export function feedbackByBeatmapId(
  * user+beatmap). Rating null clears the stars while keeping the
  * tried/skipped status. `mode` records the mode the rating was
  * made in, so learning stays per-mode.
+ *
+ * Feedback cap (batch AP item 2d): at most FEEDBACK_NEW_PER_HOUR
+ * NEW rows per user per rolling hour. Re-rating a map the user
+ * already rated is an update, not a new row, and is always
+ * allowed — only bulk new ratings are throttled. Enforced here
+ * (client-side; feedback writes do not go through the proxy, so
+ * there is no server side to enforce it on). The recent rows are
+ * read (newest first, capped at the limit) and counted in JS, so
+ * the check works with the query shapes the fake DB supports.
  */
 export async function upsertFeedback(
   client: SupabaseClient | null,
@@ -138,6 +148,31 @@ export async function upsertFeedback(
   const db = requireClient(client)
   if (input.rating !== null && (input.rating < 1 || input.rating > 5)) {
     throw new Error('Rating must be between 1 and 5.')
+  }
+  const { data: existing } = await db
+    .from('map_feedback')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('beatmap_id', input.beatmapId)
+    .maybeSingle()
+  if (!existing) {
+    const { data: recent, error: recentError } = await db
+      .from('map_feedback')
+      .select('created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(FEEDBACK_NEW_PER_HOUR)
+    if (recentError) throw new Error('Could not save your rating')
+    const hourAgo = Date.now() - 60 * 60 * 1000
+    const createdThisHour = (recent ?? []).filter((row) => {
+      const ms = Date.parse((row as { created_at: string }).created_at)
+      return Number.isFinite(ms) && ms >= hourAgo
+    }).length
+    if (createdThisHour >= FEEDBACK_NEW_PER_HOUR) {
+      throw new Error(
+        `You've rated ${FEEDBACK_NEW_PER_HOUR} new maps in the last hour — the limit. Wait a bit before rating more.`,
+      )
+    }
   }
   const { data, error } = await db
     .from('map_feedback')

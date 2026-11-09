@@ -2,15 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   OsuServiceError,
   createOsuClient,
+  isRateLimitError,
+  rateLimitMessage,
   validateOsuUsername,
   type FetchFn,
 } from '../osu'
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
+    headers: {
+      get: (name: string) => headers?.[name.toLowerCase()] ?? null,
+    },
   } as Response
 }
 
@@ -87,13 +92,39 @@ describe('osu client — response mapping (mocked fetch)', () => {
     expect(result.error?.kind).toBe('not-found')
   })
 
-  it('maps a proxy 429/5xx payload to upstream', async () => {
+  it('maps a proxy 429 payload to rate-limited (batch AP item 2a)', async () => {
     const fetchFn: FetchFn = async () =>
-      jsonResponse(429, { error: 'osu! rate limit reached', status: 429 })
+      jsonResponse(
+        429,
+        { error: 'Too many requests — you are at the 60-calls-a-minute limit.', status: 429, code: 'rate_limited' },
+        { 'retry-after': '17' },
+      )
+    const client = createOsuClient({ ...CONFIG, fetchFn })
+    const result = await client.getOsuUser('sora_playz', 'osu')
+    expect(result.data).toBeNull()
+    expect(result.error?.kind).toBe('rate-limited')
+    expect(result.error?.status).toBe(429)
+    expect(result.error?.code).toBe('rate_limited')
+    expect(result.error?.retryAfterSeconds).toBe(17)
+    expect(result.error?.message).toContain('60-calls-a-minute')
+  })
+
+  it('maps a proxy 429 without a Retry-After header to rate-limited with no wait', async () => {
+    const fetchFn: FetchFn = async () =>
+      jsonResponse(429, { error: 'Too many requests.', status: 429 })
+    const client = createOsuClient({ ...CONFIG, fetchFn })
+    const result = await client.getOsuUser('sora_playz', 'osu')
+    expect(result.error?.kind).toBe('rate-limited')
+    expect(result.error?.retryAfterSeconds).toBeUndefined()
+  })
+
+  it('maps a proxy 5xx payload to upstream', async () => {
+    const fetchFn: FetchFn = async () =>
+      jsonResponse(502, { error: 'osu! API error (502)', status: 502 })
     const client = createOsuClient({ ...CONFIG, fetchFn })
     const result = await client.getOsuUser('sora_playz', 'osu')
     expect(result.error?.kind).toBe('upstream')
-    expect(result.error?.status).toBe(429)
+    expect(result.error?.status).toBe(502)
   })
 
   it('maps a network failure to upstream', async () => {
@@ -152,6 +183,28 @@ describe('osu client — response mapping (mocked fetch)', () => {
     expect(err).toBeInstanceOf(OsuServiceError)
     expect((err as OsuServiceError).code).toBe('osu_auth_expired')
     expect((err as OsuServiceError).status).toBe(401)
+  })
+})
+
+describe('rate-limit helpers (batch AP item 2a)', () => {
+  it('isRateLimitError is true only for the rate-limited kind', () => {
+    expect(isRateLimitError(new OsuServiceError('rate-limited', 'Too many requests.'))).toBe(true)
+    expect(isRateLimitError(new OsuServiceError('upstream', 'osu! API error (502)'))).toBe(false)
+    expect(isRateLimitError(new Error('Too many requests.'))).toBe(false)
+    expect(isRateLimitError(null)).toBe(false)
+  })
+
+  it('rateLimitMessage returns the proxy message for rate-limited errors, null otherwise', () => {
+    const limited = new OsuServiceError(
+      'rate-limited',
+      'Too many requests — you are at the 60-calls-a-minute limit. Try again in 17 seconds.',
+      429,
+      'rate_limited',
+      17,
+    )
+    expect(rateLimitMessage(limited)).toContain('60-calls-a-minute')
+    expect(rateLimitMessage(new OsuServiceError('upstream', 'osu! API error (502)'))).toBeNull()
+    expect(rateLimitMessage(new OsuServiceError('rate-limited', ''))).toContain('Too many requests')
   })
 })
 

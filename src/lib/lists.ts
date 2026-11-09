@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GameMode } from './mode'
+import { LIST_MAX_ITEMS } from './proxyLimits'
 
 /**
  * User lists (M5, PLAN-v2 §M5): CRUD + list items, over Supabase
@@ -121,6 +122,13 @@ export async function loadListItems(
  * Add a set to a list. Deduped by the (list_id, beatmapset_id)
  * unique constraint: re-adding the same set is a no-op returning
  * the existing row, never a duplicate.
+ *
+ * List cap (batch AP item 2d): a list holds at most LIST_MAX_ITEMS
+ * maps. The count is checked first — the re-add of a set that is
+ * already in the list never counts against the cap. Enforced here
+ * (client-side; list writes do not go through the proxy, so there
+ * is no server side to enforce it on). At the cap the caller gets
+ * an honest error naming the limit.
  */
 export async function addToList(
   client: SupabaseClient | null,
@@ -132,6 +140,25 @@ export async function addToList(
   },
 ): Promise<ListItemRow> {
   const db = requireClient(client)
+  const { data: existing } = await db
+    .from('list_items')
+    .select('id')
+    .eq('list_id', input.listId)
+    .eq('beatmapset_id', input.beatmapsetId)
+    .maybeSingle()
+  if (!existing) {
+    const { count, data: rows, error: countError } = await db
+      .from('list_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('list_id', input.listId)
+    if (countError) throw new Error('Could not save to the list')
+    const total = typeof count === 'number' ? count : (rows?.length ?? 0)
+    if (total >= LIST_MAX_ITEMS) {
+      throw new Error(
+        `This list already has ${LIST_MAX_ITEMS} maps — the limit. Remove some maps before adding more.`,
+      )
+    }
+  }
   const { data, error } = await db
     .from('list_items')
     .upsert(

@@ -124,6 +124,49 @@ describe('feedback service (M5)', () => {
   })
 })
 
+describe('feedback cap (batch AP item 2d)', () => {
+  function dbWithRecentRatings(n: number, createdAt: string): FakeDb {
+    return new FakeDb({
+      map_feedback: Array.from({ length: n }, (_, i) => ({
+        id: `f${i}`,
+        user_id: 'u1',
+        beatmap_id: 1000 + i,
+        beatmapset_id: 100 + i,
+        mode: 'mania',
+        status: 'tried',
+        rating: 4,
+        created_at: createdAt,
+      })),
+    })
+  }
+
+  it('refuses a 61st NEW rating inside one hour, with an honest message', async () => {
+    const db = dbWithRecentRatings(60, new Date().toISOString())
+    await expect(
+      upsertFeedback(client(db), 'u1', { beatmapId: 9999, beatmapsetId: 999, mode: 'mania', status: 'tried', rating: 5 }),
+    ).rejects.toThrow('60 new maps in the last hour')
+    expect(await loadAllFeedback(client(db), 'u1')).toHaveLength(60)
+  })
+
+  it('allows the 60th new rating, and re-rating an existing map past the cap', async () => {
+    const db = dbWithRecentRatings(59, new Date().toISOString())
+    const sixtieth = await upsertFeedback(client(db), 'u1', { beatmapId: 9999, beatmapsetId: 999, mode: 'mania', status: 'tried', rating: 5 })
+    expect(sixtieth.rating).toBe(5)
+    // Re-rating a map already rated is an update, not a new row —
+    // always allowed, even at the cap.
+    const updated = await upsertFeedback(client(db), 'u1', { beatmapId: 1000, beatmapsetId: 100, mode: 'mania', status: 'tried', rating: 2 })
+    expect(updated.rating).toBe(2)
+    expect(await loadAllFeedback(client(db), 'u1')).toHaveLength(60)
+  })
+
+  it('does not count ratings older than an hour against the cap', async () => {
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    const db = dbWithRecentRatings(60, old)
+    const added = await upsertFeedback(client(db), 'u1', { beatmapId: 9999, beatmapsetId: 999, mode: 'mania', status: 'tried', rating: 5 })
+    expect(added.rating).toBe(5)
+  })
+})
+
 describe('enrichRatedSets (M5)', () => {
   it('enriches with tags + rated-difficulty SR, skips unrated and id-less rows, honours the limit', async () => {
     const calls: number[] = []

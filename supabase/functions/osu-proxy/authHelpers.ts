@@ -405,6 +405,67 @@ export async function getValidAccessToken(deps: {
   return { accessToken: grant.accessToken, osuUserId: row.osu_user_id }
 }
 
+/**
+ * Best-effort user token for PUBLIC data calls (batch AP): returns
+ * the caller's usable osu! access token, or null when there is none.
+ * Unlike getValidAccessToken it NEVER deletes the stored row and
+ * NEVER throws for a missing / undecryptable / expired token — a
+ * public read falls back to the shared client token instead of
+ * failing the request. A transient refresh failure (osu! hiccup)
+ * must not force the user to re-link osu!; the next call retries
+ * the refresh. Only a missing encryption key returns null (the
+ * caller logs it); the row is left alone either way.
+ */
+export async function getUserAccessTokenBestEffort(deps: {
+  store: TokenStore
+  fetchFn: FetchFn
+  env: UserTokenEnv
+  userId: string
+  nowMs?: number
+}): Promise<string | null> {
+  let row: TokenRow | null
+  try {
+    row = await deps.store.get(deps.userId)
+  } catch {
+    return null
+  }
+  if (!row) return null
+  let accessToken: string
+  let refreshToken: string
+  try {
+    accessToken = await decryptToken(row.access_token_enc, deps.env.encryptionKeyB64)
+    refreshToken = await decryptToken(row.refresh_token_enc, deps.env.encryptionKeyB64)
+  } catch {
+    return null
+  }
+  const nowMs = deps.nowMs ?? Date.now()
+  if (!isTokenExpired(Date.parse(row.expires_at), nowMs)) {
+    return accessToken
+  }
+  let grant: TokenGrant
+  try {
+    grant = await refreshAccessToken(
+      { fetchFn: deps.fetchFn, env: deps.env },
+      { refreshToken },
+    )
+  } catch {
+    return null
+  }
+  const expiresAt = new Date(nowMs + grant.expiresIn * 1000).toISOString()
+  try {
+    await deps.store.upsert({
+      ...row,
+      access_token_enc: await encryptToken(grant.accessToken, deps.env.encryptionKeyB64),
+      refresh_token_enc: await encryptToken(grant.refreshToken, deps.env.encryptionKeyB64),
+      expires_at: expiresAt,
+    })
+  } catch {
+    // The fresh token is still usable for this call even if the
+    // store write fails; the next call re-refreshes.
+  }
+  return grant.accessToken
+}
+
 // ---------------------------------------------------------------------------
 // Download probe (diagnostic — manual redirects, HTML snippet ≤300
 // chars, archive bodies cancelled unread)

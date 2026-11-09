@@ -26,6 +26,7 @@ import {
   type RecCandidate,
   type RecFilters,
 } from '../lib/recommend'
+import { rateLimitMessage } from '../lib/osu'
 import { FeedReal } from './RecommendationsUnlimited'
 import BackToTop from '../components/BackToTop'
 import { seenKey, seenStore, useSeenVersion } from '../lib/seenStore'
@@ -963,7 +964,7 @@ function RecommendationsReal({
           setTotalMatched(result.totalMatched)
           setDiagnostics(result.diagnostics)
         }
-      } catch {
+      } catch (err) {
         if (runRef.current !== run) return
         // Batch AM: a failed Renew restores the batch it cleared at
         // press time — a failed press never blanks the page. The
@@ -973,7 +974,13 @@ function RecommendationsReal({
         if (preRenewItemsRef.current) {
           setItems(preRenewItemsRef.current)
         }
-        setError('The recommendation search failed just now — osu! or the proxy may be busy. Try regenerating.')
+        // A rate-limited search shows the proxy's honest limit
+        // message (batch AP item 2a); anything else keeps the
+        // existing generic line.
+        setError(
+          rateLimitMessage(err) ??
+            'The recommendation search failed just now — osu! or the proxy may be busy. Try regenerating.',
+        )
       } finally {
         if (runRef.current === run) {
           setBusy(false)

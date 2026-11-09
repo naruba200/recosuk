@@ -10,7 +10,7 @@ import BeatmapRow from '../components/BeatmapRow'
 import LoadingState from '../components/LoadingState'
 import MenuSelect from '../components/MenuSelect'
 import UserTagPicker from '../components/UserTagPicker'
-import { isProxyConfigured } from '../lib/osu'
+import { isProxyConfigured, rateLimitMessage } from '../lib/osu'
 import { MODE_LABELS, type GameMode } from '../lib/mode'
 import { useModeStore } from '../lib/modeStore'
 import { computeSkillProfile } from '../lib/skillProfile'
@@ -1028,9 +1028,15 @@ function BeatmapsReal() {
         setExhausted(!page.cursor_string)
         setResults([...merged.values()])
         setTotal(typeof page.total === 'number' && page.total > 0 ? page.total : null)
-      } catch {
+      } catch (err) {
         if (runRef.current !== run) return
-        setError('Mirror search failed just now — osu! or the proxy may be busy. Try again.')
+        // A rate-limited search shows the proxy's honest limit
+        // message (batch AP item 2a); anything else keeps the
+        // existing generic line.
+        setError(
+          rateLimitMessage(err) ??
+            'Mirror search failed just now — osu! or the proxy may be busy. Try again.',
+        )
         setResults([])
       } finally {
         if (runRef.current === run) setBusy(false)

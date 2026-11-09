@@ -33,6 +33,7 @@ import {
   encryptToken,
   exchangeAuthorizationCode,
   fetchOsuMe,
+  getUserAccessTokenBestEffort,
   getValidAccessToken,
   isTokenExpired,
   isValidOsuRedirectUri,
@@ -42,6 +43,20 @@ import {
   type TokenStore,
   type UserTokenEnv,
 } from './authHelpers.ts'
+import {
+  CACHE_TTL_BEATMAP_MS,
+  MAX_DB_CACHE_BODY_BYTES,
+  RATE_LIMIT_USER_PER_MIN,
+  cacheTtlMsForPath,
+  clientIpFromHeaders,
+  formatRateLimitMessage,
+  isAllowedOrigin,
+  parseAllowedOrigins,
+  rateLimitForCaller,
+  rateLimitKeyForGuest,
+  rateLimitKeyForUser,
+  sha256Hex,
+} from './proxyHelpers.ts'
 import {
   PackListError,
   buildBeatmapPackDetailPath,
@@ -66,17 +81,30 @@ const VALID_MODES = ['osu', 'taiko', 'fruits', 'mania'] as const
 type GameMode = (typeof VALID_MODES)[number]
 
 const MIN_UPSTREAM_GAP_MS = 350 // politeness throttle between osu! calls
-const CACHE_TTL_USER_MS = 5 * 60 * 1000 // user / plays: 5 minutes
-const CACHE_TTL_BEATMAP_MS = 60 * 60 * 1000 // beatmap lookups: 1 hour
-const CACHE_TTL_TAGS_MS = 24 * 60 * 60 * 1000 // user-tag vocabulary: 24 hours (barely changes)
 
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  // `x-refresh-token` is the nightly job's shared-secret header
-  // (§AO refreshRanked); the browser never sends it.
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-refresh-token',
-  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+// CORS (batch AP item 2b): the proxy answers the app's own domain
+// plus localhost for dev — see proxyHelpers.isAllowedOrigin.
+// Requests with NO Origin header are server-to-server (the nightly
+// job, curl, tests) and are always allowed; the browser is the
+// enforcement point, so a disallowed Origin simply gets no
+// Access-Control-Allow-Origin back and the browser blocks the read.
+// ALLOWED_ORIGINS (comma-separated) overrides the default when the
+// deployment domain changes. `x-refresh-token` stays allowed —
+// the nightly job authenticates with it.
+const ALLOWED_ORIGINS = parseAllowedOrigins(Deno.env.get('ALLOWED_ORIGINS'))
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get('origin') ?? ''
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Headers':
+      'authorization, x-client-info, apikey, content-type, x-refresh-token',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  }
+  if (origin && isAllowedOrigin(origin, ALLOWED_ORIGINS)) {
+    headers['Access-Control-Allow-Origin'] = origin
+    headers['Vary'] = 'Origin'
+  }
+  return headers
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +181,111 @@ function cacheSet(key: string, body: unknown, ttlMs: number) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared DB cache (batch AP item 1b): the in-memory Map above is L1
+// (per-instance); proxy_cache (migration 004) is L2, shared across
+// instances, read/written with the service-role client. Same keys
+// as L1, TTLs from proxyHelpers.cacheTtlMsForPath. Everything here
+// is best-effort: a missing table (migration not run yet) or a DB
+// error just means "cache miss" — the request still goes upstream.
+// Bodies over 1 MB are never stored (the 500 MB free-tier DB must
+// never fill with single files).
+// ---------------------------------------------------------------------------
+
+type DbCacheDeps = { service: SupabaseClient | null }
+
+async function dbCacheGet(
+  deps: DbCacheDeps,
+  key: string,
+): Promise<{ body: unknown; expiresAt: number } | undefined> {
+  if (!deps.service) return undefined
+  try {
+    const { data, error } = await deps.service
+      .from('proxy_cache')
+      .select('body, expires_at')
+      .eq('key', key)
+      .maybeSingle()
+    if (error || !data) return undefined
+    const expiresAt = Date.parse((data as { expires_at: string }).expires_at)
+    if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) return undefined
+    return { body: (data as { body: unknown }).body, expiresAt }
+  } catch {
+    return undefined
+  }
+}
+
+async function dbCacheSet(
+  deps: DbCacheDeps,
+  key: string,
+  body: unknown,
+  ttlMs: number,
+): Promise<void> {
+  if (!deps.service) return
+  let encoded: string
+  try {
+    encoded = JSON.stringify(body)
+  } catch {
+    return
+  }
+  if (encoded.length > MAX_DB_CACHE_BODY_BYTES) return
+  try {
+    await deps.service.from('proxy_cache').upsert(
+      {
+        key,
+        body,
+        expires_at: new Date(Date.now() + ttlMs).toISOString(),
+      },
+      { onConflict: 'key' },
+    )
+  } catch {
+    // Best-effort: a failed write is a lost cache entry, never a
+    // failed request.
+  }
+  void cleanupDbCache(deps.service)
+}
+
+// Expired-row cleanup, throttled to once a minute per instance so
+// it never becomes per-request overhead. Logs the approximate
+// table size when it runs (§AP item 3b).
+let lastDbCacheCleanupAt = 0
+
+async function cleanupDbCache(service: SupabaseClient): Promise<void> {
+  const now = Date.now()
+  if (now - lastDbCacheCleanupAt < 60_000) return
+  lastDbCacheCleanupAt = now
+  try {
+    const { error } = await service
+      .from('proxy_cache')
+      .delete()
+      .lt('expires_at', new Date(now).toISOString())
+    if (error) return
+    const { count } = await service
+      .from('proxy_cache')
+      .select('key', { count: 'exact', head: true })
+    console.info('[RecOsuk proxy] cache size', {
+      rows: typeof count === 'number' ? count : null,
+    })
+  } catch {
+    // Best-effort housekeeping only.
+  }
+}
+
+// In-flight coalescing (batch AP item 1c): identical upstream calls
+// already in flight share one answer instead of hitting osu! twice.
+// Per-instance only — Edge Functions are stateless across
+// instances, so the DB cache is the cross-instance dedupe.
+const inflight = new Map<string, Promise<unknown>>()
+
+function coalesced<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const pending = inflight.get(key)
+  if (pending) return pending as Promise<T>
+  const promise = run()
+  inflight.set(key, promise)
+  return promise.finally(() => {
+    if (inflight.get(key) === promise) inflight.delete(key)
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Errors / responses
 // ---------------------------------------------------------------------------
 
@@ -167,15 +300,26 @@ class ProxyError extends Error {
   }
 }
 
-function json(body: unknown, status = 200): Response {
+function json(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+  extraHeaders: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    headers: { ...headers, ...extraHeaders, 'Content-Type': 'application/json' },
   })
 }
 
-function errorJson(error: string, status: number, code?: string): Response {
-  return json(code ? { error, status, code } : { error, status }, status)
+function errorJson(
+  error: string,
+  status: number,
+  code?: string,
+  headers: Record<string, string> = {},
+  extraHeaders: Record<string, string> = {},
+): Response {
+  return json(code ? { error, status, code } : { error, status }, status, headers, extraHeaders)
 }
 
 // ---------------------------------------------------------------------------
@@ -195,61 +339,120 @@ function errorJson(error: string, status: number, code?: string): Response {
 const OSU_FILE_URL = 'https://osu.ppy.sh/osu'
 const MAX_OSU_FILE_BYTES = 5 * 1024 * 1024
 
-async function fetchBeatmapFile(beatmapId: number): Promise<{ beatmapId: number; osuFile: string }> {
+// ---------------------------------------------------------------------------
+// Per-request proxy context (batch AP item 1a): who is calling, which
+// osu! token their calls ride, and the cache counters the structured
+// log line reports. Resolved once per request in Deno.serve — never
+// per upstream call.
+// ---------------------------------------------------------------------------
+
+interface ProxyCtx {
+  /** Service-role client for the DB cache + rate limiter; null when
+   *  the service-role secret is missing (DB features degrade to
+   *  in-memory only, the request still succeeds). */
+  service: SupabaseClient | null
+  /** The caller's own osu! token when signed in + linked; null means
+   *  the shared client token (guests, or signed-in users with no
+   *  osu! link). Never logged, never returned to the browser. */
+  userToken: string | null
+  callerKind: 'user' | 'guest' | 'service'
+  /** Supabase user id for signed-in callers; null for guests. */
+  userId: string | null
+  cache: { mem: number; db: number; miss: number }
+}
+
+async function fetchBeatmapFile(
+  beatmapId: number,
+  ctx?: ProxyCtx,
+): Promise<{ beatmapId: number; osuFile: string }> {
   const cacheKey = `GET osu-file ${beatmapId}`
   const hit = cacheGet(cacheKey)
   if (hit && typeof hit === 'object' && typeof (hit as { osuFile?: unknown }).osuFile === 'string') {
+    if (ctx) ctx.cache.mem++
     return hit as { beatmapId: number; osuFile: string }
   }
+  if (ctx?.service) {
+    const dbHit = await dbCacheGet(ctx, cacheKey)
+    if (
+      dbHit &&
+      typeof dbHit.body === 'object' &&
+      typeof (dbHit.body as { osuFile?: unknown }).osuFile === 'string'
+    ) {
+      cacheSet(cacheKey, dbHit.body, Math.max(0, dbHit.expiresAt - Date.now()))
+      ctx.cache.db++
+      return dbHit.body as { beatmapId: number; osuFile: string }
+    }
+  }
 
-  await throttle()
-  const res = await fetch(`${OSU_FILE_URL}/${beatmapId}`, {
-    headers: { Accept: 'text/plain, */*' },
+  return coalesced(cacheKey, async () => {
+    await throttle()
+    const res = await fetch(`${OSU_FILE_URL}/${beatmapId}`, {
+      headers: { Accept: 'text/plain, */*' },
+    })
+    if (res.status === 404) throw new ProxyError('Beatmap file not found on osu!', 404)
+    if (!res.ok) throw new ProxyError(`osu! beatmap file request failed (${res.status})`, 502)
+    const text = await res.text()
+    if (text.length > MAX_OSU_FILE_BYTES) {
+      throw new ProxyError('Beatmap file is too large', 502)
+    }
+    if (!text.startsWith('osu file format v')) {
+      throw new ProxyError('osu! did not return a beatmap file', 502)
+    }
+    const body = { beatmapId, osuFile: text }
+    cacheSet(cacheKey, body, CACHE_TTL_BEATMAP_MS)
+    if (ctx) {
+      ctx.cache.miss++
+      await dbCacheSet(ctx, cacheKey, body, CACHE_TTL_BEATMAP_MS)
+    }
+    return body
   })
-  if (res.status === 404) throw new ProxyError('Beatmap file not found on osu!', 404)
-  if (!res.ok) throw new ProxyError(`osu! beatmap file request failed (${res.status})`, 502)
-  const text = await res.text()
-  if (text.length > MAX_OSU_FILE_BYTES) {
-    throw new ProxyError('Beatmap file is too large', 502)
-  }
-  if (!text.startsWith('osu file format v')) {
-    throw new ProxyError('osu! did not return a beatmap file', 502)
-  }
-  const body = { beatmapId, osuFile: text }
-  cacheSet(cacheKey, body, CACHE_TTL_BEATMAP_MS)
-  return body
 }
 
-async function osuFetch(path: string, init?: RequestInit): Promise<unknown> {
+async function osuFetch(path: string, init?: RequestInit, ctx?: ProxyCtx): Promise<unknown> {
   const cacheKey = `${init?.method ?? 'GET'} ${path} ${init?.body ?? ''}`
-  const ttl =
-    path === '/tags'
-      ? CACHE_TTL_TAGS_MS
-      : path.includes('/beatmaps/')
-        ? CACHE_TTL_BEATMAP_MS
-        : CACHE_TTL_USER_MS
+  const ttl = cacheTtlMsForPath(path)
   const hit = cacheGet(cacheKey)
-  if (hit !== undefined) return hit
+  if (hit !== undefined) {
+    if (ctx) ctx.cache.mem++
+    return hit
+  }
+  if (ctx?.service) {
+    const dbHit = await dbCacheGet(ctx, cacheKey)
+    if (dbHit !== undefined) {
+      cacheSet(cacheKey, dbHit.body, Math.max(0, dbHit.expiresAt - Date.now()))
+      ctx.cache.db++
+      return dbHit.body
+    }
+  }
 
-  await throttle()
-  const token = await getAccessToken()
-  const res = await fetch(`${OSU_API}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
+  return coalesced(cacheKey, async () => {
+    await throttle()
+    // Per-user token when the caller is signed in + linked (batch AP
+    // item 1a); the shared client token is the guest fallback — and
+    // the fallback for signed-in users with no osu! link.
+    const token = ctx?.userToken ?? (await getAccessToken())
+    const res = await fetch(`${OSU_API}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (res.status === 404) throw new ProxyError('Not found on osu!', 404)
+    if (res.status === 429) throw new ProxyError('osu! rate limit reached — try again in a moment', 429)
+    if (!res.ok) throw new ProxyError(`osu! API error (${res.status})`, 502)
+
+    const body = await res.json()
+    cacheSet(cacheKey, body, ttl)
+    if (ctx) {
+      ctx.cache.miss++
+      await dbCacheSet(ctx, cacheKey, body, ttl)
+    }
+    return body
   })
-
-  if (res.status === 404) throw new ProxyError('Not found on osu!', 404)
-  if (res.status === 429) throw new ProxyError('osu! rate limit reached — try again in a moment', 429)
-  if (!res.ok) throw new ProxyError(`osu! API error (${res.status})`, 502)
-
-  const body = await res.json()
-  cacheSet(cacheKey, body, ttl)
-  return body
 }
 
 // ---------------------------------------------------------------------------
@@ -309,13 +512,14 @@ function requireRefreshEnv(): { supabaseUrl: string; serviceRoleKey: string } {
 async function fetchRankedSearchPage(
   mode: GameMode,
   cursor: string | null | undefined,
+  ctx?: ProxyCtx,
 ): Promise<RefreshScanPage<RefreshSet>> {
   const search = new URLSearchParams()
   search.set('mode', mode)
   search.set('s', 'ranked')
   search.set('sort', 'ranked_desc')
   if (cursor) search.set('cursor_string', cursor)
-  const body = (await osuFetch(`/beatmapsets/search?${search.toString()}`)) as {
+  const body = (await osuFetch(`/beatmapsets/search?${search.toString()}`, undefined, ctx)) as {
     beatmapsets?: unknown
     cursor_string?: unknown
   }
@@ -325,7 +529,7 @@ async function fetchRankedSearchPage(
   }
 }
 
-async function runAction(params: Params, req: Request): Promise<unknown> {
+async function runAction(params: Params, req: Request, ctx: ProxyCtx): Promise<unknown> {
   const action = requireString(params, 'action')
   // Auth actions (Phase A) are handled before the mode logic: they are
   // mode-free, JWT-verified, and never touch the public osu! API path.
@@ -364,22 +568,22 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
   switch (action) {
     case 'getUser': {
       const username = encodeURIComponent(requireString(params, 'username'))
-      return osuFetch(`/users/${username}/${mode}`)
+      return osuFetch(`/users/${username}/${mode}`, undefined, ctx)
     }
     case 'getTopPlays': {
       const userId = requireId(params, 'userId')
       const limit = typeof params.limit === 'number' ? Math.min(Math.max(params.limit, 1), 100) : 50
-      return osuFetch(`/users/${userId}/scores/best?mode=${mode}&limit=${limit}`)
+      return osuFetch(`/users/${userId}/scores/best?mode=${mode}&limit=${limit}`, undefined, ctx)
     }
     case 'getRecentPlays': {
       const userId = requireId(params, 'userId')
       const limit = typeof params.limit === 'number' ? Math.min(Math.max(params.limit, 1), 100) : 24
-      return osuFetch(`/users/${userId}/scores/recent?mode=${mode}&limit=${limit}&include_fails=0`)
+      return osuFetch(`/users/${userId}/scores/recent?mode=${mode}&limit=${limit}&include_fails=0`, undefined, ctx)
     }
     case 'getMostPlayed': {
       const userId = requireId(params, 'userId')
       const limit = typeof params.limit === 'number' ? Math.min(Math.max(params.limit, 1), 100) : 20
-      return osuFetch(`/users/${userId}/beatmapsets/most_played?limit=${limit}`)
+      return osuFetch(`/users/${userId}/beatmapsets/most_played?limit=${limit}`, undefined, ctx)
     }
     case 'searchBeatmapsets': {
       const search = new URLSearchParams()
@@ -398,11 +602,11 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
       if (typeof filters.language === 'number') search.set('l', String(filters.language))
       if (typeof filters.sort === 'string') search.set('sort', filters.sort)
       if (filters.nsfw === true) search.set('nsfw', 'true')
-      return osuFetch(`/beatmapsets/search?${search.toString()}`)
+      return osuFetch(`/beatmapsets/search?${search.toString()}`, undefined, ctx)
     }
     case 'getBeatmap': {
       const beatmapId = requireId(params, 'beatmapId')
-      return osuFetch(`/beatmaps/${beatmapId}`)
+      return osuFetch(`/beatmaps/${beatmapId}`, undefined, ctx)
     }
     // Beatmap .osu file (PP feature): raw file text for one
     // difficulty, fetched server-side from the public website
@@ -416,7 +620,7 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
       if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
         throw new ProxyError('beatmapId is required and must be a positive integer', 400)
       }
-      return fetchBeatmapFile(raw)
+      return fetchBeatmapFile(raw, ctx)
     }
     // Single beatmapset lookup (M5): list detail, Tried & Rated
     // rows, and rating enrichment need titles/covers/tags/SR
@@ -424,16 +628,20 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
     // set spans modes; the client filters difficulties itself.
     case 'getBeatmapset': {
       const beatmapsetId = requireId(params, 'beatmapsetId')
-      return osuFetch(`/beatmapsets/${beatmapsetId}`)
+      return osuFetch(`/beatmapsets/${beatmapsetId}`, undefined, ctx)
     }
     case 'getDifficultyAttributes': {
       const beatmapId = requireId(params, 'beatmapId')
       const body: Record<string, unknown> = { ruleset: mode }
       if (Array.isArray(params.mods)) body.mods = params.mods
-      return osuFetch(`/beatmaps/${beatmapId}/attributes`, {
-        method: 'POST',
-        body: JSON.stringify(body),
-      })
+      return osuFetch(
+        `/beatmaps/${beatmapId}/attributes`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+        ctx,
+      )
     }
     // Beatmap packs (Collections page): osu!'s public pack listing.
     // BeatConnect's own pack API needs a supporter key, so RecOsuk
@@ -458,14 +666,14 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
         if (err instanceof PackListError) throw new ProxyError(err.message, 400)
         throw err
       }
-      return osuFetch(path)
+      return osuFetch(path, undefined, ctx)
     }
     case 'getBeatmapPack': {
       // The tag reaches osu! VERBATIM: encodeURIComponent only
       // escapes reserved characters, so `ST445` stays `ST445`.
       // Never normalize, lowercase, or split the tag here.
       const pack = requireString(params, 'pack')
-      return osuFetch(buildBeatmapPackDetailPath(pack))
+      return osuFetch(buildBeatmapPackDetailPath(pack), undefined, ctx)
     }
     // User-tag vocabulary (batch 11, part 4): lazer's fixed,
     // player-voted tag vocabulary, `GET /tags` with the app
@@ -482,7 +690,7 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
     // action and the client uses the bundled vocabulary.
     // Deploy: supabase functions deploy osu-proxy --no-verify-jwt
     case 'getBeatmapUserTags': {
-      return osuFetch('/tags')
+      return osuFetch('/tags', undefined, ctx)
     }
     // Nightly ranked refresh (§AO): compile ONE ranked card and
     // store it in ranked_compilations with the SERVICE-ROLE
@@ -517,7 +725,7 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
         mode: mode as GameMode,
         startMs: interval.startMs,
         endMs: interval.endMs,
-        fetchPage: (cursor) => fetchRankedSearchPage(mode as GameMode, cursor),
+        fetchPage: (cursor) => fetchRankedSearchPage(mode as GameMode, cursor, ctx),
       })
       // Same diagnostic line as the client scan (function logs in
       // the Supabase dashboard, not the browser console).
@@ -678,6 +886,188 @@ function supabaseTokenStore(service: SupabaseClient): TokenStore {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Per-request caller + rate limit (batch AP items 1a + 2a)
+//
+// The browser already sends the signed-in user's Supabase session
+// token as the Bearer (osu.ts proxyCall); guests send the anon key.
+// A Bearer that verifies via auth.getUser is a signed-in user —
+// their calls ride their own osu! token (best-effort) and count
+// against the 60/min per-user bucket. Anything else is a guest:
+// shared token, 10/min per-IP bucket (IP stored as a SHA-256 hash,
+// never raw).
+//
+// Verification is cached per token hash for 5 minutes (in-memory,
+// this instance only) so a burst of calls from one session does
+// not pay an Auth round-trip each time. Only the hash is stored,
+// never the token.
+//
+// The rate limit is enforced by the check_proxy_rate_limit()
+// SQL function (migration 004) — atomic, so it survives across
+// Edge Function instances. When the DB is unavailable (migration
+// not run yet, or a DB error) the request is ALLOWED and a warning
+// is logged: the app must keep working before the user runs the
+// migration, and the limiter starts enforcing once it lands.
+// The nightly job (refreshRanked) and the auth actions never pass
+// through here — the job has its own token, the auth actions are
+// already JWT-gated and code-bound.
+// ---------------------------------------------------------------------------
+
+interface ProxyEnv {
+  supabaseUrl: string | null
+  anonKey: string | null
+  serviceRoleKey: string | null
+  encryptionKeyB64: string | null
+}
+
+function readProxyEnv(): ProxyEnv {
+  return {
+    supabaseUrl: Deno.env.get('SUPABASE_URL') ?? null,
+    anonKey: Deno.env.get('SUPABASE_ANON_KEY') ?? null,
+    serviceRoleKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? null,
+    encryptionKeyB64: Deno.env.get('OSU_TOKEN_ENCRYPTION_KEY') ?? null,
+  }
+}
+
+let warnedMissingServiceRole = false
+
+function serviceClientFor(env: ProxyEnv): SupabaseClient | null {
+  if (!env.supabaseUrl || !env.serviceRoleKey) {
+    if (!warnedMissingServiceRole) {
+      warnedMissingServiceRole = true
+      console.warn(
+        '[RecOsuk proxy] SUPABASE_SERVICE_ROLE_KEY is not set — DB cache + rate limit are off (in-memory cache only). ' +
+          'Set it with: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...',
+      )
+    }
+    return null
+  }
+  return createClient(env.supabaseUrl, env.serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+}
+
+const JWT_VERIFY_TTL_MS = 5 * 60 * 1000
+const verifiedJwtCache = new Map<string, { userId: string; expiresAt: number }>()
+
+/** Verifies a Bearer token as a Supabase user session. Returns the
+ *  user id, or null for the anon key / missing / invalid tokens. */
+async function verifyUserJwt(
+  token: string,
+  env: ProxyEnv,
+): Promise<string | null> {
+  if (!env.supabaseUrl || !env.anonKey) return null
+  if (token === env.anonKey) return null
+  const key = await sha256Hex(token)
+  const cached = verifiedJwtCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.userId
+  const authClient = createClient(env.supabaseUrl, env.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data, error } = await authClient.auth.getUser(token)
+  if (error || !data.user) {
+    verifiedJwtCache.delete(key)
+    return null
+  }
+  verifiedJwtCache.set(key, { userId: data.user.id, expiresAt: Date.now() + JWT_VERIFY_TTL_MS })
+  return data.user.id
+}
+
+async function resolveProxyCtx(req: Request): Promise<ProxyCtx> {
+  const env = readProxyEnv()
+  const service = serviceClientFor(env)
+  const ctx: ProxyCtx = {
+    service,
+    userToken: null,
+    callerKind: 'guest',
+    userId: null,
+    cache: { mem: 0, db: 0, miss: 0 },
+  }
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  if (!bearer) return ctx
+  const userId = await verifyUserJwt(bearer, env)
+  if (!userId) return ctx
+  ctx.callerKind = 'user'
+  ctx.userId = userId
+  if (service && env.encryptionKeyB64) {
+    try {
+      ctx.userToken = await getUserAccessTokenBestEffort({
+        store: supabaseTokenStore(service),
+        fetchFn: fetch,
+        env: {
+          clientId: Deno.env.get('OSU_CLIENT_ID') ?? '',
+          clientSecret: Deno.env.get('OSU_CLIENT_SECRET') ?? '',
+          encryptionKeyB64: env.encryptionKeyB64,
+        },
+        userId,
+      })
+    } catch {
+      ctx.userToken = null
+    }
+    if (!ctx.userToken) {
+      console.warn('[RecOsuk proxy] signed-in caller has no usable osu! token — using the shared token.')
+    }
+  }
+  return ctx
+}
+
+interface RateLimitOutcome {
+  allowed: boolean
+  retryAfterSeconds: number
+  key: string
+  limit: number
+}
+
+async function checkProxyRateLimit(
+  ctx: ProxyCtx,
+  req: Request,
+): Promise<RateLimitOutcome> {
+  // Service callers (the nightly job, auth actions) never pass
+  // through the limiter — this guard is the belt to the
+  // Deno.serve routing's braces; it also narrows callerKind to
+  // 'user' | 'guest' for the limit lookup below.
+  if (ctx.callerKind === 'service') {
+    return { allowed: true, retryAfterSeconds: 0, key: 'service', limit: RATE_LIMIT_USER_PER_MIN }
+  }
+  const limit = rateLimitForCaller(ctx.callerKind)
+  let key: string
+  if (ctx.callerKind === 'user') {
+    key = rateLimitKeyForUser(ctx.userId ?? 'unknown')
+  } else {
+    const ip = clientIpFromHeaders((name) => req.headers.get(name))
+    key = rateLimitKeyForGuest(ip ? await sha256Hex(ip) : 'unknown')
+  }
+  if (!ctx.service) {
+    return { allowed: true, retryAfterSeconds: 0, key, limit }
+  }
+  try {
+    const { data, error } = await ctx.service.rpc('check_proxy_rate_limit', {
+      p_key: key,
+      p_limit: limit,
+    })
+    if (error || !Array.isArray(data) || data.length === 0) {
+      console.warn(
+        '[RecOsuk proxy] rate-limit check failed (migration 004 not run yet?) — allowing the request.',
+        error?.message ?? '',
+      )
+      return { allowed: true, retryAfterSeconds: 0, key, limit }
+    }
+    const row = data[0] as { allowed: boolean; retry_after_seconds: number }
+    return {
+      allowed: row.allowed === true,
+      retryAfterSeconds:
+        typeof row.retry_after_seconds === 'number' && row.retry_after_seconds > 0
+          ? Math.ceil(row.retry_after_seconds)
+          : 0,
+      key,
+      limit,
+    }
+  } catch (err) {
+    console.warn('[RecOsuk proxy] rate-limit check threw — allowing the request.', String(err))
+    return { allowed: true, retryAfterSeconds: 0, key, limit }
+  }
+}
+
 async function runAuthAction(action: string, params: Params, req: Request): Promise<unknown> {
   switch (action) {
     // Step 1 of the sign-in: the client generated a crypto-random
@@ -819,12 +1209,38 @@ async function runAuthAction(action: string, params: Params, req: Request): Prom
 
 // ---------------------------------------------------------------------------
 // HTTP entrypoint
+//
+// Flow for a public data call (batch AP): resolve the caller (their
+// own osu! token when signed in + linked, shared token otherwise),
+// enforce the per-user / per-IP rate limit, then run the action.
+// The nightly job (refreshRanked) and the auth actions skip the
+// rate limit — the job has its own token, the auth actions are
+// already JWT-gated and code-bound — but still get a service ctx
+// so their scan pages can use the DB cache.
+//
+// Structured log (batch AP item 3b): one compact line per request
+// in the function logs — action, caller kind, which token rode
+// the call, cache hits/misses, status, elapsed ms. 429s get a
+// warning line of their own. No token or IP is ever logged.
 // ---------------------------------------------------------------------------
 
 Deno.serve(async (req: Request) => {
+  const startedAt = Date.now()
+  const headers = corsHeaders(req)
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: CORS_HEADERS })
+    return new Response('ok', { headers })
   }
+
+  // A ctx is needed even on the error paths (the structured log
+  // line); the service caller ctx is the cheapest safe default.
+  let ctx: ProxyCtx = {
+    service: null,
+    userToken: null,
+    callerKind: 'service',
+    userId: null,
+    cache: { mem: 0, db: 0, miss: 0 },
+  }
+  let action = ''
 
   try {
     let params: Params = {}
@@ -834,7 +1250,7 @@ Deno.serve(async (req: Request) => {
         try {
           params = JSON.parse(text) as Params
         } catch {
-          return errorJson('Request body must be valid JSON', 400)
+          return errorJson('Request body must be valid JSON', 400, undefined, headers)
         }
       }
     }
@@ -855,15 +1271,71 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const data = await runAction(params, req)
-    return json({ data })
+    action = typeof params.action === 'string' ? params.action : ''
+    const isAuthAction = [
+      'getOsuAuthorizeUrl',
+      'exchangeOsuCode',
+      'osuAuthStatus',
+      'disconnectOsu',
+      'probeOsuDownload',
+    ].includes(action)
+    if (isAuthAction || action === 'refreshRanked') {
+      // No rate limit here (see the header comment) — but the
+      // service client is still built so scan pages use the DB
+      // cache. The auth actions verify their own JWTs inside
+      // runAuthAction; refreshRanked checks its token inside
+      // runAction.
+      const env = readProxyEnv()
+      ctx = {
+        service: serviceClientFor(env),
+        userToken: null,
+        callerKind: 'service',
+        userId: null,
+        cache: { mem: 0, db: 0, miss: 0 },
+      }
+    } else {
+      ctx = await resolveProxyCtx(req)
+      const limit = await checkProxyRateLimit(ctx, req)
+      if (!limit.allowed) {
+        const message = formatRateLimitMessage(limit.limit, limit.retryAfterSeconds)
+        console.warn('[RecOsuk proxy] rate limited', {
+          action,
+          caller: ctx.callerKind,
+          limit: limit.limit,
+          retryAfterSeconds: limit.retryAfterSeconds,
+        })
+        return errorJson(message, 429, 'rate_limited', headers, {
+          'Retry-After': String(Math.max(1, limit.retryAfterSeconds)),
+        })
+      }
+    }
+
+    const data = await runAction(params, req, ctx)
+    console.info('[RecOsuk proxy]', {
+      action,
+      caller: ctx.callerKind,
+      token: ctx.userToken ? 'user' : 'shared',
+      cache: ctx.cache,
+      status: 200,
+      ms: Date.now() - startedAt,
+    })
+    return json({ data }, 200, headers)
   } catch (err) {
+    const status = err instanceof ProxyError || err instanceof OsuAuthError ? err.status : 500
+    console.info('[RecOsuk proxy]', {
+      action,
+      caller: ctx.callerKind,
+      token: ctx.userToken ? 'user' : 'shared',
+      cache: ctx.cache,
+      status,
+      ms: Date.now() - startedAt,
+    })
     if (err instanceof OsuAuthError) {
-      return errorJson(err.message, err.status, err.code)
+      return errorJson(err.message, err.status, err.code, headers)
     }
     if (err instanceof ProxyError) {
-      return errorJson(err.message, err.status, err.code)
+      return errorJson(err.message, err.status, err.code, headers)
     }
-    return errorJson('osu-proxy internal error', 500)
+    return errorJson('osu-proxy internal error', 500, undefined, headers)
   }
 })
