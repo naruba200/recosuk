@@ -48,6 +48,13 @@ import {
   buildBeatmapPacksPath,
   resolvePackListType,
 } from './packHelpers.ts'
+import {
+  checkRefreshToken,
+  compileRefreshCompilation,
+  resolveRefreshInterval,
+  type RefreshScanPage,
+  type RefreshSet,
+} from './rankedRefresh.ts'
 
 // ---------------------------------------------------------------------------
 // Config
@@ -65,8 +72,10 @@ const CACHE_TTL_TAGS_MS = 24 * 60 * 60 * 1000 // user-tag vocabulary: 24 hours (
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
+  // `x-refresh-token` is the nightly job's shared-secret header
+  // (§AO refreshRanked); the browser never sends it.
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
+    'authorization, x-client-info, apikey, content-type, x-refresh-token',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
 }
 
@@ -273,6 +282,49 @@ function requireId(params: Params, key: string): string {
   return encodeURIComponent(String(value))
 }
 
+// ---------------------------------------------------------------------------
+// Nightly ranked refresh (§AO, refreshRanked action)
+// ---------------------------------------------------------------------------
+
+/** Only the env the refresh action needs: the service-role client
+ *  for storing compilations. The osu! token-encryption key is
+ *  NOT needed here (no user tokens are involved). */
+function requireRefreshEnv(): { supabaseUrl: string; serviceRoleKey: string } {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!supabaseUrl) throw new ProxyError('osu-proxy is not configured (missing SUPABASE_URL)', 500)
+  if (!serviceRoleKey) {
+    throw new ProxyError(
+      'osu-proxy is not configured (missing SUPABASE_SERVICE_ROLE_KEY). ' +
+        'Set it with: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...',
+      500,
+    )
+  }
+  return { supabaseUrl, serviceRoleKey }
+}
+
+/** One ranked-search page, newest-ranked-first — the same paging
+ *  the client's fetchRankedPage does (status=ranked,
+ *  sort=ranked_desc, cursor passthrough). */
+async function fetchRankedSearchPage(
+  mode: GameMode,
+  cursor: string | null | undefined,
+): Promise<RefreshScanPage<RefreshSet>> {
+  const search = new URLSearchParams()
+  search.set('mode', mode)
+  search.set('s', 'ranked')
+  search.set('sort', 'ranked_desc')
+  if (cursor) search.set('cursor_string', cursor)
+  const body = (await osuFetch(`/beatmapsets/search?${search.toString()}`)) as {
+    beatmapsets?: unknown
+    cursor_string?: unknown
+  }
+  return {
+    beatmapsets: Array.isArray(body.beatmapsets) ? (body.beatmapsets as RefreshSet[]) : [],
+    cursor_string: typeof body.cursor_string === 'string' ? body.cursor_string : null,
+  }
+}
+
 async function runAction(params: Params, req: Request): Promise<unknown> {
   const action = requireString(params, 'action')
   // Auth actions (Phase A) are handled before the mode logic: they are
@@ -431,6 +483,92 @@ async function runAction(params: Params, req: Request): Promise<unknown> {
     // Deploy: supabase functions deploy osu-proxy --no-verify-jwt
     case 'getBeatmapUserTags': {
       return osuFetch('/tags')
+    }
+    // Nightly ranked refresh (§AO): compile ONE ranked card and
+    // store it in ranked_compilations with the SERVICE-ROLE
+    // client. Authenticated ONLY by the shared RANKED_REFRESH_TOKEN
+    // (header `x-refresh-token`) — never by a caller-supplied
+    // service-role key, and no user JWT is involved (the job runs
+    // while nobody is signed in). Wrong or missing token = 401.
+    // The scan uses the same rules as the client compile (20-page
+    // cap, partial flag, reached-start logic — see rankedRefresh.ts
+    // and the cross-check tests in rankedRefresh.test.ts).
+    // Deploy: supabase functions deploy osu-proxy --no-verify-jwt
+    // Secret:  supabase secrets set RANKED_REFRESH_TOKEN=<token>
+    case 'refreshRanked': {
+      const expected = Deno.env.get('RANKED_REFRESH_TOKEN')
+      const provided = req.headers.get('x-refresh-token')
+      if (!checkRefreshToken(provided, expected)) {
+        throw new ProxyError('refreshRanked requires a valid refresh token.', 401, 'refresh_token_invalid')
+      }
+      const granularity = params.granularity
+      if (
+        typeof granularity !== 'string' ||
+        !['week', 'month', 'year'].includes(granularity)
+      ) {
+        throw new ProxyError('granularity is required and must be one of: week, month, year', 400)
+      }
+      const period = requireString(params, 'period')
+      const interval = resolveRefreshInterval(granularity, period, Date.now())
+      if (!interval) {
+        throw new ProxyError(`Unknown period for granularity ${granularity}: ${period}`, 400)
+      }
+      const compiled = await compileRefreshCompilation({
+        mode: mode as GameMode,
+        startMs: interval.startMs,
+        endMs: interval.endMs,
+        fetchPage: (cursor) => fetchRankedSearchPage(mode as GameMode, cursor),
+      })
+      // Same diagnostic line as the client scan (function logs in
+      // the Supabase dashboard, not the browser console).
+      console.info('[RecOsuk ranked scan]', {
+        mode,
+        granularity,
+        period,
+        windowStart: new Date(interval.startMs).toISOString(),
+        windowEnd: new Date(interval.endMs).toISOString(),
+        seeded: compiled.seeded,
+        seedIgnored: compiled.seedIgnored,
+        scanned: compiled.scanned,
+        collected: compiled.entries.length,
+        partial: compiled.partial,
+      })
+      if (compiled.seedIgnored) {
+        console.warn(
+          '[RecOsuk ranked scan] the seeded cursor was ignored — the scan fell back to paging from the newest set. ' +
+            'Check whether the search API still accepts a fabricated cursor.',
+        )
+      }
+      const env = requireRefreshEnv()
+      const service = createClient(env.supabaseUrl, env.serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+      const { error } = await service.from('ranked_compilations').upsert(
+        {
+          mode,
+          granularity,
+          period,
+          entries: compiled.entries,
+          partial: compiled.partial,
+          scanned: compiled.scanned,
+          window_start: compiled.windowStart,
+          compiled_at: new Date().toISOString(),
+        },
+        { onConflict: 'mode,granularity,period' },
+      )
+      if (error) {
+        throw new ProxyError(`Could not store the ranked compilation: ${error.message}`, 500)
+      }
+      return {
+        mode,
+        granularity,
+        period,
+        entries: compiled.entries,
+        partial: compiled.partial,
+        scanned: compiled.scanned,
+        stored: true,
+        compiledAt: new Date().toISOString(),
+      }
     }
     default:
       throw new ProxyError(`Unknown action: ${action}`, 400)

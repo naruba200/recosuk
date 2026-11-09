@@ -14,7 +14,7 @@ import { downloadManager } from '../lib/downloadManager'
 import { attemptSongsCopy } from '../lib/songCopy'
 import { seenKey, seenStore } from '../lib/seenStore'
 import { useModeStore } from '../lib/modeStore'
-import { modeLabel } from '../lib/mode'
+import { modeLabel, type GameMode } from '../lib/mode'
 import { useCapabilities } from '../lib/capabilities'
 import { useRowMaps } from '../lib/useRowMaps'
 import { useDownloadQueue } from '../lib/downloadQueue'
@@ -32,10 +32,13 @@ import {
   RANKED_CARD_COMPILE_ERROR,
   compileCardCompilation,
   isCompilationFresh,
+  isUnreachableCompilation,
+  listStoredCompilations,
   loadStoredCompilation,
   rankedCardsForWindow,
   storeCompilation,
   type RankedPeriodCard,
+  type StoredHistoryEntry,
 } from '../lib/rankedCards'
 import {
   PACK_CATEGORIES,
@@ -240,12 +243,13 @@ function PackCard({
 }
 
 /**
- * Ranked compilation lists (batch 9, reworked in batch AN): the
- * top 50 most-played maps ranked inside a period, following the
- * GLOBAL mode state (no mode tabs inside the section). Week stays
- * ONE list; month shows 4 cards (the weeks of the current month)
- * and year 12 cards (the months of the current year); each card
- * opens a detail page with the song list.
+ * Ranked compilation lists (batch 9, reworked in batch AN, rolling
+ * in batch AO): the top 50 most-played maps ranked inside a period,
+ * following the GLOBAL mode state (no mode tabs inside the section).
+ * Week stays ONE list; month shows 4 cards (the TRAILING 4 calendar
+ * weeks) and year 12 cards (the TRAILING 12 calendar months); each
+ * card opens a detail page with the song list. A History tab lists
+ * past stored periods, newest first.
  *
  * DATABASE-BACKED (batch AN, migration 003): compiled lists are
  * stored in the `ranked_compilations` table and read FIRST — a
@@ -258,12 +262,21 @@ function PackCard({
  * stores a whole 50 as one M5 user list (account-only; guests
  * see the locked state) — on the week list here, per card on the
  * detail page.
+ *
+ * HIDDEN CARDS (§AO): a card whose compile found nothing AND the
+ * scan stopped early (partial — the interval is beyond the scan's
+ * reach) is HIDDEN, not shown as "0 maps". The empty result is
+ * stored, so the hide is cached; an unreachable stored row is
+ * never recompiled on TTL expiry (its interval only gets older).
+ * A transient failure still shows an error, never a silent hide.
  */
 interface CardState {
   compilation: RankedCompilation | null
   compiling: boolean
   error: string | null
   stale: boolean
+  /** §AO: unreachable (0 entries + partial) — hidden from the grid. */
+  hidden: boolean
 }
 
 const EMPTY_CARD_STATE: CardState = {
@@ -271,6 +284,7 @@ const EMPTY_CARD_STATE: CardState = {
   compiling: true,
   error: null,
   stale: false,
+  hidden: false,
 }
 
 /** One period card tile: label, entry count, #1 map cover/title. */
@@ -341,6 +355,94 @@ function RankedCardTile({
   )
 }
 
+/**
+ * History tab (§AO): past stored periods for the current mode,
+ * newest first. Each row opens the same detail page as a card.
+ * `rows` is undefined while loading, null when the read fails
+ * (no client, or the table does not exist yet — migration 003
+ * not run), and [] when the table exists but nothing is stored
+ * yet. Guests read like everyone else (public read policy);
+ * nobody stores from here — rows appear only once a period has
+ * been compiled and stored elsewhere.
+ */
+function RankedHistoryList({
+  mode,
+  signal,
+}: {
+  mode: GameMode
+  signal: number
+}) {
+  const navigate = useNavigate()
+  const [rows, setRows] = useState<StoredHistoryEntry[] | null | undefined>(undefined)
+
+  useEffect(() => {
+    let cancelled = false
+    setRows(undefined)
+    void listStoredCompilations(supabase, mode).then((listed) => {
+      if (!cancelled) setRows(listed)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, signal])
+
+  if (rows === undefined) {
+    return <LoadingState label="Loading past collections…" />
+  }
+  if (rows === null) {
+    return (
+      <div className="p-space-md rounded-lg bg-surface-container-low">
+        <p className="font-body-md text-body-md text-on-surface-variant">
+          Past collections are not available yet — the ranked-compilations table has not been
+          created. Run migration 003 (supabase/migrations/003_ranked_compilations.sql) in the
+          Supabase SQL editor, and periods will start appearing here once they have been
+          compiled and stored.
+        </p>
+      </div>
+    )
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="p-space-md rounded-lg bg-surface-container-low">
+        <p className="font-body-md text-body-md text-on-surface-variant">
+          No past collections stored yet — periods appear here once they have been compiled
+          and stored. New ones arrive as the weeks and months roll on.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {rows.map((row) => (
+        <button
+          key={`${row.granularity}:${row.period}`}
+          type="button"
+          onClick={() =>
+            navigate(`/collections/ranked/${mode}/${row.granularity}/${row.period}`)
+          }
+          className="flex items-center justify-between gap-space-md p-space-md rounded-lg bg-surface-container-low hover:bg-surface-container transition-colors text-left"
+        >
+          <span className="flex flex-col min-w-0">
+            <span className="font-headline-sm text-headline-sm text-on-surface truncate">
+              {row.label}
+            </span>
+            <span className="font-body-sm text-body-sm text-on-surface-variant">
+              {row.entryCount} {row.entryCount === 1 ? 'map' : 'maps'}
+              {row.partial ? ' · Partial list — the scan stopped early' : ''}
+              {row.compiledAtMs > 0
+                ? ` · Compiled ${new Date(row.compiledAtMs).toLocaleDateString()}`
+                : ''}
+            </span>
+          </span>
+          <span className="material-symbols-outlined text-on-surface-variant text-[20px] flex-shrink-0">
+            chevron_right
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const mode = useModeStore((s) => s.mode)
   const { user } = useAuth()
@@ -350,6 +452,8 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const register = useDownloadQueue((s) => s.register)
   const [windowId, setWindowId] = useState<RankedWindowId>('week')
   const [refreshSignal, setRefreshSignal] = useState(0)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historySignal, setHistorySignal] = useState(0)
   const [cardStates, setCardStates] = useState<Record<string, CardState>>({})
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
@@ -385,7 +489,18 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
       const next: Record<string, CardState> = {}
       cards.forEach((c, i) => {
         const stored = reads[i]
-        if (
+        if (stored && isUnreachableCompilation(stored.compilation)) {
+          // §AO: unreachable — hide the card and never recompile
+          // it (its interval only gets older). The stored empty
+          // result is what makes the hide stick across visits.
+          next[c.period] = {
+            compilation: stored.compilation,
+            compiling: false,
+            error: null,
+            stale: false,
+            hidden: true,
+          }
+        } else if (
           stored &&
           !isRefreshRun &&
           isCompilationFresh(stored.compiledAtMs, c.window.ttlMs, nowMs)
@@ -395,6 +510,7 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
             compiling: false,
             error: null,
             stale: false,
+            hidden: false,
           }
         } else if (stored) {
           next[c.period] = {
@@ -402,10 +518,11 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
             compiling: true,
             error: null,
             stale: true,
+            hidden: false,
           }
           queue.push(c)
         } else {
-          next[c.period] = { compilation: null, compiling: true, error: null, stale: false }
+          next[c.period] = { compilation: null, compiling: true, error: null, stale: false, hidden: false }
           queue.push(c)
         }
       })
@@ -424,7 +541,16 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
           if (cancelled || runRef.current !== run) return
           setCardStates((prev) => ({
             ...prev,
-            [card.period]: { compilation: compiled, compiling: false, error: null, stale: false },
+            [card.period]: {
+              compilation: compiled,
+              compiling: false,
+              error: null,
+              stale: false,
+              // §AO: a compile that found nothing with the scan
+              // stopped early hides the card (the stored empty
+              // result keeps it hidden on the next visit too).
+              hidden: isUnreachableCompilation(compiled),
+            },
           }))
         } catch {
           if (cancelled || runRef.current !== run) return
@@ -438,6 +564,7 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
                 compiling: false,
                 error: RANKED_CARD_COMPILE_ERROR,
                 stale: false,
+                hidden: false,
               },
             }
           })
@@ -455,6 +582,9 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
   const weekLoading = weekState ? weekState.compiling && !weekState.compilation : true
   const weekError = weekState?.error ?? null
   const anyCompiling = Object.values(cardStates).some((s) => s.compiling)
+  // §AO: unreachable cards never render — the grid shows only
+  // what the scan could actually reach.
+  const visibleCards = cards.filter((c) => !(cardStates[c.period]?.hidden ?? false))
 
   useEffect(() => {
     setSaveMessage(null)
@@ -555,8 +685,9 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
           by play count. Lists are compiled from osu! search and stored in the database, so a
           second visit loads instantly; stale ones refresh in the background. Follows your
           current mode ({modeLabel(mode)}); switch modes to see that mode&apos;s lists. This week
-          is one list; this month is 4 weekly cards and this year is 12 monthly cards — open a
-          card to see its songs.
+          is one list; the last 4 weeks are 4 cards and the last 12 months are 12 cards — open a
+          card to see its songs. Cards the scan cannot reach are hidden instead of shown empty,
+          and past periods live under History.
         </p>
       </div>
 
@@ -570,29 +701,48 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
             <button
               key={w.id}
               role="tab"
-              aria-selected={w.id === windowId}
+              aria-selected={w.id === windowId && !historyOpen}
               className={`px-space-md py-1.5 rounded-full font-label-md text-label-md transition-all ${
-                w.id === windowId
+                w.id === windowId && !historyOpen
                   ? 'bg-primary text-on-primary shadow-sm'
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
               type="button"
-              onClick={() => setWindowId(w.id)}
+              onClick={() => {
+                setHistoryOpen(false)
+                setWindowId(w.id)
+              }}
             >
               {w.tabLabel}
             </button>
           ))}
+          <button
+            role="tab"
+            aria-selected={historyOpen}
+            className={`px-space-md py-1.5 rounded-full font-label-md text-label-md transition-all ${
+              historyOpen
+                ? 'bg-primary text-on-primary shadow-sm'
+                : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+          >
+            History
+          </button>
         </div>
         <button
           className="flex items-center gap-1.5 px-space-md py-2 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-container-highest transition-all disabled:opacity-60"
           type="button"
           disabled={anyCompiling}
-          onClick={() => setRefreshSignal((n) => n + 1)}
+          onClick={() => {
+            setRefreshSignal((n) => n + 1)
+            setHistorySignal((n) => n + 1)
+          }}
         >
           <span className="material-symbols-outlined text-[16px]">refresh</span>
           <span>Refresh</span>
         </button>
-        {windowId === 'week' && (
+        {windowId === 'week' && !historyOpen && (
           <>
             <LockedButton
               allowed={caps.canSave}
@@ -630,7 +780,9 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
         </p>
       )}
 
-      {windowId === 'week' && (
+      {historyOpen && <RankedHistoryList mode={mode} signal={historySignal} />}
+
+      {!historyOpen && windowId === 'week' && (
         <>
           {weekLoading && (
             <LoadingState label={`Compiling the top 50 Ranked ${modeLabel(mode)} maps…`} />
@@ -690,19 +842,31 @@ function RankedListsSection({ seenKeyValue }: { seenKeyValue: string }) {
           )}
         </>
       )}
-      {windowId !== 'week' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-space-md">
-          {cards.map((card) => (
-            <RankedCardTile
-              key={card.period}
-              card={card}
-              state={cardStates[card.period] ?? { ...EMPTY_CARD_STATE }}
-              onOpen={() =>
-                navigate(`/collections/ranked/${mode}/${card.granularity}/${card.period}`)
-              }
-            />
-          ))}
-        </div>
+      {!historyOpen && windowId !== 'week' && (
+        <>
+          {visibleCards.length === 0 && !anyCompiling ? (
+            <div className="p-space-md rounded-lg bg-surface-container-low">
+              <p className="font-body-md text-body-md text-on-surface-variant">
+                No ranked collections in reach for {modeLabel(mode)} — the scan only reaches
+                back a few weeks from today, so periods it cannot reach are hidden instead of
+                shown empty. Older periods appear under History once they have been compiled.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-space-md">
+              {visibleCards.map((card) => (
+                <RankedCardTile
+                  key={card.period}
+                  card={card}
+                  state={cardStates[card.period] ?? { ...EMPTY_CARD_STATE }}
+                  onOpen={() =>
+                    navigate(`/collections/ranked/${mode}/${card.granularity}/${card.period}`)
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </section>
   )
