@@ -10,6 +10,7 @@ import {
   isValidRosuModule,
   MemoryPpCache,
   ppCacheKey,
+  rangeEndDifficulties,
   ROSU_PP_CALCULATOR_ID,
   ROSU_PP_VERSION,
   type PpCacheBackend,
@@ -298,6 +299,106 @@ describe('getPpRange orchestration (fake engine + fake fetch)', () => {
   })
 })
 
+describe('getPpRange range ends (§AZ)', () => {
+  // Same fake engine as the orchestration block above: PP per mode.
+  const engine: PpEngine = {
+    computeMaxPp: (_text, mode) =>
+      ({ osu: 100.4, taiko: 50.6, fruits: 30.2, mania: 10.8 })[mode],
+  }
+
+  let fetchCalls: number[]
+  let fetchImpl: (id: number) => Promise<string | null>
+
+  beforeEach(() => {
+    __setPpCacheBackendForTests(new MemoryPpCache())
+    fetchCalls = []
+    fetchImpl = async (id: number) => {
+      fetchCalls.push(id)
+      const name =
+        id === 1 ? 'osu' : id === 2 ? 'taiko' : id === 3 ? 'catch' : ('mania' as const)
+      return fixtureText(name)
+    }
+  })
+
+  afterEach(() => {
+    __setPpCacheBackendForTests(null)
+  })
+
+  // Four difficulties, star ratings spread 1★–9★. The range over
+  // the ends (1★ osu → 100 pp, 9★ mania → 11 pp) equals the range
+  // over all four — the pill does not change when PP is monotonic
+  // in SR, which is the common case.
+  const rated: PpDifficultyInput[] = [
+    { beatmapId: 1, mode: 'osu', checksum: 'cs1', starRating: 1.0 },
+    { beatmapId: 2, mode: 'taiko', checksum: 'cs2', starRating: 3.0 },
+    { beatmapId: 3, mode: 'fruits', checksum: 'cs3', starRating: 5.0 },
+    { beatmapId: 4, mode: 'mania', checksum: 'cs4', starRating: 9.0 },
+  ]
+
+  it('fetches only the min/max star-rating difficulties', async () => {
+    const range = await getPpRange(rated, { engine, fetchOsuFile: fetchImpl })
+    expect(range).toEqual({ min: 11, max: 100 })
+    expect(fetchCalls).toEqual([1, 4])
+  })
+
+  it('fetches once for a single difficulty', async () => {
+    const one: PpDifficultyInput[] = [
+      { beatmapId: 7, mode: 'osu', checksum: 'cs7', starRating: 4.5 },
+    ]
+    const range = await getPpRange(one, { engine, fetchOsuFile: fetchImpl })
+    expect(range).toEqual({ min: 100, max: 100 })
+    expect(fetchCalls).toEqual([7])
+  })
+
+  it('ties keep the first difficulty in array order', async () => {
+    const tied: PpDifficultyInput[] = [
+      { beatmapId: 1, mode: 'osu', checksum: 'cs1', starRating: 2.0 },
+      { beatmapId: 2, mode: 'taiko', checksum: 'cs2', starRating: 5.0 },
+      { beatmapId: 3, mode: 'fruits', checksum: 'cs3', starRating: 5.0 },
+      { beatmapId: 4, mode: 'mania', checksum: 'cs4', starRating: 1.0 },
+    ]
+    // Min is id 4 (1★), max is id 2 (first 5★, not id 3).
+    const range = await getPpRange(tied, { engine, fetchOsuFile: fetchImpl })
+    expect(range).toEqual({ min: 11, max: 51 })
+    expect(fetchCalls).toEqual([4, 2])
+  })
+
+  it('difficulties without a star rating fall back to all of them', async () => {
+    const unrated: PpDifficultyInput[] = [
+      { beatmapId: 1, mode: 'osu', checksum: 'cs1' },
+      { beatmapId: 2, mode: 'taiko', checksum: 'cs2' },
+      { beatmapId: 3, mode: 'fruits', checksum: 'cs3' },
+      { beatmapId: 4, mode: 'mania', checksum: 'cs4' },
+    ]
+    const range = await getPpRange(unrated, { engine, fetchOsuFile: fetchImpl })
+    expect(range).toEqual({ min: 11, max: 100 })
+    expect(fetchCalls).toEqual([1, 2, 3, 4])
+  })
+
+  it('unrated difficulties are ignored when others carry a rating', async () => {
+    const mixed: PpDifficultyInput[] = [
+      { beatmapId: 1, mode: 'osu', checksum: 'cs1', starRating: 1.0 },
+      { beatmapId: 2, mode: 'taiko', checksum: 'cs2' },
+      { beatmapId: 3, mode: 'fruits', checksum: 'cs3', starRating: 9.0 },
+    ]
+    const range = await getPpRange(mixed, { engine, fetchOsuFile: fetchImpl })
+    expect(range).toEqual({ min: 30, max: 100 })
+    expect(fetchCalls).toEqual([1, 3])
+  })
+
+  it('rangeEndDifficulties is pure: empty, single, and min==max', () => {
+    expect(rangeEndDifficulties([])).toEqual([])
+    const one: PpDifficultyInput = { beatmapId: 7, mode: 'osu', starRating: 4.5 }
+    expect(rangeEndDifficulties([one])).toEqual([one])
+    const same: PpDifficultyInput[] = [
+      { beatmapId: 1, mode: 'osu', starRating: 3.0 },
+      { beatmapId: 2, mode: 'taiko', starRating: 3.0 },
+    ]
+    // Same rating on both ends is one fetch, not two.
+    expect(rangeEndDifficulties(same)).toEqual([same[0]])
+  })
+})
+
 describe('live-failure hardening (2026-10-30 M_ID report)', () => {
   // The live console showed `TypeError: Cannot read properties of
   // undefined (reading 'M_ID')` + repeated osu-proxy 400s on landing
@@ -484,9 +585,27 @@ describe('difficulties plumbing', () => {
     }
     const c = setToCandidate(set, 'mania', profile)
     expect(c?.difficulties).toEqual([
-      { beatmapId: 2, mode: 'mania', checksum: 'cs-4k', lastUpdated: '2026-01-01T00:00:00Z' },
-      { beatmapId: 3, mode: 'mania', checksum: undefined, lastUpdated: '2026-02-01T00:00:00Z' },
-      { beatmapId: 4, mode: 'mania', checksum: undefined, lastUpdated: undefined },
+      {
+        beatmapId: 2,
+        mode: 'mania',
+        checksum: 'cs-4k',
+        lastUpdated: '2026-01-01T00:00:00Z',
+        starRating: 3.5,
+      },
+      {
+        beatmapId: 3,
+        mode: 'mania',
+        checksum: undefined,
+        lastUpdated: '2026-02-01T00:00:00Z',
+        starRating: 4.9,
+      },
+      {
+        beatmapId: 4,
+        mode: 'mania',
+        checksum: undefined,
+        lastUpdated: undefined,
+        starRating: undefined,
+      },
     ])
     // SR range still uses the finite-SR subset only.
     expect(c?.srMin).toBe(3.5)
@@ -508,8 +627,8 @@ describe('difficulties plumbing', () => {
     }
     const c = rankedSetToCandidate(set, 'mania')
     expect(c?.difficulties).toEqual([
-      { beatmapId: 11, mode: 'mania', checksum: 'cs-hd', lastUpdated: undefined },
-      { beatmapId: 12, mode: 'mania', checksum: undefined, lastUpdated: undefined },
+      { beatmapId: 11, mode: 'mania', checksum: 'cs-hd', lastUpdated: undefined, starRating: 4.0 },
+      { beatmapId: 12, mode: 'mania', checksum: undefined, lastUpdated: undefined, starRating: 5.0 },
     ])
   })
 })

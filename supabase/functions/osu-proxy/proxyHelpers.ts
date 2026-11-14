@@ -48,6 +48,73 @@ export function rateLimitKeyForGuest(ipHash: string): string {
   return `ip:${ipHash}`
 }
 
+// ---------------------------------------------------------------------------
+// Miss-path limiter + exemptions (batch AZ)
+// ---------------------------------------------------------------------------
+
+/** Actions that never pass through the rate limiter: the auth
+ *  actions verify their own JWTs inside runAuthAction, the nightly
+ *  job checks its own refresh token, and getBeatmapFile fetches
+ *  public .osu files from the website endpoint
+ *  (https://osu.ppy.sh/osu/) — NOT the API — so the API's
+ *  60/min ask never covered those calls. */
+export const RATE_LIMIT_EXEMPT_ACTIONS: ReadonlySet<string> = new Set([
+  'getOsuAuthorizeUrl',
+  'exchangeOsuCode',
+  'osuAuthStatus',
+  'disconnectOsu',
+  'probeOsuDownload',
+  'refreshRanked',
+  'getBeatmapFile',
+])
+
+export function isRateLimitExemptAction(action: string): boolean {
+  return RATE_LIMIT_EXEMPT_ACTIONS.has(action)
+}
+
+/** The rate-limit bucket for one caller, resolved once per request
+ *  in resolveProxyCtx (index.ts) so the miss-path limiter can
+ *  charge it without the request in hand. */
+export interface RateLimitIdentity {
+  key: string
+  limit: number
+}
+
+export function rateLimitIdentityForUser(
+  userId: string,
+  ownerUserId: string | undefined,
+): RateLimitIdentity {
+  return {
+    key: rateLimitKeyForUser(userId),
+    limit: rateLimitForUser(userId, ownerUserId),
+  }
+}
+
+export function rateLimitIdentityForGuest(ipHash: string): RateLimitIdentity {
+  return { key: rateLimitKeyForGuest(ipHash), limit: rateLimitForCaller('guest') }
+}
+
+/** The exact 429 the function returns when the limiter denies a
+ *  call: the honest message, status, stable code, and the
+ *  Retry-After header the client reads for its wait display
+ *  (osu.ts). Retry-After is at least 1 second. */
+export function rateLimitError(
+  limit: number,
+  retryAfterSeconds: number,
+): {
+  message: string
+  status: 429
+  code: 'rate_limited'
+  headers: { 'Retry-After': string }
+} {
+  return {
+    message: formatRateLimitMessage(limit, retryAfterSeconds),
+    status: 429,
+    code: 'rate_limited',
+    headers: { 'Retry-After': String(Math.max(1, retryAfterSeconds)) },
+  }
+}
+
 /** Honest 429 message — the same text the function returns in the
  *  error body and the client shows. Never a fake success. */
 export function formatRateLimitMessage(limit: number, retryAfterSeconds: number): string {

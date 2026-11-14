@@ -18,10 +18,14 @@ import {
   clientIpFromHeaders,
   formatRateLimitMessage,
   isAllowedOrigin,
+  isRateLimitExemptAction,
   isWithinThrottleWindow,
   parseAllowedOrigins,
+  rateLimitError,
   rateLimitForCaller,
   rateLimitForUser,
+  rateLimitIdentityForGuest,
+  rateLimitIdentityForUser,
   rateLimitKeyForGuest,
   rateLimitKeyForUser,
   sha256Hex,
@@ -78,6 +82,76 @@ describe('owner high cap (batch AW)', () => {
 
   it('quotes the real limit in the 429 message — 600 for the owner', () => {
     expect(formatRateLimitMessage(600, 5)).toContain('600-calls-a-minute')
+  })
+})
+
+describe('rate-limit exemption + miss-path limiter (§AZ)', () => {
+  const OWNER = '11111111-1111-1111-1111-111111111111'
+  const OTHER_USER = '22222222-2222-2222-2222-222222222222'
+
+  it('exempts file fetches, auth actions, and the nightly job — nothing else', () => {
+    // Item 1: .osu files come from the website endpoint, not the
+    // API, so the API's 60/min ask never covered them.
+    expect(isRateLimitExemptAction('getBeatmapFile')).toBe(true)
+    for (const action of [
+      'getOsuAuthorizeUrl',
+      'exchangeOsuCode',
+      'osuAuthStatus',
+      'disconnectOsu',
+      'probeOsuDownload',
+      'refreshRanked',
+    ]) {
+      expect(isRateLimitExemptAction(action)).toBe(true)
+    }
+    for (const action of [
+      'getUser',
+      'getTopPlays',
+      'getRecentPlays',
+      'getMostPlayed',
+      'searchBeatmapsets',
+      'getBeatmap',
+      'getBeatmapset',
+      'getDifficultyAttributes',
+      'getBeatmapPacks',
+      'getBeatmapPack',
+      'getBeatmapUserTags',
+    ]) {
+      expect(isRateLimitExemptAction(action)).toBe(false)
+    }
+  })
+
+  it('resolves the owner identity to 600 and everyone else to 60 (values unchanged)', () => {
+    expect(rateLimitIdentityForUser(OWNER, OWNER)).toEqual({
+      key: 'user:11111111-1111-1111-1111-111111111111',
+      limit: 600,
+    })
+    expect(rateLimitIdentityForUser(OTHER_USER, OWNER)).toEqual({
+      key: 'user:22222222-2222-2222-2222-222222222222',
+      limit: 60,
+    })
+    expect(rateLimitIdentityForUser(OWNER, undefined)).toEqual({
+      key: 'user:11111111-1111-1111-1111-111111111111',
+      limit: 60,
+    })
+  })
+
+  it('resolves guests to their hashed-IP bucket at 10', () => {
+    expect(rateLimitIdentityForGuest('abc123')).toEqual({ key: 'ip:abc123', limit: 10 })
+  })
+
+  it('builds the exact 429 descriptor: message, status, code, Retry-After', () => {
+    const err = rateLimitError(60, 17)
+    expect(err.status).toBe(429)
+    expect(err.code).toBe('rate_limited')
+    expect(err.message).toBe(
+      "Too many requests — you're at the 60-calls-a-minute limit for RecOsuk's osu! proxy. Try again in 17 seconds.",
+    )
+    expect(err.headers).toEqual({ 'Retry-After': '17' })
+  })
+
+  it('clamps Retry-After to at least 1 second', () => {
+    expect(rateLimitError(60, 0).headers).toEqual({ 'Retry-After': '1' })
+    expect(rateLimitError(10, -5).headers).toEqual({ 'Retry-After': '1' })
   })
 })
 

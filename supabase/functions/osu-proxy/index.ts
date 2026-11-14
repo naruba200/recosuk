@@ -49,14 +49,14 @@ import {
   RATE_LIMIT_USER_PER_MIN,
   cacheTtlMsForPath,
   clientIpFromHeaders,
-  formatRateLimitMessage,
   isAllowedOrigin,
+  isRateLimitExemptAction,
   parseAllowedOrigins,
-  rateLimitForCaller,
-  rateLimitForUser,
-  rateLimitKeyForGuest,
-  rateLimitKeyForUser,
+  rateLimitError,
+  rateLimitIdentityForGuest,
+  rateLimitIdentityForUser,
   sha256Hex,
+  type RateLimitIdentity,
 } from './proxyHelpers.ts'
 import {
   PackListError,
@@ -294,10 +294,14 @@ class ProxyError extends Error {
   status: number
   /** Stable machine-readable code, returned alongside `error` when set (auth actions). */
   code?: string
-  constructor(message: string, status: number, code?: string) {
+  /** Extra response headers (e.g. Retry-After on the rate-limit
+   *  429) — the handler's catch passes these to errorJson. */
+  headers?: Record<string, string>
+  constructor(message: string, status: number, code?: string, headers?: Record<string, string>) {
     super(message)
     this.status = status
     this.code = code
+    this.headers = headers
   }
 }
 
@@ -330,10 +334,14 @@ function errorJson(
 // Beatmap `.osu` files (PP feature): the website file endpoint, NOT
 // the API — no client-credentials token is sent (it is a public
 // website URL, not an API route, and the token buys nothing here).
-// Throttled like every upstream call and cached 1h in-memory; the
-// client caches per (beatmap, checksum, calculator version) itself,
-// so a stale hour here only delays a freshly-updated map, never a
-// wrong PP (the checksum key misses and the file is re-fetched).
+// Never rate-limited (batch AZ item 1): the API's 60/min ask does
+// not cover the website endpoint. The remaining bounds are the
+// 350ms upstream gap, the 1h cache, and the client's max-3
+// concurrent fetches. Throttled like every upstream call and cached
+// 1h in-memory; the client caches per (beatmap, checksum,
+// calculator version) itself, so a stale hour here only delays a
+// freshly-updated map, never a wrong PP (the checksum key misses
+// and the file is re-fetched).
 // The first-line check is the real guard: a missing/redirected map
 // lands on an HTML page, which must never be passed off as a .osu
 // file. Deploy: supabase functions deploy osu-proxy --no-verify-jwt
@@ -359,6 +367,15 @@ interface ProxyCtx {
   callerKind: 'user' | 'guest' | 'service'
   /** Supabase user id for signed-in callers; null for guests. */
   userId: string | null
+  /** Rate-limit bucket for this caller, resolved once per request
+   *  in resolveProxyCtx (batch AZ item 2): the DB key + the
+   *  caller's limit. osuFetch charges one count per cache MISS
+   *  only — a cache hit costs nothing, so counts now mean real
+   *  osu! calls. One proxy request can therefore cost several
+   *  counts (a profile load makes several upstream calls); that
+   *  is the honest accounting. */
+  rateLimitKey: string
+  rateLimit: number
   cache: { mem: number; db: number; miss: number }
 }
 
@@ -427,6 +444,13 @@ async function osuFetch(path: string, init?: RequestInit, ctx?: ProxyCtx): Promi
   }
 
   return coalesced(cacheKey, async () => {
+    // Batch AZ item 2: the limiter charges here, on a cache miss
+    // only — a cache hit above returns before this callback runs,
+    // so it costs nothing. Inside the coalesced callback so
+    // identical in-flight misses share one upstream call AND one
+    // count, and before throttle() so a denied request burns
+    // neither a throttle slot nor an upstream fetch.
+    await chargeRateLimitOnMiss(ctx, path)
     await throttle()
     // Per-user token when the caller is signed in + linked (batch AP
     // item 1a); the shared client token is the guest fallback — and
@@ -974,19 +998,28 @@ async function verifyUserJwt(
 async function resolveProxyCtx(req: Request): Promise<ProxyCtx> {
   const env = readProxyEnv()
   const service = serviceClientFor(env)
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  const userId = bearer ? await verifyUserJwt(bearer, env) : null
+  // Rate-limit identity (batch AZ item 2): resolved once here so
+  // the miss-path limiter can charge it without the request in
+  // hand. Guests are bucketed by hashed IP, never the raw address.
+  let identity: RateLimitIdentity
+  if (userId) {
+    identity = rateLimitIdentityForUser(userId, Deno.env.get('OWNER_USER_ID'))
+  } else {
+    const ip = clientIpFromHeaders((name) => req.headers.get(name))
+    identity = rateLimitIdentityForGuest(ip ? await sha256Hex(ip) : 'unknown')
+  }
   const ctx: ProxyCtx = {
     service,
     userToken: null,
-    callerKind: 'guest',
-    userId: null,
+    callerKind: userId ? 'user' : 'guest',
+    userId,
     cache: { mem: 0, db: 0, miss: 0 },
+    rateLimitKey: identity.key,
+    rateLimit: identity.limit,
   }
-  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-  if (!bearer) return ctx
-  const userId = await verifyUserJwt(bearer, env)
   if (!userId) return ctx
-  ctx.callerKind = 'user'
-  ctx.userId = userId
   if (service && env.encryptionKeyB64) {
     try {
       ctx.userToken = await getUserAccessTokenBestEffort({
@@ -1016,46 +1049,34 @@ interface RateLimitOutcome {
   limit: number
 }
 
-async function checkProxyRateLimit(
-  ctx: ProxyCtx,
-  req: Request,
-): Promise<RateLimitOutcome> {
-  // Service callers (the nightly job, auth actions) never pass
-  // through the limiter — this guard is the belt to the
-  // Deno.serve routing's braces; it also narrows callerKind to
-  // 'user' | 'guest' for the limit lookup below.
+/**
+ * Charge one count for a cache miss (batch AZ item 2). The key +
+ * limit were resolved once per request in resolveProxyCtx and
+ * stored on the ctx — this takes no request. Called ONLY from
+ * osuFetch's miss path: a cache hit never reaches it, so a cached
+ * answer costs nothing. Service callers never pass through the
+ * limiter (the nightly job, auth actions). A missing service
+ * client or a failed RPC check fails OPEN, exactly as the old
+ * front-door check did (migration 004 not run yet = no limiter).
+ */
+async function checkProxyRateLimit(ctx: ProxyCtx): Promise<RateLimitOutcome> {
   if (ctx.callerKind === 'service') {
-    return { allowed: true, retryAfterSeconds: 0, key: 'service', limit: RATE_LIMIT_USER_PER_MIN }
-  }
-  // Batch AW: the owner (OWNER_USER_ID secret, read here like
-  // RANKED_REFRESH_TOKEN) rides the 600/min cap; every other
-  // signed-in user stays at 60/min, guests at 10/min. An unset or
-  // empty secret means no exemption — fail-safe, never a bypass.
-  const limit =
-    ctx.callerKind === 'user'
-      ? rateLimitForUser(ctx.userId ?? 'unknown', Deno.env.get('OWNER_USER_ID'))
-      : rateLimitForCaller(ctx.callerKind)
-  let key: string
-  if (ctx.callerKind === 'user') {
-    key = rateLimitKeyForUser(ctx.userId ?? 'unknown')
-  } else {
-    const ip = clientIpFromHeaders((name) => req.headers.get(name))
-    key = rateLimitKeyForGuest(ip ? await sha256Hex(ip) : 'unknown')
+    return { allowed: true, retryAfterSeconds: 0, key: ctx.rateLimitKey, limit: ctx.rateLimit }
   }
   if (!ctx.service) {
-    return { allowed: true, retryAfterSeconds: 0, key, limit }
+    return { allowed: true, retryAfterSeconds: 0, key: ctx.rateLimitKey, limit: ctx.rateLimit }
   }
   try {
     const { data, error } = await ctx.service.rpc('check_proxy_rate_limit', {
-      p_key: key,
-      p_limit: limit,
+      p_key: ctx.rateLimitKey,
+      p_limit: ctx.rateLimit,
     })
     if (error || !Array.isArray(data) || data.length === 0) {
       console.warn(
         '[RecOsuk proxy] rate-limit check failed (migration 004 not run yet?) — allowing the request.',
         error?.message ?? '',
       )
-      return { allowed: true, retryAfterSeconds: 0, key, limit }
+      return { allowed: true, retryAfterSeconds: 0, key: ctx.rateLimitKey, limit: ctx.rateLimit }
     }
     const row = data[0] as { allowed: boolean; retry_after_seconds: number }
     return {
@@ -1064,13 +1085,33 @@ async function checkProxyRateLimit(
         typeof row.retry_after_seconds === 'number' && row.retry_after_seconds > 0
           ? Math.ceil(row.retry_after_seconds)
           : 0,
-      key,
-      limit,
+      key: ctx.rateLimitKey,
+      limit: ctx.rateLimit,
     }
   } catch (err) {
     console.warn('[RecOsuk proxy] rate-limit check threw — allowing the request.', String(err))
-    return { allowed: true, retryAfterSeconds: 0, key, limit }
+    return { allowed: true, retryAfterSeconds: 0, key: ctx.rateLimitKey, limit: ctx.rateLimit }
   }
+}
+
+/** Charge one count for a cache miss, throwing the exact 429 when
+ *  the caller is over budget (batch AZ item 2). No ctx means no
+ *  known caller — fail open, as the old front-door check did.
+ *  The thrown ProxyError carries the Retry-After header, which
+ *  the handler's catch passes through to the response (the client
+ *  reads it for its wait display). */
+async function chargeRateLimitOnMiss(ctx: ProxyCtx | undefined, path: string): Promise<void> {
+  if (!ctx) return
+  const outcome = await checkProxyRateLimit(ctx)
+  if (outcome.allowed) return
+  const err = rateLimitError(outcome.limit, outcome.retryAfterSeconds)
+  console.warn('[RecOsuk proxy] rate limited', {
+    path,
+    key: outcome.key,
+    limit: outcome.limit,
+    retryAfterSeconds: outcome.retryAfterSeconds,
+  })
+  throw new ProxyError(err.message, err.status, err.code, err.headers)
 }
 
 async function runAuthAction(action: string, params: Params, req: Request): Promise<unknown> {
@@ -1244,6 +1285,8 @@ Deno.serve(async (req: Request) => {
     callerKind: 'service',
     userId: null,
     cache: { mem: 0, db: 0, miss: 0 },
+    rateLimitKey: 'service',
+    rateLimit: RATE_LIMIT_USER_PER_MIN,
   }
   let action = ''
 
@@ -1277,19 +1320,20 @@ Deno.serve(async (req: Request) => {
     }
 
     action = typeof params.action === 'string' ? params.action : ''
-    const isAuthAction = [
-      'getOsuAuthorizeUrl',
-      'exchangeOsuCode',
-      'osuAuthStatus',
-      'disconnectOsu',
-      'probeOsuDownload',
-    ].includes(action)
-    if (isAuthAction || action === 'refreshRanked') {
-      // No rate limit here (see the header comment) — but the
-      // service client is still built so scan pages use the DB
-      // cache. The auth actions verify their own JWTs inside
-      // runAuthAction; refreshRanked checks its token inside
-      // runAction.
+    // Batch AZ item 1: getBeatmapFile joins the exempt list with
+    // the auth actions and refreshRanked — .osu files come from
+    // the website endpoint (https://osu.ppy.sh/osu/), not the API,
+    // so the API's 60/min ask never covered them. Exempt actions
+    // get the cheap service ctx (no JWT verification, no user
+    // token load — the data is public) and never touch the
+    // limiter; the DB cache still serves them.
+    // Batch AZ item 2: the limiter no longer runs at the front
+    // door at all — it charges inside osuFetch on a cache miss
+    // only, so a cached answer costs nothing (see
+    // chargeRateLimitOnMiss). Auth actions verify their own JWTs
+    // inside runAuthAction; refreshRanked checks its token inside
+    // runAction.
+    if (isRateLimitExemptAction(action)) {
       const env = readProxyEnv()
       ctx = {
         service: serviceClientFor(env),
@@ -1297,22 +1341,11 @@ Deno.serve(async (req: Request) => {
         callerKind: 'service',
         userId: null,
         cache: { mem: 0, db: 0, miss: 0 },
+        rateLimitKey: 'service',
+        rateLimit: RATE_LIMIT_USER_PER_MIN,
       }
     } else {
       ctx = await resolveProxyCtx(req)
-      const limit = await checkProxyRateLimit(ctx, req)
-      if (!limit.allowed) {
-        const message = formatRateLimitMessage(limit.limit, limit.retryAfterSeconds)
-        console.warn('[RecOsuk proxy] rate limited', {
-          action,
-          caller: ctx.callerKind,
-          limit: limit.limit,
-          retryAfterSeconds: limit.retryAfterSeconds,
-        })
-        return errorJson(message, 429, 'rate_limited', headers, {
-          'Retry-After': String(Math.max(1, limit.retryAfterSeconds)),
-        })
-      }
     }
 
     const data = await runAction(params, req, ctx)
@@ -1339,7 +1372,7 @@ Deno.serve(async (req: Request) => {
       return errorJson(err.message, err.status, err.code, headers)
     }
     if (err instanceof ProxyError) {
-      return errorJson(err.message, err.status, err.code, headers)
+      return errorJson(err.message, err.status, err.code, headers, err.headers ?? {})
     }
     return errorJson('osu-proxy internal error', 500, undefined, headers)
   }

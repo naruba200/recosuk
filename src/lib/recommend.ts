@@ -82,6 +82,9 @@ export interface CandidateDifficulty {
   mode: GameMode
   checksum?: string
   lastUpdated?: string
+  /** Star rating from the search payload, when carried (§AZ):
+   * getPpRange only fetches the lowest/highest-rated ends. */
+  starRating?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -517,8 +520,10 @@ export function setToCandidate(
   if (!diff) return null
   // In-mode difficulties (same list pickDifficulty uses, minus the
   // finite-SR requirement — PP needs no star rating): the SR range
-  // uses the finite-SR subset, the PP range uses every difficulty
-  // with a numeric id.
+  // uses the finite-SR subset, the PP range uses only the
+  // lowest/highest star-rating ends (§AZ, see pp.ts
+  // rangeEndDifficulties) — the rating rides along for that
+  // selection, and difficulties without one are ignored there.
   const inMode = (set.beatmaps ?? []).filter(
     (b): b is SearchDifficulty =>
       !!b && b.mode === mode && typeof b.id === 'number',
@@ -551,6 +556,10 @@ export function setToCandidate(
         typeof b.checksum === 'string' && b.checksum !== '' ? b.checksum : undefined,
       lastUpdated:
         typeof b.last_updated === 'string' && b.last_updated !== '' ? b.last_updated : undefined,
+      starRating:
+        typeof b.difficulty_rating === 'number' && Number.isFinite(b.difficulty_rating)
+          ? b.difficulty_rating
+          : undefined,
     })),
     bpm: diff.bpm ?? set.beatmaps?.[0]?.bpm ?? 0,
     lengthSec: diff.total_length ?? 0,

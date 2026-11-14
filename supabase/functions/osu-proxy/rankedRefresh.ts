@@ -160,6 +160,7 @@ export interface RefreshCandidate {
     mode: string
     checksum?: string
     lastUpdated?: string
+    starRating?: number
   }>
   bpm: number
   lengthSec: number
@@ -239,6 +240,10 @@ export function refreshSetToCandidate(
         typeof b.checksum === 'string' && b.checksum !== '' ? b.checksum : undefined,
       lastUpdated:
         typeof b.last_updated === 'string' && b.last_updated !== '' ? b.last_updated : undefined,
+      // §AZ: the PP range only fetches the lowest/highest
+      // star-rating ends — every difficulty here carries a finite
+      // rating (the filter above requires it).
+      starRating: b.difficulty_rating,
     })),
     bpm: diff.bpm ?? 0,
     lengthSec: diff.total_length ?? 0,

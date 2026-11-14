@@ -76,6 +76,13 @@ export interface PpDifficultyInput {
    * NoMod number back.
    */
   mods?: number
+  /**
+   * Star rating from the search payload, when the payload carries
+   * it (§AZ). getPpRange only fetches the lowest- and
+   * highest-rated difficulties; the rating is the selector, never
+   * part of the cache key.
+   */
+  starRating?: number
 }
 
 export interface PpRange {
@@ -537,18 +544,65 @@ function dedupedCompute(
 }
 
 /**
+ * The difficulties a PP range actually needs (§AZ): the lowest-
+ * and highest-star-rating entries. A range only spans its ends,
+ * so fetching every difficulty in the set burned one proxy
+ * request per difficulty for numbers the pill never showed.
+ * Deterministic ties: the first difficulty in array order wins.
+ * No ratings at all → every difficulty (the old behaviour):
+ * callers built before starRating existed must keep working.
+ * One difficulty, or min == max, → one fetch.
+ *
+ * Tradeoff: PP is not strictly monotonic in star rating, so in
+ * rare cases a middle difficulty could out-PP the top one and
+ * the range reads slightly narrow.
+ */
+export function rangeEndDifficulties(
+  difficulties: readonly PpDifficultyInput[],
+): PpDifficultyInput[] {
+  if (!Array.isArray(difficulties) || difficulties.length === 0) return []
+  let minIdx = -1
+  let maxIdx = -1
+  let minSr = Number.POSITIVE_INFINITY
+  let maxSr = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < difficulties.length; i++) {
+    // A malformed entry (undefined, non-object) must never throw
+    // out of the range computation: it is skipped here and treated
+    // as a null by the compute step, exactly as before.
+    const d = difficulties[i] as PpDifficultyInput | null | undefined
+    if (!d || typeof d !== 'object') continue
+    const sr = d.starRating
+    if (typeof sr !== 'number' || !Number.isFinite(sr)) continue
+    if (sr < minSr) {
+      minSr = sr
+      minIdx = i
+    }
+    if (sr > maxSr) {
+      maxSr = sr
+      maxIdx = i
+    }
+  }
+  if (minIdx === -1) return [...difficulties]
+  if (minIdx === maxIdx) return [difficulties[minIdx]]
+  return [difficulties[minIdx], difficulties[maxIdx]]
+}
+
+/**
  * Max-PP range over a set's difficulties. Cache-first (no fetch
  * for cached difficulties), lazy WASM init only when at least one
  * difficulty misses, and never throws: any failure degrades to
- * the computed subset, or null when nothing computed.
+ * the computed subset, or null when nothing computed. Only the
+ * range ends are computed (§AZ, see rangeEndDifficulties) — the
+ * middle difficulties never cost a fetch.
  */
 export async function getPpRange(
   difficulties: readonly PpDifficultyInput[],
   deps: PpComputeDeps = {},
 ): Promise<PpRange | null> {
   if (!Array.isArray(difficulties) || difficulties.length === 0) return null
+  const ends = rangeEndDifficulties(difficulties)
   const values: (number | null)[] = await Promise.all(
-    difficulties.map((d) => readCachedPp(d).catch(() => null)),
+    ends.map((d) => readCachedPp(d).catch(() => null)),
   )
   const missingIdx: number[] = []
   values.forEach((v, i) => {
@@ -565,7 +619,7 @@ export async function getPpRange(
       const fetchFn = deps.fetchOsuFile ?? defaultFetchOsuFile
       try {
         const computed = await Promise.all(
-          missingIdx.map((i) => dedupedCompute(difficulties[i], engine as PpEngine, fetchFn)),
+          missingIdx.map((i) => dedupedCompute(ends[i], engine as PpEngine, fetchFn)),
         )
         computed.forEach((pp, j) => {
           values[missingIdx[j]] = pp

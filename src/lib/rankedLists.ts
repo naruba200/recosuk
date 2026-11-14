@@ -106,6 +106,8 @@ export function rankedSetToCandidate(
     // PP range inputs: every in-mode difficulty with a numeric id
     // (same list as the SR range here — the median pick above
     // already requires a finite SR, so this matches it exactly).
+    // getPpRange only fetches the lowest/highest star-rating ends
+    // (§AZ), and every difficulty here carries a finite rating.
     difficulties: inMode.map((b) => ({
       beatmapId: b.id,
       mode,
@@ -113,6 +115,7 @@ export function rankedSetToCandidate(
         typeof b.checksum === 'string' && b.checksum !== '' ? b.checksum : undefined,
       lastUpdated:
         typeof b.last_updated === 'string' && b.last_updated !== '' ? b.last_updated : undefined,
+      starRating: b.difficulty_rating,
     })),
     bpm: diff.bpm ?? 0,
     lengthSec: diff.total_length ?? 0,
