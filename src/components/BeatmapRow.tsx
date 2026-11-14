@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { GameMode } from '../lib/mode'
 import { modeLabel } from '../lib/mode'
 import type { DownloadPrimary } from '../lib/downloadManager'
+import { combineMods } from '../lib/mods'
 import { statusBadgeClasses } from '../lib/statusBadge'
 import type { RecCandidate } from '../lib/recommend'
 import { applyTagAllowlist, essentialTags, formatLength, modeTagLabel } from '../lib/recommend'
@@ -64,6 +65,13 @@ interface BeatmapRowProps {
    * 'auto' too (user decision 2026-11-09, §AU).
    */
   downloadPrimary?: DownloadPrimary
+  /**
+   * Selected mods, as acronyms (§AY). Recommendations passes
+   * the applied filters' mods; every other caller passes
+   * nothing (= NoMod). They only feed the PP pill — the range
+   * recomputes under these mods and the pill names them.
+   */
+  mods?: string[]
   /** Ranked compilation lists only: renders the #N rank badge and
    *  the play count. Absent everywhere else — rows stay unchanged. */
   rank?: number
@@ -376,6 +384,7 @@ export default function BeatmapRow({
   onSkip,
   onDownloaded,
   downloadPrimary,
+  mods = [],
   rank,
   feedback = null,
   containing = [],
@@ -396,21 +405,29 @@ export default function BeatmapRow({
   // difficulty data (never from setToCandidate/rankedSetToCandidate)
   // show no pill at all. The † marker + note name the October 2025
   // formula for reworked modes — never presented as current-formula.
+  // §AY: the selected mods ride on each difficulty (combined
+  // bitmask), so the range recomputes under them; the pill names
+  // the mods so the number's basis is visible.
   const ppHasDifficulties = !!c.difficulties && c.difficulties.length > 0
-  const { ref: ppRef, range: ppRangeValue, state: ppState } = usePpRange(
-    ppHasDifficulties ? c.difficulties : undefined,
-  )
+  const ppMods = combineMods(mods)
+  const ppDifficulties = useMemo(() => {
+    const diffs = c.difficulties
+    if (!diffs || diffs.length === 0) return undefined
+    return diffs.map((d) => ({ ...d, mods: ppMods }))
+  }, [c.difficulties, ppMods])
+  const { ref: ppRef, range: ppRangeValue, state: ppState } = usePpRange(ppDifficulties)
   const ppStale = !ppFormulaIsCurrent(mode)
   const ppText = ppState === 'ready' && ppRangeValue ? formatPpRange(ppRangeValue) : '—'
+  const ppModsLabel = mods.length > 0 ? ` with ${mods.join('+')}` : ''
   const ppTitle = ppRangeValue
     ? ppStale
       ? PP_STALENESS_NOTE
-      : 'Max PP for a perfect score'
+      : `Max PP for a perfect score${ppModsLabel}`
     : ppState === 'loading'
       ? 'Computing max PP…'
       : 'PP unavailable for this map'
   const ppAriaLabel = ppRangeValue
-    ? `Max PP range ${formatPpRange(ppRangeValue)}${ppStale ? '. October 2025 formula; the July 2026 rework is not yet in this calculator' : ', for a perfect score'}`
+    ? `Max PP range ${formatPpRange(ppRangeValue)}${ppModsLabel}${ppStale ? '. October 2025 formula; the July 2026 rework is not yet in this calculator' : ', for a perfect score'}`
     : ppTitle
 
   const goAuth = () => navigate('/auth')
@@ -463,6 +480,9 @@ export default function BeatmapRow({
                 aria-label={ppAriaLabel}
               >
                 {ppText}
+                {mods.length > 0 && (
+                  <span className="font-bold">· {mods.join('+')}</span>
+                )}
                 {ppRangeValue && ppStale && (
                   <sup aria-hidden="true" className="text-[10px] leading-none">†</sup>
                 )}

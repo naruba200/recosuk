@@ -4,9 +4,10 @@ import { proxyCall } from './osu'
 
 /**
  * Max-PP ranges (2026-10-29): the PP for a perfect score (SS,
- * NoMod, lazer scoring) per difficulty, computed with rosu-pp-js
+ * lazer scoring) per difficulty, computed with rosu-pp-js
  * — the WASM port of the osu!lazer calculators — from the real
- * `.osu` file text. NEVER a hand-rolled formula (standing rework
+ * `.osu` file text, under the selected mods (§AY; NoMod when
+ * none are selected). NEVER a hand-rolled formula (standing rework
  * rule): the numbers track upstream by dependency bump, and the
  * cache key carries the calculator version so a bump invalidates
  * every stored value automatically.
@@ -67,6 +68,14 @@ export interface PpDifficultyInput {
   checksum?: string
   /** Fallback version signal when no checksum is present. */
   lastUpdated?: string
+  /**
+   * Selected mods as a legacy bitmask (§AY, see lib/mods), or
+   * omitted for NoMod (0). The number is part of the cache key,
+   * so the same difficulty under different mods is a different
+   * entry — switching mods recomputes instead of serving the
+   * NoMod number back.
+   */
+  mods?: number
 }
 
 export interface PpRange {
@@ -76,10 +85,11 @@ export interface PpRange {
 
 /**
  * Cache key for one difficulty: (beatmap id, revision, calculator
- * version). Revision prefers the .osu checksum (exact file
+ * version, mods). Revision prefers the .osu checksum (exact file
  * version), then last_updated, then the bare id. The calculator
  * version is always present, so a rework bump misses every old
- * entry and recomputes.
+ * entry and recomputes. Mods default to 0 (NoMod), so an entry
+ * computed before mods existed is still the NoMod entry.
  */
 export function ppCacheKey(input: PpDifficultyInput): string {
   const revision =
@@ -88,7 +98,7 @@ export function ppCacheKey(input: PpDifficultyInput): string {
       : typeof input.lastUpdated === 'string' && input.lastUpdated !== ''
         ? input.lastUpdated
         : 'unversioned'
-  return `${input.beatmapId}:${ROSU_PP_CALCULATOR_ID}:${revision}`
+  return `${input.beatmapId}:${ROSU_PP_CALCULATOR_ID}:${revision}:${input.mods ?? 0}`
 }
 
 /** Min/max over the computed values; null when nothing computed. */
@@ -311,10 +321,15 @@ type RosuModule = typeof import('rosu-pp-js')
 
 /** Minimal engine surface: max PP for a perfect play from .osu text. */
 export interface PpEngine {
-  computeMaxPp(osuText: string, mode: GameMode): number | null
+  computeMaxPp(osuText: string, mode: GameMode, mods?: number): number | null
 }
 
-function computeWithRosu(rosu: RosuModule, osuText: string, mode: GameMode): number | null {
+function computeWithRosu(
+  rosu: RosuModule,
+  osuText: string,
+  mode: GameMode,
+  mods = 0,
+): number | null {
   if (typeof osuText !== 'string' || !osuText.startsWith('osu file format v')) return null
   let map: Beatmap | null = null
   let perf: Performance | null = null
@@ -335,8 +350,11 @@ function computeWithRosu(rosu: RosuModule, osuText: string, mode: GameMode): num
     if (map.mode !== expected) {
       map.convert(expected)
     }
-    // No score args + mods 0 + lazer = the SS/NoMod maximum.
-    perf = new rosu.Performance({ mods: 0, lazer: true })
+    // No score args + lazer = the SS maximum under the given mods
+    // (0 = NoMod). `mods` is the legacy bitmask (see lib/mods);
+    // NC's value already carries the DT bit, so 576 alone applies
+    // the 1.5x speed — the combined mask must NOT add DT again.
+    perf = new rosu.Performance({ mods, lazer: true })
     attrs = perf.calculate(map)
     const pp = attrs.pp
     if (typeof pp !== 'number' || !Number.isFinite(pp) || pp < 0) return null
@@ -398,7 +416,7 @@ function loadRealEngine(): Promise<PpEngine> {
       if (!isValidRosuModule(rosu)) {
         throw new Error('rosu-pp-js module shape is unexpected')
       }
-      return { computeMaxPp: (osuText, mode) => computeWithRosu(rosu, osuText, mode) }
+      return { computeMaxPp: (osuText, mode, mods) => computeWithRosu(rosu, osuText, mode, mods) }
     })()
     realEnginePromise.catch(() => {
       realEnginePromise = null
@@ -468,7 +486,7 @@ async function computeAndCache(
     if (cached !== null) return cached
     const osuFile = await fetchOsuFile(input.beatmapId)
     if (!osuFile) return null
-    const pp = engine.computeMaxPp(osuFile, input.mode)
+    const pp = engine.computeMaxPp(osuFile, input.mode, input.mods ?? 0)
     if (pp === null) return null
     // Failures are never cached: a retry on the next view is honest.
     try {

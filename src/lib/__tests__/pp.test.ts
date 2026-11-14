@@ -73,24 +73,41 @@ describe('ppCacheKey', () => {
 
   it('prefers the checksum when present', () => {
     expect(ppCacheKey({ ...base, checksum: 'abc123' })).toBe(
-      `42:${ROSU_PP_CALCULATOR_ID}:abc123`,
+      `42:${ROSU_PP_CALCULATOR_ID}:abc123:0`,
     )
   })
 
   it('falls back to last_updated, then the bare id', () => {
     expect(ppCacheKey({ ...base, lastUpdated: '2026-01-02T03:04:05Z' })).toBe(
-      `42:${ROSU_PP_CALCULATOR_ID}:2026-01-02T03:04:05Z`,
+      `42:${ROSU_PP_CALCULATOR_ID}:2026-01-02T03:04:05Z:0`,
     )
-    expect(ppCacheKey(base)).toBe(`42:${ROSU_PP_CALCULATOR_ID}:unversioned`)
+    expect(ppCacheKey(base)).toBe(`42:${ROSU_PP_CALCULATOR_ID}:unversioned:0`)
   })
 
   it('ignores empty checksum/lastUpdated strings', () => {
     expect(ppCacheKey({ ...base, checksum: '', lastUpdated: '' })).toBe(
-      `42:${ROSU_PP_CALCULATOR_ID}:unversioned`,
+      `42:${ROSU_PP_CALCULATOR_ID}:unversioned:0`,
     )
     expect(ppCacheKey({ ...base, checksum: '', lastUpdated: '2026-01-02' })).toBe(
-      `42:${ROSU_PP_CALCULATOR_ID}:2026-01-02`,
+      `42:${ROSU_PP_CALCULATOR_ID}:2026-01-02:0`,
     )
+  })
+})
+
+describe('ppCacheKey with mods (§AY)', () => {
+  const base: PpDifficultyInput = { beatmapId: 42, mode: 'osu', checksum: 'abc123' }
+
+  it('differs when the mods differ, so switching mods recomputes', () => {
+    expect(ppCacheKey({ ...base, mods: 64 })).not.toBe(ppCacheKey({ ...base, mods: 0 }))
+    expect(ppCacheKey({ ...base, mods: 64 })).not.toBe(ppCacheKey({ ...base, mods: 8 }))
+    expect(ppCacheKey({ ...base, mods: 576 })).toBe(
+      `42:${ROSU_PP_CALCULATOR_ID}:abc123:576`,
+    )
+  })
+
+  it('omitted mods mean NoMod (0), matching an explicit 0', () => {
+    expect(ppCacheKey(base)).toBe(ppCacheKey({ ...base, mods: 0 }))
+    expect(ppCacheKey(base)).toBe(`42:${ROSU_PP_CALCULATOR_ID}:abc123:0`)
   })
 })
 
@@ -255,6 +272,29 @@ describe('getPpRange orchestration (fake engine + fake fetch)', () => {
     expect(await getPpRange([], { engine: spying, fetchOsuFile: fetchImpl })).toBeNull()
     expect(engineCalled).toBe(false)
     expect(fetchCalls).toHaveLength(0)
+  })
+
+  it('passes the mods bitmask to the engine and caches per mods (§AY)', async () => {
+    const seenMods: (number | undefined)[] = []
+    const recording: PpEngine = {
+      computeMaxPp: (_text, _mode, mods) => {
+        seenMods.push(mods)
+        return 42.4
+      },
+    }
+    // Same difficulty id, two mod sets: both compute (different
+    // cache keys), each with its own bitmask — and a repeat of the
+    // first set is served from cache without recomputing.
+    const modded: PpDifficultyInput[] = [
+      { beatmapId: 5, mode: 'osu', checksum: 'cs5', mods: 64 },
+      { beatmapId: 5, mode: 'osu', checksum: 'cs5', mods: 0 },
+    ]
+    const range = await getPpRange(modded, { engine: recording, fetchOsuFile: fetchImpl })
+    expect(range).toEqual({ min: 42, max: 42 })
+    expect(seenMods).toEqual([64, 0])
+    const again = await getPpRange([modded[0]], { engine: recording, fetchOsuFile: fetchImpl })
+    expect(again).toEqual({ min: 42, max: 42 })
+    expect(seenMods).toEqual([64, 0])
   })
 })
 

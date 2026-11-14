@@ -175,6 +175,7 @@ describe('generateRecommendations hardening (mocked proxy)', () => {
         rankedLovedOnly: false,
         keyCount: null,
         userTag: null,
+        mods: [],
       },
       seen: EMPTY_SEEN,
     })
@@ -196,6 +197,7 @@ describe('generateRecommendations hardening (mocked proxy)', () => {
         rankedLovedOnly: false,
         keyCount: null,
         userTag: null,
+        mods: [],
       },
       seen: EMPTY_SEEN,
     })
@@ -224,6 +226,7 @@ describe('generateRecommendations hardening (mocked proxy)', () => {
         rankedLovedOnly: false,
         keyCount: null,
         userTag: null,
+        mods: [],
       },
       seen: EMPTY_SEEN,
     })
@@ -245,6 +248,7 @@ describe('generateRecommendations hardening (mocked proxy)', () => {
           rankedLovedOnly: false,
           keyCount: null,
           userTag: null,
+          mods: [],
         },
         seen: EMPTY_SEEN,
       }),
@@ -272,6 +276,7 @@ describe('FeedSession hardening (mocked proxy)', () => {
         rankedLovedOnly: false,
         keyCount: null,
         userTag: null,
+        mods: [],
       },
       EMPTY_SEEN,
       'key',

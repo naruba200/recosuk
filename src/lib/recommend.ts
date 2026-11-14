@@ -146,6 +146,14 @@ export interface RecFilters {
    * so matching the id against mapper text would be guessing.
    */
   userTag: string | null
+  /**
+   * Selected mods, as acronyms (§AY, see lib/mods). They do NOT
+   * narrow the pool or re-sort anything: they only feed the PP
+   * pill, which recomputes each row's max PP under these mods.
+   * Empty = NoMod. Same lifetime as the other filters (lifted
+   * state in Recommendations — in-session, not persisted).
+   */
+  mods: string[]
 }
 
 /**
@@ -188,6 +196,7 @@ export function defaultFiltersFor(profile: SkillProfile): RecFilters {
     rankedLovedOnly: true,
     keyCount: profile.mode === 'mania' ? profile.mainKeyCount : null,
     userTag: null,
+    mods: [],
   }
 }
 

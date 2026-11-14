@@ -2,7 +2,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { useGuestStore } from '../lib/guestStore'
 import type { GameMode } from '../lib/mode'
 import { isProxyConfigured, validateOsuUsername } from '../lib/osu'
 
@@ -11,7 +10,6 @@ type Status = { kind: 'error' | 'note'; text: string } | null
 export default function LinkOsu() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const linkGuest = useGuestStore((s) => s.linkGuest)
   // Starts empty: no pre-filled username (the Stitch export shipped one).
   const [username, setUsername] = useState('')
   const [selectedMode, setSelectedMode] = useState<GameMode>('mania')
@@ -79,19 +77,6 @@ export default function LinkOsu() {
     } catch {
       /* storage unavailable — the link is lost; Generating will ask to link again */
     }
-    navigate('/onboarding/generating')
-  }
-
-  async function handleGuest() {
-    if (busy) return
-    const resolved = await resolveLink()
-    if (!resolved) return
-    linkGuest({
-      osuUsername: username.trim(),
-      osuUserId: resolved.osuUserId,
-      playmode: resolved.playmode,
-      selectedMode: resolved.mode,
-    })
     navigate('/onboarding/generating')
   }
 
@@ -314,22 +299,22 @@ export default function LinkOsu() {
                 </span>
               </button>
             </div>
-            {/* Option B: Guest Access */}
+            {/* Option B: Sign in (§AX) */}
             <div className="bg-surface-container-low rounded-lg p-5 flex flex-col justify-between text-left shadow-md hover:bg-surface-container transition-colors relative overflow-hidden group">
               <div className="relative z-10">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="w-2 h-2 rounded-full bg-outline">
                   </span>
-                  <span className="font-label-md text-label-md text-on-surface font-bold">Instant play
+                  <span className="font-label-md text-label-md text-on-surface font-bold">Already have an account?
                   </span>
                 </div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-4">{' '}Continue as guest — get your profile and recommendations now, but saving, lists, and ratings stay locked.{' '}
+                <p className="font-body-sm text-body-sm text-on-surface-variant mb-4">{' '}Sign in to your RecOsuk account to pick up your saved maps, lists, and ratings.{' '}
                 </p>
               </div>
-              <button className="relative z-10 w-full py-2.5 px-4 rounded-full bg-surface-container-highest hover:bg-surface-bright text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm" type="button" onClick={(e) => { e.stopPropagation(); void handleGuest() }}>
-                <span className="material-symbols-outlined text-[16px]">visibility
+              <button className="relative z-10 w-full py-2.5 px-4 rounded-full bg-surface-container-highest hover:bg-surface-bright text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm" type="button" onClick={(e) => { e.stopPropagation(); navigate('/auth?mode=signin') }}>
+                <span className="material-symbols-outlined text-[16px]">login
                 </span>
-                <span>Continue as guest
+                <span>Login
                 </span>
               </button>
             </div>

@@ -19,6 +19,22 @@ export interface PpRangeResult {
   state: PpRangeState
 }
 
+/**
+ * Recompute key for a row's difficulties (§AY): beatmap id,
+ * revision, mode AND the mods bitmask. A mods change must
+ * recompute the range — without the mods in this string the
+ * effect below would keep serving the stale NoMod numbers.
+ * Exported for tests (pure function, no DOM needed).
+ */
+export function ppRangeSignature(
+  difficulties: readonly PpDifficultyInput[] | undefined,
+): string {
+  if (!difficulties || difficulties.length === 0) return ''
+  return difficulties
+    .map((d) => `${d.beatmapId}:${d.checksum ?? ''}:${d.lastUpdated ?? ''}:${d.mode}:${d.mods ?? 0}`)
+    .join('|')
+}
+
 export function usePpRange(
   difficulties: readonly PpDifficultyInput[] | undefined,
   deps: PpComputeDeps = {},
@@ -40,12 +56,7 @@ export function usePpRange(
     diffRef.current = difficulties
   })
 
-  const signature =
-    difficulties && difficulties.length > 0
-      ? difficulties
-          .map((d) => `${d.beatmapId}:${d.checksum ?? ''}:${d.lastUpdated ?? ''}:${d.mode}`)
-          .join('|')
-      : ''
+  const signature = ppRangeSignature(difficulties)
 
   const ref = useCallback((next: HTMLElement | null) => {
     setNode(next)

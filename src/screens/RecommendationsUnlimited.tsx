@@ -376,6 +376,7 @@ export function FeedReal({
               onFeedbackChange={rowMaps.onFeedbackChange}
               onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
               downloadPrimary="auto"
+              mods={filters.mods}
             />
           ))}
 

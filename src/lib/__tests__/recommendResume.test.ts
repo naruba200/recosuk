@@ -338,6 +338,7 @@ describe('Feed dedupe unchanged (batch 6, part 4)', () => {
       rankedLovedOnly: false,
       keyCount: null,
       userTag: null,
+      mods: [],
     }
     const session = new FeedSession(
       profile,

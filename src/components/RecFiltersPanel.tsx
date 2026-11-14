@@ -1,5 +1,6 @@
 import type { GameMode } from '../lib/mode'
 import type { SkillProfile } from '../lib/skillProfile'
+import { applyModToggle, modsForMode } from '../lib/mods'
 import { defaultFiltersFor, type RecFilters } from '../lib/recommend'
 import UserTagPicker from './UserTagPicker'
 
@@ -123,6 +124,35 @@ export default function RecFiltersPanel({
           </div>
         </div>
       )}
+
+      {/* Mods (§AY): mode-aware toggle chips. They feed the PP
+          pill only — each row's max PP recomputes under these mods
+          — and never narrow the pool or re-sort the list (ranking
+          stays NoMod-SR based). Conflicts follow the standard osu!
+          rules via applyModToggle (DT vs HT/NC, HR vs EZ, SD vs
+          PF, one key mod). Same chip style as Key Count above. */}
+      <div className="flex flex-col gap-space-xs">
+        <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Mods</span>
+        <div className="grid grid-cols-3 gap-1.5">
+          {modsForMode(mode).map((m) => (
+            <button
+              key={m}
+              className={draft.mods.includes(m)
+                ? 'py-1.5 text-center rounded-DEFAULT bg-primary text-on-primary font-label-md text-label-md font-bold shadow-[0_0_12px_rgba(210,187,255,0.4)]'
+                : 'py-1.5 text-center rounded-DEFAULT bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors'}
+              type="button"
+              onClick={() => set({ mods: applyModToggle(draft.mods, m) })}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <span className="font-body-sm text-body-sm text-on-surface-variant">
+          {draft.mods.length === 0
+            ? 'NoMod — PP shown without mods.'
+            : `PP recomputed with ${draft.mods.join('+')}. Ranking stays NoMod-based.`}
+        </span>
+      </div>
 
       {/* User tag (batch 11, part 4): the fixed lazer vocabulary,
           grouped by category and filtered to this mode. Filtering

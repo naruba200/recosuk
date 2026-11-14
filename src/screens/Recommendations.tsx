@@ -469,6 +469,7 @@ export function RecommendationsReal({
               onFeedbackChange={rowMaps.onFeedbackChange}
               onContainingChange={(ids) => rowMaps.onContainingChange(c.beatmapsetId, ids)}
               downloadPrimary="auto"
+              mods={filters.mods}
             />
           ))}
           {/* Part 4 + batch 7, item 3 — Renew: rendered at the bottom

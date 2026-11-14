@@ -57,6 +57,7 @@ const draft: RecFilters = {
   rankedLovedOnly: true,
   keyCount: null,
   userTag: null,
+  mods: [],
 }
 
 const profile: SkillProfile = {

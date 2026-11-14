@@ -69,6 +69,12 @@ function candidate(overrides: Partial<RecCandidate> = {}): RecCandidate {
   }
 }
 
+describe('defaultFiltersFor mods (§AY)', () => {
+  it('defaults to no mods selected', () => {
+    expect(defaultFiltersFor(profile).mods).toEqual([])
+  })
+})
+
 describe('buildCandidateQueries', () => {
   it('builds a bounded primary query from the filters', () => {
     const filters = defaultFiltersFor(profile)
